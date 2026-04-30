@@ -1,4 +1,16 @@
 node_modules/
+
 .env
+.env.*
+
+dist/
+build/
+
+*.log
+logs/
+
 .DS_Store
 Thumbs.db
+
+.vscode/
+.idea/
