@@ -3,6 +3,7 @@
 * 날짜 : 4월 29일
 * 작성자 : 장요한(by Claude Code)
 * 작업 브랜치 : feature/recipe-crud
+
 ---
 
 ### 작업 1 — `GET /api/recipes` 레시피 목록 조회 구현
