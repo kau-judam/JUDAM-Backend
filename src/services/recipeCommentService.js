@@ -84,4 +84,35 @@ const createComment = async (recipeId, content, user) => {
   };
 };
 
-module.exports = { getCommentsByRecipeId, createComment };
+// 댓글 수정 (PUT /api/recipes/:recipeId/comments/:commentId)
+// - 작성자 본인만 수정 가능 (호출 전에 컨트롤러에서 userId 검증)
+// - 성공 시 updated_at 갱신
+// TODO: DB 연결 후 RECIPE_COMMENTS UPDATE 쿼리로 교체
+const updateComment = async (commentId, content) => {
+  const comment = MOCK_COMMENTS.find((c) => c.comment_id === commentId);
+  comment.content = content;
+  comment.updated_at = new Date().toISOString();
+  return {
+    comment_id: comment.comment_id,
+    user_nickname: comment.user_nickname,
+    content: comment.content,
+    like_count: comment.like_count,
+    created_at: comment.created_at,
+    updated_at: comment.updated_at,
+  };
+};
+
+// 댓글 삭제 (DELETE /api/recipes/:recipeId/comments/:commentId)
+// - 작성자 본인만 삭제 가능 (호출 전에 컨트롤러에서 userId 검증)
+// TODO: DB 연결 후 RECIPE_COMMENTS DELETE 쿼리로 교체
+const deleteComment = async (commentId) => {
+  const idx = MOCK_COMMENTS.findIndex((c) => c.comment_id === commentId);
+  MOCK_COMMENTS.splice(idx, 1);
+};
+
+// 댓글 단건 조회 (권한 검증용 내부 헬퍼)
+// TODO: DB 연결 후 RECIPE_COMMENTS SELECT WHERE comment_id 쿼리로 교체
+const getCommentById = (commentId) =>
+  MOCK_COMMENTS.find((c) => c.comment_id === commentId) || null;
+
+module.exports = { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById };

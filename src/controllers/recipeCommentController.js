@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { getCommentsByRecipeId, createComment } = require('../services/recipeCommentService');
+const { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById } = require('../services/recipeCommentService');
 const { getRecipeById } = require('../services/recipeService');
 
 // 댓글 목록 조회 핸들러 (GET /api/recipes/:recipeId/comments)
@@ -61,4 +61,67 @@ const postComment = async (req, res) => {
   }
 };
 
-module.exports = { getCommentList, postComment };
+// 댓글 수정 핸들러 (PUT /api/recipes/:recipeId/comments/:commentId)
+// - 로그인 필수 (authMiddleware)
+// - 작성자 본인만 수정 가능
+const putComment = async (req, res) => {
+  const recipeId = parseInt(req.params.recipeId, 10);
+  const commentId = parseInt(req.params.commentId, 10);
+  const { content } = req.body;
+
+  if (!content || content.trim() === '') {
+    return res.status(400).json({ status: 400, message: '댓글 내용을 입력해 주세요.' });
+  }
+
+  try {
+    const recipe = await getRecipeById(recipeId);
+    if (!recipe) {
+      return res.status(404).json({ status: 404, message: '해당 레시피를 찾을 수 없습니다.' });
+    }
+
+    const comment = getCommentById(commentId);
+    if (!comment) {
+      return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
+    }
+
+    if (comment.user_id !== req.user.id) {
+      return res.status(403).json({ status: 403, message: '본인이 작성한 댓글만 수정할 수 있습니다.' });
+    }
+
+    const updated = await updateComment(commentId, content.trim());
+    return res.status(200).json({ status: 200, message: '댓글이 수정되었습니다.', comment: updated });
+  } catch {
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+// 댓글 삭제 핸들러 (DELETE /api/recipes/:recipeId/comments/:commentId)
+// - 로그인 필수 (authMiddleware)
+// - 작성자 본인만 삭제 가능
+const deleteCommentHandler = async (req, res) => {
+  const recipeId = parseInt(req.params.recipeId, 10);
+  const commentId = parseInt(req.params.commentId, 10);
+
+  try {
+    const recipe = await getRecipeById(recipeId);
+    if (!recipe) {
+      return res.status(404).json({ status: 404, message: '해당 레시피를 찾을 수 없습니다.' });
+    }
+
+    const comment = getCommentById(commentId);
+    if (!comment) {
+      return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
+    }
+
+    if (comment.user_id !== req.user.id) {
+      return res.status(403).json({ status: 403, message: '본인이 작성한 댓글만 삭제할 수 있습니다.' });
+    }
+
+    await deleteComment(commentId);
+    return res.status(200).json({ status: 200, message: '댓글이 삭제되었습니다.' });
+  } catch {
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+module.exports = { getCommentList, postComment, putComment, deleteCommentHandler };
