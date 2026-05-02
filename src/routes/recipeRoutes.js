@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware'); // JWT 토큰 검증 미들웨어
 const { postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest } = require('../controllers/recipeController');
+const { getCommentList, postComment } = require('../controllers/recipeCommentController');
 
 // 레시피 작성 — 로그인 필수 (authMiddleware로 JWT 검증)
 router.post('/', authMiddleware, postRecipe);
@@ -17,5 +18,12 @@ router.post('/:recipeId/interests', authMiddleware, postInterest);
 
 // 관심 해제 — 로그인 필수 (본인이 등록한 관심만 해제 가능)
 router.delete('/:recipeId/interests', authMiddleware, deleteInterest);
+
+// 댓글 목록 조회 — 로그인 불필요 (로그인 시 is_liked 반영, 비로그인 시 false)
+router.get('/:recipeId/comments', getCommentList);
+
+// 댓글 작성 — 로그인 필수
+router.post('/:recipeId/comments', authMiddleware, postComment);
+
 
 module.exports = router;
