@@ -79,7 +79,7 @@ const putComment = async (req, res) => {
       return res.status(404).json({ status: 404, message: '해당 레시피를 찾을 수 없습니다.' });
     }
 
-    const comment = getCommentById(commentId);
+    const comment = await getCommentById(commentId);
     if (!comment) {
       return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
     }
@@ -108,7 +108,7 @@ const deleteCommentHandler = async (req, res) => {
       return res.status(404).json({ status: 404, message: '해당 레시피를 찾을 수 없습니다.' });
     }
 
-    const comment = getCommentById(commentId);
+    const comment = await getCommentById(commentId);
     if (!comment) {
       return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
     }
