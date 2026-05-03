@@ -25,6 +25,14 @@ const MOCK_COMMENTS = [
 ];
 
 // TODO: DB 연결 후 RECIPE_COMMENT_LIKES 테이블 SELECT 쿼리로 교체할 것
+// DDL: CREATE TABLE "RECIPE_COMMENT_LIKES" (
+//   "like_id"    BIGSERIAL  NOT NULL,
+//   "comment_id" BIGINT     NOT NULL,
+//   "user_id"    BIGINT     NOT NULL,
+//   "created_at" TIMESTAMP  NOT NULL,
+//   CONSTRAINT PK_RECIPE_COMMENT_LIKES PRIMARY KEY ("like_id"),
+//   CONSTRAINT UQ_RECIPE_COMMENT_LIKES UNIQUE ("comment_id", "user_id")
+// );
 const MOCK_COMMENT_LIKES = [];
 
 let nextCommentId = 3;
@@ -115,4 +123,40 @@ const deleteComment = async (commentId) => {
 const getCommentById = (commentId) =>
   MOCK_COMMENTS.find((c) => c.comment_id === commentId) || null;
 
-module.exports = { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById };
+// 댓글 좋아요 등록 (POST /api/recipes/:recipeId/comments/:commentId/likes)
+// - UNIQUE 제약: 동일 사용자가 같은 댓글에 중복 좋아요 불가
+// - 성공 시 RECIPE_COMMENTS.like_count +1
+// TODO: DB 연결 후 RECIPE_COMMENT_LIKES INSERT + RECIPE_COMMENTS UPDATE 쿼리로 교체
+const likeComment = async (commentId, userId) => {
+  const comment = MOCK_COMMENTS.find((c) => c.comment_id === commentId);
+  if (!comment) return { error: 'not_found' };
+
+  const alreadyLiked = MOCK_COMMENT_LIKES.some(
+    (l) => l.comment_id === commentId && l.user_id === userId
+  );
+  if (alreadyLiked) return { error: 'duplicate' };
+
+  MOCK_COMMENT_LIKES.push({ comment_id: commentId, user_id: userId, created_at: new Date().toISOString() });
+  comment.like_count += 1;
+  return { like_count: comment.like_count };
+};
+
+// 댓글 좋아요 취소 (DELETE /api/recipes/:recipeId/comments/:commentId/likes)
+// - 좋아요를 누른 적 없는 경우 404
+// - 성공 시 RECIPE_COMMENTS.like_count -1 (최솟값 0 보장)
+// TODO: DB 연결 후 RECIPE_COMMENT_LIKES DELETE + RECIPE_COMMENTS UPDATE 쿼리로 교체
+const unlikeComment = async (commentId, userId) => {
+  const comment = MOCK_COMMENTS.find((c) => c.comment_id === commentId);
+  if (!comment) return { error: 'not_found' };
+
+  const idx = MOCK_COMMENT_LIKES.findIndex(
+    (l) => l.comment_id === commentId && l.user_id === userId
+  );
+  if (idx === -1) return { error: 'not_liked' };
+
+  MOCK_COMMENT_LIKES.splice(idx, 1);
+  comment.like_count = Math.max(0, comment.like_count - 1);
+  return { like_count: comment.like_count };
+};
+
+module.exports = { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById, likeComment, unlikeComment };
