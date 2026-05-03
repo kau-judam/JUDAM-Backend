@@ -1,162 +1,168 @@
-// TODO: DB 연결 후 이 배열 전체 삭제하고 RECIPE_COMMENTS 테이블 쿼리로 교체할 것
-// DDL: CREATE TABLE "RECIPE_COMMENTS" (comment_id BIGSERIAL, recipe_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
-//      content TEXT NOT NULL, like_count INT NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NULL)
-const MOCK_COMMENTS = [
-  {
-    comment_id: 1,
-    recipe_id: 1,
-    user_id: 1,
-    user_nickname: '막걸리덕후',
-    content: '복숭아 막걸리 정말 기대됩니다!',
-    like_count: 5,
-    created_at: '2026-04-30T10:00:00.000Z',
-    updated_at: null,
-  },
-  {
-    comment_id: 2,
-    recipe_id: 1,
-    user_id: 2,
-    user_nickname: '전통주마니아',
-    content: '여름에 딱이겠네요. 빨리 출시됐으면!',
-    like_count: 2,
-    created_at: '2026-04-30T11:00:00.000Z',
-    updated_at: null,
-  },
-];
-
-// TODO: DB 연결 후 RECIPE_COMMENT_LIKES 테이블 SELECT 쿼리로 교체할 것
-// DDL: CREATE TABLE "RECIPE_COMMENT_LIKES" (
-//   "like_id"    BIGSERIAL  NOT NULL,
-//   "comment_id" BIGINT     NOT NULL,
-//   "user_id"    BIGINT     NOT NULL,
-//   "created_at" TIMESTAMP  NOT NULL,
-//   CONSTRAINT PK_RECIPE_COMMENT_LIKES PRIMARY KEY ("like_id"),
-//   CONSTRAINT UQ_RECIPE_COMMENT_LIKES UNIQUE ("comment_id", "user_id")
-// );
-const MOCK_COMMENT_LIKES = [];
-
-let nextCommentId = 3;
-
-// TODO: DB 연결 후 USERS 테이블 SELECT 쿼리로 닉네임 조회하도록 교체할 것
-// JWT 페이로드에 nickname이 없어서 임시로 user_id → 닉네임 고정 매핑 사용
-const MOCK_USER_NICKNAMES = { 1: '막걸리덕후', 2: '전통주마니아' };
+const pool = require('../db');
 
 // 댓글 목록 조회 (GET /api/recipes/:recipeId/comments)
-// - page, size로 페이지네이션 (page는 0부터 시작)
-// - userId가 null이면 is_liked는 항상 false (비로그인 사용자)
-// TODO: DB 연결 후 RECIPE_COMMENTS JOIN USERS + RECIPE_COMMENT_LIKES LEFT JOIN 쿼리로 교체
+// - userId가 null이면 is_liked는 항상 false (비로그인)
+// - LEFT JOIN으로 is_liked를 한 쿼리에서 처리
 const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
-  const filtered = MOCK_COMMENTS.filter((c) => c.recipe_id === recipeId);
+  const offset = page * size;
 
-  const totalElements = filtered.length;
+  const dataResult = await pool.query(
+    `SELECT
+       rc.comment_id,
+       u.nickname        AS user_nickname,
+       rc.content,
+       rc.like_count,
+       rc.created_at,
+       rc.updated_at,
+       CASE WHEN rcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked
+     FROM recipe_comments rc
+     JOIN  users u   ON u.user_id  = rc.user_id
+     LEFT JOIN recipe_comment_likes rcl
+            ON rcl.comment_id = rc.comment_id AND rcl.user_id = $4
+     WHERE rc.recipe_id = $1
+     ORDER BY rc.created_at ASC
+     LIMIT $2 OFFSET $3`,
+    [recipeId, size, offset, userId]
+  );
+
+  const countResult = await pool.query(
+    'SELECT COUNT(*) FROM recipe_comments WHERE recipe_id = $1',
+    [recipeId]
+  );
+
+  const totalElements = parseInt(countResult.rows[0].count, 10);
   const totalPages = Math.ceil(totalElements / size) || 1;
-  const start = page * size;
 
-  const items = filtered.slice(start, start + size).map((c) => ({
-    comment_id: c.comment_id,
+  const comments = dataResult.rows.map((c) => ({
+    comment_id:    Number(c.comment_id),
     user_nickname: c.user_nickname,
-    content: c.content,
-    like_count: c.like_count,
-    is_liked: userId !== null && MOCK_COMMENT_LIKES.some(
-      (l) => l.comment_id === c.comment_id && l.user_id === userId
-    ),
-    created_at: c.created_at,
-    updated_at: c.updated_at,
+    content:       c.content,
+    like_count:    Number(c.like_count),
+    is_liked:      c.is_liked,
+    created_at:    c.created_at,
+    updated_at:    c.updated_at,
   }));
 
-  return { comments: items, totalElements, totalPages, currentPage: page };
+  return { comments, totalElements, totalPages, currentPage: page };
 };
 
 // 댓글 작성 (POST /api/recipes/:recipeId/comments)
-// TODO: DB 연결 후 RECIPE_COMMENTS INSERT 쿼리로 교체 (comment_id는 BIGSERIAL로 자동 생성)
 const createComment = async (recipeId, content, user) => {
-  const nickname = MOCK_USER_NICKNAMES[user.id] || `user_${user.id}`;
-  const comment = {
-    comment_id: nextCommentId++,
-    recipe_id: recipeId,
-    user_id: user.id,
-    user_nickname: nickname,
-    content,
-    like_count: 0,
-    created_at: new Date().toISOString(),
-    updated_at: null,
-  };
-  MOCK_COMMENTS.push(comment);
+  const nicknameResult = await pool.query(
+    'SELECT nickname FROM users WHERE user_id = $1',
+    [user.id]
+  );
+  const nickname = nicknameResult.rows[0]?.nickname || `user_${user.id}`;
+
+  const result = await pool.query(
+    `INSERT INTO recipe_comments (recipe_id, user_id, content)
+     VALUES ($1, $2, $3)
+     RETURNING comment_id, content, like_count, created_at, updated_at`,
+    [recipeId, user.id, content]
+  );
+
+  const c = result.rows[0];
   return {
-    comment_id: comment.comment_id,
-    user_nickname: comment.user_nickname,
-    content: comment.content,
-    like_count: comment.like_count,
-    created_at: comment.created_at,
-    updated_at: comment.updated_at,
+    comment_id:    Number(c.comment_id),
+    user_nickname: nickname,
+    content:       c.content,
+    like_count:    Number(c.like_count),
+    created_at:    c.created_at,
+    updated_at:    c.updated_at,
   };
 };
 
 // 댓글 수정 (PUT /api/recipes/:recipeId/comments/:commentId)
-// - 작성자 본인만 수정 가능 (호출 전에 컨트롤러에서 userId 검증)
-// - 성공 시 updated_at 갱신
-// TODO: DB 연결 후 RECIPE_COMMENTS UPDATE 쿼리로 교체
 const updateComment = async (commentId, content) => {
-  const comment = MOCK_COMMENTS.find((c) => c.comment_id === commentId);
-  comment.content = content;
-  comment.updated_at = new Date().toISOString();
+  const result = await pool.query(
+    `UPDATE recipe_comments
+     SET content = $1, updated_at = NOW()
+     WHERE comment_id = $2
+     RETURNING comment_id, user_id, content, like_count, created_at, updated_at`,
+    [content, commentId]
+  );
+
+  const c = result.rows[0];
+  const nicknameResult = await pool.query(
+    'SELECT nickname FROM users WHERE user_id = $1',
+    [c.user_id]
+  );
+
   return {
-    comment_id: comment.comment_id,
-    user_nickname: comment.user_nickname,
-    content: comment.content,
-    like_count: comment.like_count,
-    created_at: comment.created_at,
-    updated_at: comment.updated_at,
+    comment_id:    Number(c.comment_id),
+    user_nickname: nicknameResult.rows[0]?.nickname || `user_${c.user_id}`,
+    content:       c.content,
+    like_count:    Number(c.like_count),
+    created_at:    c.created_at,
+    updated_at:    c.updated_at,
   };
 };
 
 // 댓글 삭제 (DELETE /api/recipes/:recipeId/comments/:commentId)
-// - 작성자 본인만 삭제 가능 (호출 전에 컨트롤러에서 userId 검증)
-// TODO: DB 연결 후 RECIPE_COMMENTS DELETE 쿼리로 교체
 const deleteComment = async (commentId) => {
-  const idx = MOCK_COMMENTS.findIndex((c) => c.comment_id === commentId);
-  MOCK_COMMENTS.splice(idx, 1);
+  await pool.query('DELETE FROM recipe_comments WHERE comment_id = $1', [commentId]);
 };
 
 // 댓글 단건 조회 (권한 검증용 내부 헬퍼)
-// TODO: DB 연결 후 RECIPE_COMMENTS SELECT WHERE comment_id 쿼리로 교체
-const getCommentById = (commentId) =>
-  MOCK_COMMENTS.find((c) => c.comment_id === commentId) || null;
+const getCommentById = async (commentId) => {
+  const result = await pool.query(
+    'SELECT comment_id, recipe_id, user_id FROM recipe_comments WHERE comment_id = $1',
+    [commentId]
+  );
+  if (result.rows.length === 0) return null;
+  const c = result.rows[0];
+  return {
+    comment_id: Number(c.comment_id),
+    recipe_id:  Number(c.recipe_id),
+    user_id:    Number(c.user_id),
+  };
+};
 
 // 댓글 좋아요 등록 (POST /api/recipes/:recipeId/comments/:commentId/likes)
-// - UNIQUE 제약: 동일 사용자가 같은 댓글에 중복 좋아요 불가
-// - 성공 시 RECIPE_COMMENTS.like_count +1
-// TODO: DB 연결 후 RECIPE_COMMENT_LIKES INSERT + RECIPE_COMMENTS UPDATE 쿼리로 교체
+// - UNIQUE 제약(comment_id, user_id) 위반 시 duplicate 에러 반환
 const likeComment = async (commentId, userId) => {
-  const comment = MOCK_COMMENTS.find((c) => c.comment_id === commentId);
-  if (!comment) return { error: 'not_found' };
-
-  const alreadyLiked = MOCK_COMMENT_LIKES.some(
-    (l) => l.comment_id === commentId && l.user_id === userId
+  const commentResult = await pool.query(
+    'SELECT comment_id FROM recipe_comments WHERE comment_id = $1',
+    [commentId]
   );
-  if (alreadyLiked) return { error: 'duplicate' };
+  if (commentResult.rows.length === 0) return { error: 'not_found' };
 
-  MOCK_COMMENT_LIKES.push({ comment_id: commentId, user_id: userId, created_at: new Date().toISOString() });
-  comment.like_count += 1;
-  return { like_count: comment.like_count };
+  try {
+    await pool.query(
+      'INSERT INTO recipe_comment_likes (comment_id, user_id) VALUES ($1, $2)',
+      [commentId, userId]
+    );
+  } catch (e) {
+    if (e.code === '23505') return { error: 'duplicate' };
+    throw e;
+  }
+
+  const updated = await pool.query(
+    'UPDATE recipe_comments SET like_count = like_count + 1 WHERE comment_id = $1 RETURNING like_count',
+    [commentId]
+  );
+  return { like_count: Number(updated.rows[0].like_count) };
 };
 
 // 댓글 좋아요 취소 (DELETE /api/recipes/:recipeId/comments/:commentId/likes)
-// - 좋아요를 누른 적 없는 경우 404
-// - 성공 시 RECIPE_COMMENTS.like_count -1 (최솟값 0 보장)
-// TODO: DB 연결 후 RECIPE_COMMENT_LIKES DELETE + RECIPE_COMMENTS UPDATE 쿼리로 교체
 const unlikeComment = async (commentId, userId) => {
-  const comment = MOCK_COMMENTS.find((c) => c.comment_id === commentId);
-  if (!comment) return { error: 'not_found' };
-
-  const idx = MOCK_COMMENT_LIKES.findIndex(
-    (l) => l.comment_id === commentId && l.user_id === userId
+  const commentResult = await pool.query(
+    'SELECT comment_id FROM recipe_comments WHERE comment_id = $1',
+    [commentId]
   );
-  if (idx === -1) return { error: 'not_liked' };
+  if (commentResult.rows.length === 0) return { error: 'not_found' };
 
-  MOCK_COMMENT_LIKES.splice(idx, 1);
-  comment.like_count = Math.max(0, comment.like_count - 1);
-  return { like_count: comment.like_count };
+  const deleteResult = await pool.query(
+    'DELETE FROM recipe_comment_likes WHERE comment_id = $1 AND user_id = $2 RETURNING like_id',
+    [commentId, userId]
+  );
+  if (deleteResult.rows.length === 0) return { error: 'not_liked' };
+
+  const updated = await pool.query(
+    'UPDATE recipe_comments SET like_count = GREATEST(like_count - 1, 0) WHERE comment_id = $1 RETURNING like_count',
+    [commentId]
+  );
+  return { like_count: Number(updated.rows[0].like_count) };
 };
 
 module.exports = { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById, likeComment, unlikeComment };
