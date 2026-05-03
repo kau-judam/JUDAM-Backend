@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById } = require('../services/recipeCommentService');
+const { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById, likeComment, unlikeComment } = require('../services/recipeCommentService');
 const { getRecipeById } = require('../services/recipeService');
 
 // 댓글 목록 조회 핸들러 (GET /api/recipes/:recipeId/comments)
@@ -124,4 +124,58 @@ const deleteCommentHandler = async (req, res) => {
   }
 };
 
-module.exports = { getCommentList, postComment, putComment, deleteCommentHandler };
+// 댓글 좋아요 등록 핸들러 (POST /api/recipes/:recipeId/comments/:commentId/likes)
+// - 로그인 필수 (authMiddleware)
+// - 동일 사용자가 같은 댓글에 중복 좋아요 시 409
+const postCommentLike = async (req, res) => {
+  const recipeId = parseInt(req.params.recipeId, 10);
+  const commentId = parseInt(req.params.commentId, 10);
+
+  try {
+    const recipe = await getRecipeById(recipeId);
+    if (!recipe) {
+      return res.status(404).json({ status: 404, message: '해당 레시피를 찾을 수 없습니다.' });
+    }
+
+    const result = await likeComment(commentId, req.user.id);
+    if (result.error === 'not_found') {
+      return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
+    }
+    if (result.error === 'duplicate') {
+      return res.status(409).json({ status: 409, message: '이미 좋아요를 누른 댓글입니다.' });
+    }
+
+    return res.status(200).json({ status: 200, message: '좋아요가 등록되었습니다.', like_count: result.like_count });
+  } catch {
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+// 댓글 좋아요 취소 핸들러 (DELETE /api/recipes/:recipeId/comments/:commentId/likes)
+// - 로그인 필수 (authMiddleware)
+// - 좋아요를 누르지 않은 댓글에 취소 시도 시 404
+const deleteCommentLike = async (req, res) => {
+  const recipeId = parseInt(req.params.recipeId, 10);
+  const commentId = parseInt(req.params.commentId, 10);
+
+  try {
+    const recipe = await getRecipeById(recipeId);
+    if (!recipe) {
+      return res.status(404).json({ status: 404, message: '해당 레시피를 찾을 수 없습니다.' });
+    }
+
+    const result = await unlikeComment(commentId, req.user.id);
+    if (result.error === 'not_found') {
+      return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
+    }
+    if (result.error === 'not_liked') {
+      return res.status(404).json({ status: 404, message: '좋아요를 누르지 않은 댓글입니다.' });
+    }
+
+    return res.status(200).json({ status: 200, message: '좋아요가 취소되었습니다.', like_count: result.like_count });
+  } catch {
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+module.exports = { getCommentList, postComment, putComment, deleteCommentHandler, postCommentLike, deleteCommentLike };
