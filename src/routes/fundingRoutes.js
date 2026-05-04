@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
 
+//서류업로드 관련
+const multer = require('multer');
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+  },
+});
+
 const {
   saveAgreement,
   createFundingDraft, 
@@ -12,6 +21,7 @@ const {
   savePlan,
   saveBreweryInfo,
   saveNotices,
+  uploadDocument,
 } = require('../controllers/funding.controller');
 
 router.post('/agreements', saveAgreement);
@@ -24,5 +34,6 @@ router.patch('/drafts/:draftId/taste-profile', saveTasteProfile);
 router.patch('/drafts/:draftId/plan', savePlan);
 router.patch('/drafts/:draftId/brewery-info', saveBreweryInfo);
 router.patch('/drafts/:draftId/notices', saveNotices);
+router.post('/drafts/:draftId/documents', upload.single('file'), uploadDocument);
 
 module.exports = router;

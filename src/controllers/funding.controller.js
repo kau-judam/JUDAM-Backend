@@ -475,6 +475,64 @@ const saveNotices = (req, res) => {
   });
 };
 
+//필수 서류 업로드
+const uploadDocument = (req, res) => {
+  const { draftId } = req.params;
+  const { documentType } = req.body;
+  const file = req.file;
+
+  const allowedDocumentTypes = [
+    'BUSINESS_REGISTRATION',
+    'MAIL_ORDER_BUSINESS',
+    'LIQUOR_LICENSE',
+    'BANK_ACCOUNT_COPY',
+    'ETC',
+  ];
+
+  if (!draftId || isNaN(Number(draftId)) || !documentType) {
+    return res.status(400).json({
+      status: 400,
+      message: '서류 업로드 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  if (!allowedDocumentTypes.includes(documentType)) {
+    return res.status(400).json({
+      status: 400,
+      message: '서류 업로드 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  if (!file) {
+    return res.status(400).json({
+      status: 400,
+      message: '업로드할 파일이 필요합니다.',
+    });
+  }
+
+  const allowedMimeTypes = [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+  ];
+
+  if (!allowedMimeTypes.includes(file.mimetype)) {
+    return res.status(400).json({
+      status: 400,
+      message: '지원하지 않는 파일 형식입니다.',
+    });
+  }
+
+  return res.status(201).json({
+    draftId: Number(draftId),
+    documentId: 10,
+    documentType,
+    fileName: file.originalname,
+    fileUrl: `https://storage.example.com/documents/${file.originalname}`,
+    message: '필수 서류가 업로드되었습니다.',
+  });
+};
+
 module.exports = {
   saveAgreement,
   createFundingDraft,
@@ -486,4 +544,5 @@ module.exports = {
   savePlan,
   saveBreweryInfo,
   saveNotices,
+  uploadDocument,
 };
