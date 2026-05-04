@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middlewares/authMiddleware'); // JWT 토큰 검증 미들웨어
-const { postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest } = require('../controllers/recipeController');
+const authMiddleware = require('../middlewares/authMiddleware');
+const breweryMiddleware = require('../middlewares/breweryMiddleware');
+const { postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes } = require('../controllers/recipeController');
 const { getCommentList, postComment, putComment, deleteCommentHandler, postCommentLike, deleteCommentLike } = require('../controllers/recipeCommentController');
 
 // 레시피 작성 — 로그인 필수 (authMiddleware로 JWT 검증)
@@ -9,6 +10,12 @@ router.post('/', authMiddleware, postRecipe);
 
 // 레시피 목록 조회 — 로그인 불필요 (누구나 접근 가능)
 router.get('/', getRecipeList);
+
+// 양조장 레시피 등록 — BREWERY 권한 필수 (/:recipeId보다 먼저 정의해야 충돌 방지)
+router.post('/brewery', authMiddleware, breweryMiddleware, postBreweryRecipe);
+
+// 양조장 소비자 레시피 확인 — BREWERY 권한 필수 (/:recipeId보다 먼저 정의해야 충돌 방지)
+router.get('/brewery', authMiddleware, breweryMiddleware, getBreweryRecipes);
 
 // 레시피 상세 조회 — 로그인 불필요 (누구나 접근 가능)
 router.get('/:recipeId', getRecipeDetail);
