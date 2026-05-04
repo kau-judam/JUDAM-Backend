@@ -533,6 +533,163 @@ const uploadDocument = (req, res) => {
   });
 };
 
+//펀딩프로젝트 목록 조회
+const getFundingList = (req, res) => {
+  const { status, sort, page = 0, size = 10 } = req.query;
+
+  const allowedStatuses = ['UPCOMING', 'ONGOING', 'ENDED'];
+  const allowedSorts = ['POPULAR', 'LATEST', 'DEADLINE'];
+
+  if (status && !allowedStatuses.includes(status)) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  if (sort && !allowedSorts.includes(sort)) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  const pageNumber = Number(page);
+  const sizeNumber = Number(size);
+
+  if (
+    Number.isNaN(pageNumber) ||
+    Number.isNaN(sizeNumber) ||
+    pageNumber < 0 ||
+    sizeNumber <= 0
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  return res.status(200).json({
+    content: [
+      {
+        fundingId: 1,
+        title: '벚꽃 막걸리 프로젝트',
+        thumbnailUrl: 'https://example.com/image.jpg',
+        breweryName: '삼해소주가',
+        currentAmount: 3200000,
+        targetAmount: 5000000,
+        achievementRate: 64,
+        status: 'ONGOING',
+        endDate: '2026-05-30',
+      },
+    ],
+    page: pageNumber,
+    size: sizeNumber,
+    totalElements: 25,
+    totalPages: 3,
+  });
+};
+
+//펀딩 프러젝트 상세조회
+const getFundingDetail = (req, res) => {
+  const { fundingId } = req.params;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    fundingId: Number(fundingId),
+    title: '벚꽃 막걸리 프로젝트',
+    summary: '못난이 쌀과 벚꽃 추출물을 활용한 봄 한정 막걸리',
+    thumbnailUrl: 'https://example.com/image.jpg',
+    breweryName: '삼해소주가',
+    status: 'ONGOING',
+    currentAmount: 3200000,
+    targetAmount: 5000000,
+    achievementRate: 64,
+    supporterCount: 128,
+    startDate: '2026-05-01',
+    endDate: '2026-05-30',
+    expectedDeliveryDate: '2026-06-20',
+    tasteProfile: {
+      sweetness: 3,
+      acidity: 4,
+      body: 2,
+      carbonation: 3,
+      alcoholIntensity: 2,
+      flavorNotes: ['쌀향', '꽃향', '산뜻함'],
+    },
+    supportOptions: [
+      {
+        optionId: 1,
+        name: '벚꽃 막걸리 1병',
+        price: 18000,
+        description: '750ml 1병 구성',
+      },
+      {
+        optionId: 2,
+        name: '벚꽃 막걸리 3병 세트',
+        price: 50000,
+        description: '750ml 3병 구성',
+      },
+    ],
+  });
+};
+
+//프로젝트 소개 조회
+const getFundingIntro = (req, res) => {
+  const { fundingId } = req.params;
+
+  // 유효성 검증
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    fundingId: Number(fundingId),
+    title: '벚꽃 막걸리 프로젝트',
+    introduction: '못난이 농산물을 활용하여 새로운 전통주를 만드는 프로젝트입니다.',
+    story: '이 프로젝트는 지역 농가의 버려지는 사과를 활용하여 새로운 가치를 만들어내기 위해 시작되었습니다...',
+    images: [
+      'https://example.com/intro1.jpg',
+      'https://example.com/intro2.jpg',
+    ],
+  });
+};
+
+//양조일지 조회
+const getBreweryLogs = (req, res) => {
+  const { fundingId } = req.params;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    fundingId: Number(fundingId),
+    logs: [
+      {
+        logId: 1,
+        step: '원재료 수급',
+        title: '못난이 사과 수급 완료',
+        content: '지역 농가에서 못난이 사과 100kg을 수급했습니다.',
+        imageUrls: ['https://example.com/log1.jpg'],
+        createdAt: '2026-05-03T14:30:00',
+      },
+    ],
+  });
+};
+
 module.exports = {
   saveAgreement,
   createFundingDraft,
@@ -545,4 +702,8 @@ module.exports = {
   saveBreweryInfo,
   saveNotices,
   uploadDocument,
+  getFundingList,
+  getFundingDetail,
+  getFundingIntro,
+  getBreweryLogs,
 };

@@ -22,6 +22,10 @@ const {
   saveBreweryInfo,
   saveNotices,
   uploadDocument,
+  getFundingList,
+  getFundingDetail,
+  getFundingIntro,
+  getBreweryLogs,
 } = require('../controllers/funding.controller');
 
 router.post('/agreements', saveAgreement);
@@ -35,5 +39,10 @@ router.patch('/drafts/:draftId/plan', savePlan);
 router.patch('/drafts/:draftId/brewery-info', saveBreweryInfo);
 router.patch('/drafts/:draftId/notices', saveNotices);
 router.post('/drafts/:draftId/documents', upload.single('file'), uploadDocument);
+router.get('/', getFundingList);
+router.get('/:fundingId/intro', getFundingIntro);
+router.get('/:fundingId/brewery-logs', getBreweryLogs);
+router.get('/:fundingId', getFundingDetail);
+
 
 module.exports = router;
