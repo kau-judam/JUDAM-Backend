@@ -12,7 +12,7 @@ const createRecipe = async (recipeData, user) => {
     throw error;
   }
 
-  const author_type = user.role === 'BREWERY' ? 'BREWERY' : 'CONSUMER';
+  const author_type = user.role === 'BREWERY' ? 'BREWERY' : 'USER';
 
   const result = await pool.query(
     `INSERT INTO recipes
@@ -151,4 +151,78 @@ const removeInterest = async (recipeId, userId) => {
   return updated.rows[0];
 };
 
-module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest };
+// 양조장 레시피 등록 (POST /api/recipes/brewery)
+const createBreweryRecipe = async (recipeData, user) => {
+  const { passed, reason } = await checkRecipeLegalFilter(recipeData);
+  if (!passed) {
+    const error = new Error(reason || '등록할 수 없는 내용이 포함되어 있습니다. 레시피 내용을 다시 확인해 주세요.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await pool.query(
+    `INSERT INTO recipes
+       (user_id, title, content, abv_range, main_ingredient, target_flavor, concept, summary, image_url, author_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING recipe_id, title, author_type, status, is_fundable, interest_count, image_url, created_at`,
+    [
+      user.id,
+      recipeData.title,
+      recipeData.content,
+      recipeData.abv_range,
+      recipeData.main_ingredient,
+      recipeData.target_flavor,
+      recipeData.concept,
+      recipeData.summary,
+      recipeData.image_url || null,
+      'BREWERY',
+    ]
+  );
+
+  return result.rows[0];
+};
+
+// 양조장이 소비자 레시피 확인 (GET /api/recipes/brewery)
+const getConsumerRecipes = async (status, page, size) => {
+  const offset = page * size;
+  const VALID_STATUSES = new Set(['NORMAL', 'FUNDING_READY']);
+  const statusFilter = VALID_STATUSES.has(status) ? status : null;
+
+  let dataQuery, countQuery, dataParams, countParams;
+
+  if (statusFilter) {
+    dataQuery = `
+      SELECT recipe_id, title, summary, main_ingredient, author_type, status, is_fundable, interest_count, image_url, created_at
+      FROM recipes
+      WHERE author_type = 'USER' AND status = $1
+      ORDER BY interest_count DESC
+      LIMIT $2 OFFSET $3
+    `;
+    dataParams = [statusFilter, size, offset];
+    countQuery = `SELECT COUNT(*) FROM recipes WHERE author_type = 'USER' AND status = $1`;
+    countParams = [statusFilter];
+  } else {
+    dataQuery = `
+      SELECT recipe_id, title, summary, main_ingredient, author_type, status, is_fundable, interest_count, image_url, created_at
+      FROM recipes
+      WHERE author_type = 'USER'
+      ORDER BY interest_count DESC
+      LIMIT $1 OFFSET $2
+    `;
+    dataParams = [size, offset];
+    countQuery = `SELECT COUNT(*) FROM recipes WHERE author_type = 'USER'`;
+    countParams = [];
+  }
+
+  const [dataResult, countResult] = await Promise.all([
+    pool.query(dataQuery, dataParams),
+    pool.query(countQuery, countParams),
+  ]);
+
+  const totalElements = parseInt(countResult.rows[0].count, 10);
+  const totalPages = Math.ceil(totalElements / size) || 1;
+
+  return { recipes: dataResult.rows, totalElements, totalPages, currentPage: page };
+};
+
+module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes };

@@ -1,4 +1,4 @@
-const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest } = require('../services/recipeService');
+const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes } = require('../services/recipeService');
 
 // 레시피 작성 시 반드시 있어야 하는 필드 목록
 // 하나라도 빠지면 400 에러 반환
@@ -112,4 +112,40 @@ const deleteInterest = async (req, res) => {
   }
 };
 
-module.exports = { postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest };
+// 양조장 레시피 등록 핸들러 (POST /api/recipes/brewery)
+// - authMiddleware + breweryMiddleware에서 JWT 검증 및 BREWERY 권한 확인 완료
+// - author_type은 서비스에서 BREWERY로 자동 설정
+const postBreweryRecipe = async (req, res) => {
+  const missing = REQUIRED_FIELDS.filter((f) => !req.body[f]);
+  if (missing.length > 0) {
+    return res.status(400).json({ status: 400, message: '필수 항목이 누락되었습니다.' });
+  }
+
+  try {
+    const recipe = await createBreweryRecipe(req.body, req.user);
+    return res.status(201).json({ status: 201, message: '레시피가 등록되었습니다.', recipe });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({ status: 400, message: error.message });
+    }
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+// 양조장 소비자 레시피 확인 핸들러 (GET /api/recipes/brewery)
+// - authMiddleware + breweryMiddleware에서 JWT 검증 및 BREWERY 권한 확인 완료
+// - author_type=USER 고정 필터, interest_count DESC 정렬 고정
+const getBreweryRecipes = async (req, res) => {
+  const status = req.query.status || 'ALL';
+  const page = Math.max(0, parseInt(req.query.page, 10) || 0);
+  const size = Math.max(1, parseInt(req.query.size, 10) || 20);
+
+  try {
+    const result = await getConsumerRecipes(status, page, size);
+    return res.status(200).json(result);
+  } catch {
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+module.exports = { postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes };
