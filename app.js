@@ -4,6 +4,7 @@ const authRoutes = require('./src/routes/auth.routes');
 const legacyAuthRoutes = require('./src/routes/authRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const recipeRoutes = require('./src/routes/recipeRoutes');
+const fundingRoutes = require('./src/routes/fundingRoutes');
 
 const app = express();
 
@@ -20,5 +21,6 @@ app.use('/api/auth', authRoutes);
 app.use('/auth', legacyAuthRoutes);
 app.use('/users', userRoutes);
 app.use('/api/recipes', recipeRoutes);
+app.use('/api/fundings', fundingRoutes);
 
 module.exports = app;
