@@ -20,7 +20,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/auth', legacyAuthRoutes);
-app.use('/users', userRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/recipes', recipeRoutes);
 app.use('/api/fundings', fundingRoutes);
 app.use('/api/orders', orderRoutes);
