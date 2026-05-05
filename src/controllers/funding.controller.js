@@ -892,6 +892,142 @@ const getFundingReviews = (req, res) => {
   });
 };
 
+//후원옵션조회
+const getSupportOptions = (req, res) => {
+  const { fundingId } = req.params;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    fundingId: Number(fundingId),
+    supportOptions: [
+      {
+        optionId: 1,
+        name: '벚꽃 막걸리 1병',
+        price: 18000,
+        description: '750ml 1병 구성',
+        stock: 100,
+        remainingStock: 42,
+        maxPerUser: 3,
+      },
+      {
+        optionId: 2,
+        name: '벚꽃 막걸리 3병 세트',
+        price: 50000,
+        description: '750ml 3병 구성',
+        stock: 50,
+        remainingStock: 10,
+        maxPerUser: 2,
+      },
+    ],
+  });
+};
+
+//후원생성주문
+const createFundingOrder = (req, res) => {
+  const { fundingId } = req.params;
+
+  const {
+    optionId,
+    quantity,
+    recipientName,
+    recipientPhone,
+    shippingAddress,
+    shippingDetailAddress,
+    adultVerified,
+    noticeAgreed,
+  } = req.body;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  if (
+    !optionId ||
+    !quantity ||
+    !recipientName ||
+    !recipientPhone ||
+    !shippingAddress
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '주문 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  if (!adultVerified) {
+    return res.status(400).json({
+      status: 400,
+      message: '주류 후원을 위해 성인인증이 필요합니다.',
+    });
+  }
+
+  if (!noticeAgreed) {
+    return res.status(400).json({
+      status: 400,
+      message: '환불/교환/리스크 안내에 동의해야 합니다.',
+    });
+  }
+
+  const optionPrice = 18000;
+
+  const totalAmount = optionPrice * quantity;
+
+  return res.status(201).json({
+    orderId: 1001,
+    fundingId: Number(fundingId),
+    optionId,
+    quantity,
+    totalAmount,
+    orderStatus: 'CREATED',
+    message: '후원 주문이 생성되었습니다.',
+  });
+};
+
+//양조장문의등록
+const createFundingInquiry = (req, res) => {
+  const { fundingId } = req.params;
+  const { title, content } = req.body;
+
+  // fundingId 검증
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  // 입력값 검증
+  if (
+    !title ||
+    !content ||
+    typeof title !== 'string' ||
+    typeof content !== 'string' ||
+    title.trim() === '' ||
+    content.trim() === ''
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '문의 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  return res.status(201).json({
+    fundingId: Number(fundingId),
+    inquiryId: 21,
+    message: '문의가 등록되었습니다.',
+  });
+};
+
+
 module.exports = {
   saveAgreement,
   createFundingDraft,
@@ -912,4 +1048,7 @@ module.exports = {
   createFundingQuestion,
   createFundingReply,
   getFundingReviews,
+  getSupportOptions,
+  createFundingOrder,
+  createFundingInquiry,
 };

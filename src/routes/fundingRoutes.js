@@ -30,6 +30,9 @@ const {
   createFundingQuestion,
   createFundingReply,
   getFundingReviews,
+  getSupportOptions,
+  createFundingOrder,
+  createFundingInquiry,
 } = require('../controllers/funding.controller');
 
 router.post('/agreements', saveAgreement);
@@ -50,6 +53,10 @@ router.get('/:fundingId/questions', getFundingQuestions);
 router.post('/:fundingId/questions', createFundingQuestion);
 router.post('/:fundingId/questions/:questionId/replies', createFundingReply);
 router.get('/:fundingId/reviews', getFundingReviews);
+router.get('/:fundingId/support-options', getSupportOptions);
+router.post('/:fundingId/orders', createFundingOrder);
+router.post('/:fundingId/inquiries', createFundingInquiry);
+
 router.get('/:fundingId', getFundingDetail);
 
 
