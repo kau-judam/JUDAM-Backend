@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { getKakaoToken, getKakaoUserInfo } = require('../services/kakao.service');
+const { findOrCreateKakaoUser } = require('../services/user.service');
 
 const kakaoLogin = (req, res) => {
   const { KAKAO_REST_API_KEY, KAKAO_REDIRECT_URI } = process.env;
@@ -47,12 +48,13 @@ const kakaoCallback = async (req, res) => {
       profileImage: profile.profile_image_url || null,
     };
 
-    // TODO: Save or update Kakao user in DB.
+    const dbUser = await findOrCreateKakaoUser(user);
+
     const accessToken = jwt.sign(
       {
+        userId: dbUser.user_id,
         provider: 'kakao',
-        kakaoId: user.kakaoId,
-        email: user.email,
+        role: dbUser.role,
       },
       JWT_SECRET,
       {
@@ -63,16 +65,26 @@ const kakaoCallback = async (req, res) => {
     return res.status(200).json({
       message: 'kakao login success',
       accessToken,
-      user,
+      user: {
+        userId: dbUser.user_id,
+        email: dbUser.email,
+        nickname: dbUser.nickname,
+        role: dbUser.role,
+        provider: dbUser.provider,
+        profileImage: dbUser.profile_image,
+        lastLoginAt: dbUser.last_login_at,
+      },
     });
   } catch (error) {
-    const status = error.statusCode || error.response?.status || 500;
+  console.error('카카오 로그인 실패 상세:', error);
+  console.error('카카오 로그인 실패 응답:', error.response?.data);
+  console.error('카카오 로그인 실패 메시지:', error.message);
 
-    return res.status(status).json({
-      message: 'kakao login failed',
-      error: error.response?.data || error.message,
-    });
-  }
-};
+  return res.status(500).json({
+    message: 'kakao login failed',
+    error: error.response?.data || error.message || String(error),
+  });
+}
+}
 
 module.exports = { kakaoLogin, kakaoCallback };
