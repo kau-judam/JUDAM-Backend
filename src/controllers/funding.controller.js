@@ -689,6 +689,208 @@ const getBreweryLogs = (req, res) => {
     ],
   });
 };
+//qna 목록 조회
+const getFundingQuestions = (req, res) => {
+  const { fundingId } = req.params;
+  const { page = 0, size = 10, answered } = req.query;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  const pageNumber = Number(page);
+  const sizeNumber = Number(size);
+
+  if (
+    Number.isNaN(pageNumber) ||
+    Number.isNaN(sizeNumber) ||
+    pageNumber < 0 ||
+    sizeNumber <= 0
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  if (
+    answered !== undefined &&
+    answered !== 'true' &&
+    answered !== 'false'
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  const answeredValue =
+    answered === undefined ? true : answered === 'true';
+
+  return res.status(200).json({
+    content: [
+      {
+        questionId: 1,
+        writerNickname: '술좋아하는재원',
+        title: '배송은 언제 시작되나요?',
+        content: '펀딩 종료 후 배송 예정일이 궁금합니다.',
+        answered: answeredValue,
+        createdAt: '2026-05-01T13:20:00',
+      },
+    ],
+    page: pageNumber,
+    size: sizeNumber,
+    totalElements: 12,
+    totalPages: 2,
+  });
+};
+
+//qna 질문등록
+const createFundingQuestion = (req, res) => {
+  const { fundingId } = req.params;
+  const { title, content, isPrivate = false } = req.body;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  if (
+    !title ||
+    !content ||
+    typeof title !== 'string' ||
+    typeof content !== 'string' ||
+    title.trim() === '' ||
+    content.trim() === ''
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '질문 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  if (typeof isPrivate !== 'boolean') {
+    return res.status(400).json({
+      status: 400,
+      message: '질문 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  return res.status(201).json({
+    fundingId: Number(fundingId),
+    questionId: 15,
+    message: '질문이 등록되었습니다.',
+  });
+};
+
+//qna 답글 등록
+const createFundingReply = (req, res) => {
+  const { fundingId, questionId } = req.params;
+  const { content } = req.body;
+
+  // fundingId, questionId 검증
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !questionId ||
+    isNaN(Number(questionId))
+  ) {
+    return res.status(404).json({
+      status: 404,
+      message: '질문 또는 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  // content 검증
+  if (
+    !content ||
+    typeof content !== 'string' ||
+    content.trim() === ''
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '답변 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  // (mock) 이미 답변이 있는 경우 처리 예시
+  const alreadyAnswered = false;
+
+  if (alreadyAnswered) {
+    return res.status(409).json({
+      status: 409,
+      message: '이미 답변이 등록된 질문입니다.',
+    });
+  }
+
+  return res.status(201).json({
+    fundingId: Number(fundingId),
+    questionId: Number(questionId),
+    replyId: 3,
+    message: '답변이 등록되었습니다.',
+  });
+};
+
+//후기목록조회
+const getFundingReviews = (req, res) => {
+  const { fundingId } = req.params;
+  const { page = 0, size = 10, sort = 'LATEST' } = req.query;
+
+  // fundingId 검증
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  const pageNumber = Number(page);
+  const sizeNumber = Number(size);
+
+  // page, size 검증
+  if (
+    Number.isNaN(pageNumber) ||
+    Number.isNaN(sizeNumber) ||
+    pageNumber < 0 ||
+    sizeNumber <= 0
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  const allowedSorts = ['LATEST', 'RATING'];
+
+  if (!allowedSorts.includes(sort)) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  return res.status(200).json({
+    content: [
+      {
+        reviewId: 1,
+        writerNickname: '막걸리러버',
+        rating: 4.5,
+        content: '향이 정말 좋고 부드러워서 만족스러웠습니다!',
+        imageUrls: ['https://example.com/review1.jpg'],
+        createdAt: '2026-06-10T12:30:00',
+      },
+    ],
+    page: pageNumber,
+    size: sizeNumber,
+    totalElements: 20,
+    totalPages: 2,
+  });
+};
 
 module.exports = {
   saveAgreement,
@@ -706,4 +908,8 @@ module.exports = {
   getFundingDetail,
   getFundingIntro,
   getBreweryLogs,
+  getFundingQuestions,
+  createFundingQuestion,
+  createFundingReply,
+  getFundingReviews,
 };

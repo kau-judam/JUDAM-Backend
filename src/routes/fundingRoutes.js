@@ -26,6 +26,10 @@ const {
   getFundingDetail,
   getFundingIntro,
   getBreweryLogs,
+  getFundingQuestions,
+  createFundingQuestion,
+  createFundingReply,
+  getFundingReviews,
 } = require('../controllers/funding.controller');
 
 router.post('/agreements', saveAgreement);
@@ -42,6 +46,10 @@ router.post('/drafts/:draftId/documents', upload.single('file'), uploadDocument)
 router.get('/', getFundingList);
 router.get('/:fundingId/intro', getFundingIntro);
 router.get('/:fundingId/brewery-logs', getBreweryLogs);
+router.get('/:fundingId/questions', getFundingQuestions);
+router.post('/:fundingId/questions', createFundingQuestion);
+router.post('/:fundingId/questions/:questionId/replies', createFundingReply);
+router.get('/:fundingId/reviews', getFundingReviews);
 router.get('/:fundingId', getFundingDetail);
 
 
