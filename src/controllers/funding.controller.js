@@ -260,6 +260,221 @@ const saveLegalInfo = (req, res) => {
   });
 };
 
+//맛지표관련
+const saveTasteProfile = (req, res) => {
+  const { draftId } = req.params;
+
+  const {
+    sweetness,
+    acidity,
+    body,
+    carbonation,
+    alcoholIntensity,
+    flavorNotes,
+  } = req.body;
+
+  if (
+    !draftId ||
+    isNaN(Number(draftId)) ||
+    sweetness === undefined ||
+    acidity === undefined ||
+    body === undefined ||
+    carbonation === undefined ||
+    alcoholIntensity === undefined
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '맛지표 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  const tasteValues = [
+    sweetness,
+    acidity,
+    body,
+    carbonation,
+    alcoholIntensity,
+  ];
+
+  const isOutOfRange = tasteValues.some(
+    (value) => typeof value !== 'number' || value < 1 || value > 5
+  );
+
+  if (isOutOfRange) {
+    return res.status(400).json({
+      status: 400,
+      message: '맛지표는 1부터 5 사이의 값이어야 합니다.',
+    });
+  }
+
+  if (flavorNotes && !Array.isArray(flavorNotes)) {
+    return res.status(400).json({
+      status: 400,
+      message: '맛지표 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    draftId: Number(draftId),
+    section: 'TASTE_PROFILE',
+    progressRate: 64,
+    message: '맛지표 정보가 저장되었습니다.',
+  });
+};
+
+//프로젝트 계획 정보 저장 API(프로젝트소개+예산배열검증+일정배열검증)
+const savePlan = (req, res) => {
+  const { draftId } = req.params;
+
+  const { introduction, budgetPlan, schedulePlan } = req.body;
+
+  if (
+    !draftId ||
+    isNaN(Number(draftId)) ||
+    !introduction ||
+    !Array.isArray(budgetPlan) ||
+    !Array.isArray(schedulePlan)
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '프로젝트 계획 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  if (budgetPlan.length === 0) {
+    return res.status(400).json({
+      status: 400,
+      message: '예산 항목은 최소 1개 이상 입력해야 합니다.',
+    });
+  }
+
+  if (schedulePlan.length === 0) {
+    return res.status(400).json({
+      status: 400,
+      message: '일정 단계는 최소 1개 이상 입력해야 합니다.',
+    });
+  }
+
+  const hasInvalidBudget = budgetPlan.some(
+    (budget) => !budget.category || !budget.amount || typeof budget.amount !== 'number'
+  );
+
+  if (hasInvalidBudget) {
+    return res.status(400).json({
+      status: 400,
+      message: '프로젝트 계획 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  const hasInvalidSchedule = schedulePlan.some(
+    (schedule) => !schedule.step || !schedule.description || !schedule.date
+  );
+
+  if (hasInvalidSchedule) {
+    return res.status(400).json({
+      status: 400,
+      message: '프로젝트 계획 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    draftId: Number(draftId),
+    section: 'PLAN',
+    progressRate: 78,
+    message: '프로젝트 계획 정보가 저장되었습니다.',
+  });
+};
+
+//창작자/정산/사업자 정보 저장
+const saveBreweryInfo = (req, res) => {
+  const { draftId } = req.params;
+
+  const {
+    breweryName,
+    representativeName,
+    businessRegistrationNumber,
+    businessAddress,
+    contactEmail,
+    contactPhone,
+    bankName,
+    accountNumber,
+    accountHolder,
+  } = req.body;
+
+  if (
+    !draftId ||
+    isNaN(Number(draftId)) ||
+    !breweryName ||
+    !representativeName ||
+    !businessRegistrationNumber ||
+    !businessAddress ||
+    !contactEmail ||
+    !contactPhone ||
+    !bankName ||
+    !accountNumber ||
+    !accountHolder
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조장 정보 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  const businessNumberRegex = /^\d{3}-\d{2}-\d{5}$/;
+
+  if (!businessNumberRegex.test(businessRegistrationNumber)) {
+    return res.status(400).json({
+      status: 400,
+      message: '사업자등록번호 형식이 올바르지 않습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    draftId: Number(draftId),
+    section: 'BREWERY_INFO',
+    progressRate: 85,
+    message: '창작자/정산/사업자 정보가 저장되었습니다.',
+  });
+};
+
+//환불/교환/성인인증/리스크 안내 저장
+const saveNotices = (req, res) => {
+  const { draftId } = req.params;
+
+  const {
+    refundPolicy,
+    exchangePolicy,
+    adultVerificationNotice,
+    riskNotice,
+  } = req.body;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '안내사항 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  if (
+    !refundPolicy ||
+    !exchangePolicy ||
+    !adultVerificationNotice ||
+    !riskNotice
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '필수 안내사항을 모두 입력해야 합니다.',
+    });
+  }
+
+  return res.status(200).json({
+    draftId: Number(draftId),
+    section: 'NOTICES',
+    progressRate: 92,
+    message: '안내사항 정보가 저장되었습니다.',
+  });
+};
+
 module.exports = {
   saveAgreement,
   createFundingDraft,
@@ -267,4 +482,8 @@ module.exports = {
   saveBasicInfo,
   saveSchedule,
   saveLegalInfo,
+  saveTasteProfile,
+  savePlan,
+  saveBreweryInfo,
+  saveNotices,
 };
