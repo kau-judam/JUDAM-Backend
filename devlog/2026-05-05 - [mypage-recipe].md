@@ -158,3 +158,13 @@ git checkout -b feature/mypage-recipe
 | `app.js` | 마운트 경로 `/users` → `/api/users` 수정 (API 스펙 경로 일치) |
 
 `app.js`의 마운트 경로가 `/users`로 되어 있어 API 스펙의 `/api/users/me/...`와 맞지 않았다. `/api/users`로 수정하면서 기존 `/users/me` 플레이스홀더 엔드포인트도 `/api/users/me`로 자연스럽게 이동됐다.
+
+---
+
+### 참고사항
+
+- `recipeCommentController.js`의 댓글 수정·삭제 권한 검사(`putComment`, `deleteCommentHandler`)에서 `comment.user_id !== req.user.id` 비교 시 타입 불일치 버그가 있었다. DB에서 반환되는 `comment.user_id`는 숫자형인데 JWT에서 추출한 `req.user.id`는 문자열로 들어오는 경우가 있어 `!==` 엄격 비교가 항상 `true`를 반환하는 문제였다. `Number(req.user.id)`로 명시적 형변환을 추가하여 수정했다. (`feature/s3-presigned-url` 브랜치에서 함께 수정)
+
+- S3 Presigned URL을 이용한 이미지 업로드 API를 `feature/s3-presigned-url` 브랜치에서 추가 구현했다. `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` 패키지가 추가됐으며, `src/services/s3.service.js` / `src/controllers/s3.controller.js` / `src/routes/s3.routes.js` 파일이 신규 생성됐다. AWS 관련 환경변수(`AWS_REGION`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)는 `.env.example`에 추가됐으며, 실제 `.env`에도 값을 채워야 S3 기능이 동작한다.
+
+- `app.js`의 userRoutes 마운트 경로를 `/users` → `/api/users`로 수정했다(작업 5 참조). 이 변경으로 기존에 `/users/...` 경로로 테스트하던 클라이언트나 팀원이 있다면 `/api/users/...`로 경로를 업데이트해야 한다.
