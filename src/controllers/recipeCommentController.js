@@ -84,7 +84,7 @@ const putComment = async (req, res) => {
       return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
     }
 
-    if (comment.user_id !== req.user.id) {
+    if (comment.user_id !== Number(req.user.id)) {
       return res.status(403).json({ status: 403, message: '본인이 작성한 댓글만 수정할 수 있습니다.' });
     }
 
@@ -113,7 +113,7 @@ const deleteCommentHandler = async (req, res) => {
       return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
     }
 
-    if (comment.user_id !== req.user.id) {
+    if (comment.user_id !== Number(req.user.id)) {
       return res.status(403).json({ status: 403, message: '본인이 작성한 댓글만 삭제할 수 있습니다.' });
     }
 
