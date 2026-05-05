@@ -5,6 +5,7 @@ const legacyAuthRoutes = require('./src/routes/authRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const recipeRoutes = require('./src/routes/recipeRoutes');
 const fundingRoutes = require('./src/routes/fundingRoutes');
+const orderRoutes = require('./src/routes/orderRoutes'); //결제요청
 
 const app = express();
 
@@ -22,5 +23,6 @@ app.use('/auth', legacyAuthRoutes);
 app.use('/users', userRoutes);
 app.use('/api/recipes', recipeRoutes);
 app.use('/api/fundings', fundingRoutes);
+app.use('/api/orders', orderRoutes);
 
 module.exports = app;
