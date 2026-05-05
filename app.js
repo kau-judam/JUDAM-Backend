@@ -6,6 +6,7 @@ const userRoutes = require('./src/routes/userRoutes');
 const recipeRoutes = require('./src/routes/recipeRoutes');
 const fundingRoutes = require('./src/routes/fundingRoutes');
 const orderRoutes = require('./src/routes/orderRoutes'); //결제요청
+const s3Routes = require('./src/routes/s3.routes');
 
 const app = express();
 
@@ -24,5 +25,6 @@ app.use('/api/users', userRoutes);
 app.use('/api/recipes', recipeRoutes);
 app.use('/api/fundings', fundingRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/s3', s3Routes);
 
 module.exports = app;
