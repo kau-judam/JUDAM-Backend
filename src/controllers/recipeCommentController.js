@@ -145,7 +145,11 @@ const postCommentLike = async (req, res) => {
       return res.status(409).json({ status: 409, message: '이미 좋아요를 누른 댓글입니다.' });
     }
 
-    return res.status(200).json({ status: 200, message: '좋아요가 등록되었습니다.', like_count: result.like_count });
+    return res.status(200).json({
+      status: 200,
+      message: '좋아요 등록 완료',
+      data: { comment_id: commentId, like_count: result.like_count },
+    });
   } catch {
     return res.status(500).json({ status: 500, message: '서버 내부 오류' });
   }
@@ -172,7 +176,11 @@ const deleteCommentLike = async (req, res) => {
       return res.status(404).json({ status: 404, message: '좋아요를 누르지 않은 댓글입니다.' });
     }
 
-    return res.status(200).json({ status: 200, message: '좋아요가 취소되었습니다.', like_count: result.like_count });
+    return res.status(200).json({
+      status: 200,
+      message: '좋아요 취소 완료',
+      data: { comment_id: commentId, like_count: result.like_count },
+    });
   } catch {
     return res.status(500).json({ status: 500, message: '서버 내부 오류' });
   }

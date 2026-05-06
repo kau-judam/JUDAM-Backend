@@ -33,7 +33,8 @@ const createRecipe = async (recipeData, user) => {
     ]
   );
 
-  return result.rows[0];
+  const row = result.rows[0];
+  return { ...row, recipe_id: parseInt(row.recipe_id) };
 };
 
 // 레시피 목록 조회 (GET /api/recipes)
@@ -74,13 +75,26 @@ const getRecipes = async (sort, status, page, size) => {
   const totalElements = parseInt(countResult.rows[0].count, 10);
   const totalPages = Math.ceil(totalElements / size) || 1;
 
-  return { recipes: dataResult.rows, totalElements, totalPages, currentPage: page };
+  return {
+    recipes: dataResult.rows.map((r) => ({ ...r, recipe_id: Number(r.recipe_id) })),
+    totalElements,
+    totalPages,
+    currentPage: page,
+  };
 };
 
 // 레시피 상세 조회 (GET /api/recipes/:recipeId)
 const getRecipeById = async (recipeId) => {
-  const result = await pool.query('SELECT * FROM recipes WHERE recipe_id = $1', [recipeId]);
-  return result.rows[0] || null;
+  const result = await pool.query(
+    `SELECT recipe_id, title, content, abv_range, main_ingredient, ai_sub_ingredient,
+            target_flavor, concept, summary, author_type, status, is_fundable,
+            interest_count, image_url, created_at, updated_at
+     FROM recipes WHERE recipe_id = $1`,
+    [recipeId]
+  );
+  const row = result.rows[0] || null;
+  if (!row) return null;
+  return { ...row, recipe_id: Number(row.recipe_id) };
 };
 
 // 관심 등록 (POST /api/recipes/:recipeId/interests)
@@ -117,7 +131,8 @@ const addInterest = async (recipeId, userId) => {
     [INTEREST_THRESHOLD, recipeId]
   );
 
-  return updated.rows[0];
+  const row = updated.rows[0];
+  return { ...row, recipe_id: Number(row.recipe_id) };
 };
 
 // 관심 해제 (DELETE /api/recipes/:recipeId/interests)
@@ -148,7 +163,8 @@ const removeInterest = async (recipeId, userId) => {
     [recipeId]
   );
 
-  return updated.rows[0];
+  const row = updated.rows[0];
+  return { ...row, recipe_id: Number(row.recipe_id) };
 };
 
 // 양조장 레시피 등록 (POST /api/recipes/brewery)
@@ -179,7 +195,8 @@ const createBreweryRecipe = async (recipeData, user) => {
     ]
   );
 
-  return result.rows[0];
+  const row = result.rows[0];
+  return { ...row, recipe_id: Number(row.recipe_id) };
 };
 
 // 양조장이 소비자 레시피 확인 (GET /api/recipes/brewery)
@@ -222,7 +239,12 @@ const getConsumerRecipes = async (status, page, size) => {
   const totalElements = parseInt(countResult.rows[0].count, 10);
   const totalPages = Math.ceil(totalElements / size) || 1;
 
-  return { recipes: dataResult.rows, totalElements, totalPages, currentPage: page };
+  return {
+    recipes: dataResult.rows.map((r) => ({ ...r, recipe_id: Number(r.recipe_id) })),
+    totalElements,
+    totalPages,
+    currentPage: page,
+  };
 };
 
 module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes };
