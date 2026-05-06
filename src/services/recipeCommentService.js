@@ -9,6 +9,7 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
   const dataResult = await pool.query(
     `SELECT
        rc.comment_id,
+       rc.user_id,
        u.nickname        AS user_nickname,
        rc.content,
        rc.like_count,
@@ -34,13 +35,14 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
   const totalPages = Math.ceil(totalElements / size) || 1;
 
   const comments = dataResult.rows.map((c) => ({
-    comment_id:    Number(c.comment_id),
-    user_nickname: c.user_nickname,
-    content:       c.content,
-    like_count:    Number(c.like_count),
-    is_liked:      c.is_liked,
-    created_at:    c.created_at,
-    updated_at:    c.updated_at,
+    comment_id: Number(c.comment_id),
+    user_id:    Number(c.user_id),
+    nickname:   c.user_nickname,
+    content:    c.content,
+    like_count: Number(c.like_count),
+    is_liked:   c.is_liked,
+    created_at: c.created_at,
+    updated_at: c.updated_at,
   }));
 
   return { comments, totalElements, totalPages, currentPage: page };
@@ -63,12 +65,13 @@ const createComment = async (recipeId, content, user) => {
 
   const c = result.rows[0];
   return {
-    comment_id:    Number(c.comment_id),
-    user_nickname: nickname,
-    content:       c.content,
-    like_count:    Number(c.like_count),
-    created_at:    c.created_at,
-    updated_at:    c.updated_at,
+    comment_id: Number(c.comment_id),
+    recipe_id:  recipeId,
+    user_id:    Number(user.id),
+    nickname:   nickname,
+    content:    c.content,
+    like_count: Number(c.like_count),
+    created_at: c.created_at,
   };
 };
 
