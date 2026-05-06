@@ -7,6 +7,7 @@ const recipeRoutes = require('./src/routes/recipeRoutes');
 const fundingRoutes = require('./src/routes/fundingRoutes');
 const aiRoutes = require('./src/routes/ai.routes');
 const orderRoutes = require('./src/routes/orderRoutes'); //결제요청
+const s3Routes = require('./src/routes/s3.routes');
 
 const app = express();
 
@@ -21,10 +22,11 @@ app.get('/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/auth', legacyAuthRoutes);
-app.use('/users', userRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/recipes', recipeRoutes);
 app.use('/api/fundings', fundingRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/s3', s3Routes);
 app.use('/api/ai', aiRoutes);
 
 module.exports = app;
