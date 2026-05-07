@@ -1,14 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
+const { getMe } = require('../controllers/user.controller');
 const { getMyRecipeList, getMyInterestRecipeList, getMyRecipeCommentList } = require('../controllers/mypageController');
 
-router.get('/me', authMiddleware, (req, res) => {
-  res.status(200).json({
-    message: 'protected route success',
-    user: req.user,
-  });
-});
+router.get('/me', authMiddleware, getMe);
 
 // 내가 작성한 레시피 목록 — 로그인 필수
 router.get('/me/recipes', authMiddleware, getMyRecipeList);
