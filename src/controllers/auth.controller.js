@@ -1,14 +1,29 @@
-const jwt = require('jsonwebtoken');
 const { getKakaoToken, getKakaoUserInfo } = require('../services/kakao.service');
 const { findOrCreateKakaoUser } = require('../services/user.service');
+const {
+  generateAccessToken,
+  issueRefreshToken,
+  refreshAccessToken: refreshAccessTokenService,
+  revokeRefreshToken,
+} = require('../services/token.service');
+
+const sendError = (res, status, message, error) => {
+  return res.status(status).json({
+    message,
+    error,
+  });
+};
 
 const kakaoLogin = (req, res) => {
   const { KAKAO_REST_API_KEY, KAKAO_REDIRECT_URI } = process.env;
 
   if (!KAKAO_REST_API_KEY || !KAKAO_REDIRECT_URI) {
-    return res.status(500).json({
-      message: 'Kakao OAuth environment variables are missing',
-    });
+    return sendError(
+      res,
+      500,
+      'Kakao OAuth environment variables are missing',
+      'KAKAO_REST_API_KEY and KAKAO_REDIRECT_URI are required',
+    );
   }
 
   const kakaoAuthUrl = new URL('https://kauth.kakao.com/oauth/authorize');
@@ -21,18 +36,9 @@ const kakaoLogin = (req, res) => {
 
 const kakaoCallback = async (req, res) => {
   const { code } = req.query;
-  const { JWT_SECRET } = process.env;
 
   if (!code) {
-    return res.status(400).json({
-      message: 'Authorization code is required',
-    });
-  }
-
-  if (!JWT_SECRET) {
-    return res.status(500).json({
-      message: 'JWT_SECRET environment variable is missing',
-    });
+    return sendError(res, 400, 'Authorization code is required', 'code query parameter is missing');
   }
 
   try {
@@ -41,30 +47,21 @@ const kakaoCallback = async (req, res) => {
 
     const kakaoAccount = kakaoUserInfo.kakao_account || {};
     const profile = kakaoAccount.profile || {};
-    const user = {
+    const kakaoProfile = {
       kakaoId: kakaoUserInfo.id,
       email: kakaoAccount.email || null,
       nickname: profile.nickname || null,
       profileImage: profile.profile_image_url || null,
     };
 
-    const dbUser = await findOrCreateKakaoUser(user);
-
-    const accessToken = jwt.sign(
-      {
-        userId: dbUser.user_id,
-        provider: 'kakao',
-        role: dbUser.role,
-      },
-      JWT_SECRET,
-      {
-        expiresIn: '7d',
-      },
-    );
+    const dbUser = await findOrCreateKakaoUser(kakaoProfile);
+    const accessToken = generateAccessToken(dbUser);
+    const refreshToken = await issueRefreshToken(dbUser.user_id);
 
     return res.status(200).json({
       message: 'kakao login success',
       accessToken,
+      refreshToken,
       user: {
         userId: dbUser.user_id,
         email: dbUser.email,
@@ -76,15 +73,63 @@ const kakaoCallback = async (req, res) => {
       },
     });
   } catch (error) {
-  console.error('카카오 로그인 실패 상세:', error);
-  console.error('카카오 로그인 실패 응답:', error.response?.data);
-  console.error('카카오 로그인 실패 메시지:', error.message);
+    return sendError(
+      res,
+      error.statusCode || error.response?.status || 500,
+      'kakao login failed',
+      error.response?.data || error.detail || error.message || String(error),
+    );
+  }
+};
 
-  return res.status(500).json({
-    message: 'kakao login failed',
-    error: error.response?.data || error.message || String(error),
-  });
-}
-}
+const refreshAccessToken = async (req, res) => {
+  const { refreshToken } = req.body;
 
-module.exports = { kakaoLogin, kakaoCallback };
+  if (!refreshToken) {
+    return sendError(res, 400, 'refreshToken is required', 'refreshToken is missing');
+  }
+
+  try {
+    const accessToken = await refreshAccessTokenService(refreshToken);
+
+    return res.status(200).json({
+      message: 'access token refreshed',
+      accessToken,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || 'access token refresh failed',
+      error.detail || error.message,
+    );
+  }
+};
+
+const logout = async (req, res) => {
+  const { refreshToken } = req.body;
+
+  try {
+    if (refreshToken) {
+      await revokeRefreshToken(refreshToken);
+    }
+
+    return res.status(200).json({
+      message: 'logout success',
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || 'logout failed',
+      error.detail || error.message,
+    );
+  }
+};
+
+module.exports = {
+  kakaoLogin,
+  kakaoCallback,
+  refreshAccessToken,
+  logout,
+};
