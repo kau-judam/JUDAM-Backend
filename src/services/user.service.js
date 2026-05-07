@@ -215,6 +215,48 @@ const updateUserProfile = async (userId, updateData) => {
   return rows[0];
 };
 
+const deleteUserAccount = async (userId) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `
+        UPDATE users
+        SET
+          deleted_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+          AND deleted_at IS NULL
+        RETURNING user_id
+      `,
+      [userId],
+    );
+
+    if (rows.length === 0) {
+      throw createServiceError(404, 'user not found');
+    }
+
+    await client.query(
+      `
+        UPDATE refresh_tokens
+        SET revoked_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+          AND revoked_at IS NULL
+      `,
+      [userId],
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   findUserByKakaoId,
   createKakaoUser,
@@ -222,5 +264,6 @@ module.exports = {
   findOrCreateKakaoUser,
   findUserById,
   updateUserProfile,
+  deleteUserAccount,
   isNicknameExists,
 };

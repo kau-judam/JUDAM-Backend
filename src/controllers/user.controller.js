@@ -1,4 +1,9 @@
-const { findUserById, updateUserProfile, isNicknameExists } = require('../services/user.service');
+const {
+  findUserById,
+  updateUserProfile,
+  deleteUserAccount,
+  isNicknameExists,
+} = require('../services/user.service');
 
 const mapUserResponse = (user) => ({
   userId: String(user.user_id),
@@ -122,6 +127,35 @@ const updateMe = async (req, res) => {
   }
 };
 
+const deleteMe = async (req, res) => {
+  if (!req.user?.userId) {
+    return res.status(401).json({
+      status: 401,
+      message: '유효하지 않거나 만료된 토큰입니다.',
+    });
+  }
+
+  try {
+    await deleteUserAccount(req.user.userId);
+
+    return res.status(200).json({
+      message: 'user deleted successfully',
+    });
+  } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(404).json({
+        message: 'user not found',
+        error: 'user does not exist or already deleted',
+      });
+    }
+
+    return res.status(500).json({
+      message: 'failed to delete user',
+      error: error.message,
+    });
+  }
+};
+
 const checkNickname = async (req, res) => {
   const nickname = typeof req.query.nickname === 'string' ? req.query.nickname.trim() : '';
 
@@ -146,4 +180,4 @@ const checkNickname = async (req, res) => {
   }
 };
 
-module.exports = { getMe, updateMe, checkNickname };
+module.exports = { getMe, updateMe, deleteMe, checkNickname };
