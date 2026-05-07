@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
-const { getMe } = require('../controllers/user.controller');
+const { getMe, updateMe } = require('../controllers/user.controller');
 const { getMyRecipeList, getMyInterestRecipeList, getMyRecipeCommentList } = require('../controllers/mypageController');
 
 router.get('/me', authMiddleware, getMe);
+router.patch('/me', authMiddleware, updateMe);
 
 // 내가 작성한 레시피 목록 — 로그인 필수
 router.get('/me/recipes', authMiddleware, getMyRecipeList);

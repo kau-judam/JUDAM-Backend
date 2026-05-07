@@ -93,6 +93,7 @@ const findUserById = async (userId) => {
         user_id,
         email,
         nickname,
+        phone_number,
         role,
         provider,
         profile_image,
@@ -108,10 +109,102 @@ const findUserById = async (userId) => {
   return rows[0] || null;
 };
 
+const createServiceError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const isNicknameUsedByAnotherUser = async (nickname, userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT user_id
+      FROM users
+      WHERE nickname = $1
+        AND user_id <> $2
+        AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [nickname, userId],
+  );
+
+  return rows.length > 0;
+};
+
+const updateUserProfile = async (userId, updateData) => {
+  const currentUser = await findUserById(userId);
+
+  if (!currentUser) {
+    throw createServiceError(404, 'user not found');
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(updateData, 'nickname') &&
+    updateData.nickname !== currentUser.nickname
+  ) {
+    const duplicated = await isNicknameUsedByAnotherUser(updateData.nickname, userId);
+
+    if (duplicated) {
+      throw createServiceError(409, 'nickname already exists');
+    }
+  }
+
+  const setClauses = [];
+  const values = [];
+  let parameterIndex = 1;
+
+  if (Object.prototype.hasOwnProperty.call(updateData, 'nickname')) {
+    setClauses.push(`nickname = $${parameterIndex}`);
+    values.push(updateData.nickname);
+    parameterIndex += 1;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updateData, 'phoneNumber')) {
+    setClauses.push(`phone_number = $${parameterIndex}`);
+    values.push(updateData.phoneNumber);
+    parameterIndex += 1;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updateData, 'profileImage')) {
+    setClauses.push(`profile_image = $${parameterIndex}`);
+    values.push(updateData.profileImage);
+    parameterIndex += 1;
+  }
+
+  setClauses.push('updated_at = CURRENT_TIMESTAMP');
+  values.push(userId);
+
+  const { rows } = await pool.query(
+    `
+      UPDATE users
+      SET ${setClauses.join(', ')}
+      WHERE user_id = $${parameterIndex}
+        AND deleted_at IS NULL
+      RETURNING
+        user_id,
+        email,
+        nickname,
+        phone_number,
+        role,
+        provider,
+        profile_image,
+        updated_at
+    `,
+    values,
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(404, 'user not found');
+  }
+
+  return rows[0];
+};
+
 module.exports = {
   findUserByKakaoId,
   createKakaoUser,
   updateKakaoUserLastLogin,
   findOrCreateKakaoUser,
   findUserById,
+  updateUserProfile,
 };
