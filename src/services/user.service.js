@@ -86,9 +86,31 @@ const findOrCreateKakaoUser = async (kakaoProfile) => {
   return createKakaoUser(kakaoProfile);
 };
 
+const findUserById = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        user_id,
+        email,
+        nickname,
+        role,
+        provider,
+        profile_image
+      FROM users
+      WHERE user_id = $1
+        AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  return rows[0] || null;
+};
+
 module.exports = {
   findUserByKakaoId,
   createKakaoUser,
   updateKakaoUserLastLogin,
   findOrCreateKakaoUser,
+  findUserById,
 };
