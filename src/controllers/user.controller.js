@@ -1,4 +1,4 @@
-const { findUserById, updateUserProfile } = require('../services/user.service');
+const { findUserById, updateUserProfile, isNicknameExists } = require('../services/user.service');
 
 const mapUserResponse = (user) => ({
   userId: String(user.user_id),
@@ -122,4 +122,28 @@ const updateMe = async (req, res) => {
   }
 };
 
-module.exports = { getMe, updateMe };
+const checkNickname = async (req, res) => {
+  const nickname = typeof req.query.nickname === 'string' ? req.query.nickname.trim() : '';
+
+  if (!nickname) {
+    return res.status(400).json({
+      message: 'nickname is required',
+      error: 'nickname query parameter is missing',
+    });
+  }
+
+  try {
+    const exists = await isNicknameExists(nickname);
+
+    return res.status(200).json({
+      available: !exists,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: 'failed to check nickname',
+      error: error.message,
+    });
+  }
+};
+
+module.exports = { getMe, updateMe, checkNickname };

@@ -131,6 +131,21 @@ const isNicknameUsedByAnotherUser = async (nickname, userId) => {
   return rows.length > 0;
 };
 
+const isNicknameExists = async (nickname) => {
+  const { rows } = await pool.query(
+    `
+      SELECT user_id
+      FROM users
+      WHERE nickname = $1
+        AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [nickname],
+  );
+
+  return rows.length > 0;
+};
+
 const updateUserProfile = async (userId, updateData) => {
   const currentUser = await findUserById(userId);
 
@@ -207,4 +222,5 @@ module.exports = {
   findOrCreateKakaoUser,
   findUserById,
   updateUserProfile,
+  isNicknameExists,
 };
