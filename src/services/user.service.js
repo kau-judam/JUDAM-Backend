@@ -95,7 +95,8 @@ const findUserById = async (userId) => {
         nickname,
         role,
         provider,
-        profile_image
+        profile_image,
+        last_login_at
       FROM users
       WHERE user_id = $1
         AND deleted_at IS NULL
