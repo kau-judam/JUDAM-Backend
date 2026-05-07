@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
-const { getMe, updateMe } = require('../controllers/user.controller');
+const { getMe, updateMe, checkNickname } = require('../controllers/user.controller');
 const { getMyRecipeList, getMyInterestRecipeList, getMyRecipeCommentList } = require('../controllers/mypageController');
 
+router.get('/check-nickname', checkNickname);
 router.get('/me', authMiddleware, getMe);
 router.patch('/me', authMiddleware, updateMe);
 
