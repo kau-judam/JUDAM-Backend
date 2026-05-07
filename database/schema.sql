@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS recipe_comments (
   user_id BIGINT NOT NULL,
   content TEXT NOT NULL,
   like_count INT NOT NULL DEFAULT 0,
+  parent_comment_id BIGINT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP,
   CONSTRAINT fk_recipe_comments_recipe
@@ -147,6 +148,10 @@ CREATE TABLE IF NOT EXISTS recipe_comments (
   CONSTRAINT fk_recipe_comments_user
     FOREIGN KEY (user_id)
     REFERENCES users(user_id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_recipe_comments_parent
+    FOREIGN KEY (parent_comment_id)
+    REFERENCES recipe_comments(comment_id)
     ON DELETE CASCADE
 );
 
