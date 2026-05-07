@@ -1,5 +1,4 @@
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -9,20 +8,17 @@ const s3 = new S3Client({
   },
 });
 
-const EXPIRES_IN_SECONDS = 300; // 5분
-
-const generatePresignedUrl = async (userId, filename, fileType) => {
-  const key = `uploads/${userId}/${Date.now()}-${filename}`;
+const uploadFileToS3 = async (buffer, originalname, mimetype, userId) => {
+  const key = `uploads/${userId}/${Date.now()}-${originalname}`;
   const command = new PutObjectCommand({
     Bucket: process.env.AWS_S3_BUCKET,
     Key: key,
-    ContentType: fileType,
+    Body: buffer,
+    ContentType: mimetype,
   });
 
-  const presignedUrl = await getSignedUrl(s3, command, { expiresIn: EXPIRES_IN_SECONDS });
-  const s3Url = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
-
-  return { presignedUrl, s3Url };
+  await s3.send(command);
+  return `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 };
 
-module.exports = { generatePresignedUrl };
+module.exports = { uploadFileToS3 };

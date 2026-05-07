@@ -1,8 +1,7 @@
 const pool = require('../db');
 
 // 댓글 목록 조회 (GET /api/recipes/:recipeId/comments)
-// - userId가 null이면 is_liked는 항상 false (비로그인)
-// - LEFT JOIN으로 is_liked를 한 쿼리에서 처리
+// - userId가 null이면 is_liked, is_mine은 항상 false (비로그인)
 const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
   const offset = page * size;
 
@@ -11,23 +10,26 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
        rc.comment_id,
        rc.user_id,
        u.nickname        AS user_nickname,
+       u.profile_image   AS author_profile_image,
+       u.role            AS author_type,
        rc.content,
        rc.like_count,
        rc.created_at,
        rc.updated_at,
-       CASE WHEN rcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked
+       CASE WHEN rcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
+       CASE WHEN rc.user_id = $4 THEN true ELSE false END         AS is_mine
      FROM recipe_comments rc
      JOIN  users u   ON u.user_id  = rc.user_id
      LEFT JOIN recipe_comment_likes rcl
             ON rcl.comment_id = rc.comment_id AND rcl.user_id = $4
-     WHERE rc.recipe_id = $1
+     WHERE rc.recipe_id = $1 AND rc.parent_comment_id IS NULL
      ORDER BY rc.created_at ASC
      LIMIT $2 OFFSET $3`,
     [recipeId, size, offset, userId]
   );
 
   const countResult = await pool.query(
-    'SELECT COUNT(*) FROM recipe_comments WHERE recipe_id = $1',
+    'SELECT COUNT(*) FROM recipe_comments WHERE recipe_id = $1 AND parent_comment_id IS NULL',
     [recipeId]
   );
 
@@ -35,14 +37,17 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
   const totalPages = Math.ceil(totalElements / size) || 1;
 
   const comments = dataResult.rows.map((c) => ({
-    comment_id: Number(c.comment_id),
-    user_id:    Number(c.user_id),
-    nickname:   c.user_nickname,
-    content:    c.content,
-    like_count: Number(c.like_count),
-    is_liked:   c.is_liked,
-    created_at: c.created_at,
-    updated_at: c.updated_at,
+    comment_id:           Number(c.comment_id),
+    user_id:              Number(c.user_id),
+    nickname:             c.user_nickname,
+    author_profile_image: c.author_profile_image,
+    author_type:          c.author_type,
+    content:              c.content,
+    like_count:           Number(c.like_count),
+    is_liked:             c.is_liked,
+    is_mine:              c.is_mine,
+    created_at:           c.created_at,
+    updated_at:           c.updated_at,
   }));
 
   return { comments, totalElements, totalPages, currentPage: page };
@@ -122,7 +127,6 @@ const getCommentById = async (commentId) => {
 };
 
 // 댓글 좋아요 등록 (POST /api/recipes/:recipeId/comments/:commentId/likes)
-// - UNIQUE 제약(comment_id, user_id) 위반 시 duplicate 에러 반환
 const likeComment = async (commentId, userId) => {
   const commentResult = await pool.query(
     'SELECT comment_id FROM recipe_comments WHERE comment_id = $1',
@@ -168,4 +172,95 @@ const unlikeComment = async (commentId, userId) => {
   return { like_count: Number(updated.rows[0].like_count) };
 };
 
-module.exports = { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById, likeComment, unlikeComment };
+// 대댓글 목록 조회 (GET /api/recipes/:recipeId/comments/:commentId/replies)
+// - userId가 null이면 is_liked, is_mine은 항상 false (비로그인)
+const getReplies = async (parentCommentId, page, size, userId) => {
+  const offset = page * size;
+
+  const dataResult = await pool.query(
+    `SELECT
+       rc.comment_id,
+       rc.user_id,
+       u.nickname        AS user_nickname,
+       u.profile_image   AS author_profile_image,
+       u.role            AS author_type,
+       rc.content,
+       rc.like_count,
+       rc.created_at,
+       rc.updated_at,
+       CASE WHEN rcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
+       CASE WHEN rc.user_id = $4 THEN true ELSE false END         AS is_mine
+     FROM recipe_comments rc
+     JOIN  users u ON u.user_id = rc.user_id
+     LEFT JOIN recipe_comment_likes rcl
+            ON rcl.comment_id = rc.comment_id AND rcl.user_id = $4
+     WHERE rc.parent_comment_id = $1
+     ORDER BY rc.created_at ASC
+     LIMIT $2 OFFSET $3`,
+    [parentCommentId, size, offset, userId]
+  );
+
+  const countResult = await pool.query(
+    'SELECT COUNT(*) FROM recipe_comments WHERE parent_comment_id = $1',
+    [parentCommentId]
+  );
+
+  const totalElements = parseInt(countResult.rows[0].count, 10);
+  const totalPages = Math.ceil(totalElements / size) || 1;
+
+  const replies = dataResult.rows.map((c) => ({
+    comment_id:           Number(c.comment_id),
+    user_id:              Number(c.user_id),
+    nickname:             c.user_nickname,
+    author_profile_image: c.author_profile_image,
+    author_type:          c.author_type,
+    content:              c.content,
+    like_count:           Number(c.like_count),
+    is_liked:             c.is_liked,
+    is_mine:              c.is_mine,
+    created_at:           c.created_at,
+    updated_at:           c.updated_at,
+  }));
+
+  return { replies, totalElements, totalPages, currentPage: page };
+};
+
+// 대댓글 작성 (POST /api/recipes/:recipeId/comments/:commentId/replies)
+const createReply = async (recipeId, parentCommentId, content, user) => {
+  const parentResult = await pool.query(
+    'SELECT comment_id FROM recipe_comments WHERE comment_id = $1',
+    [parentCommentId]
+  );
+  if (parentResult.rows.length === 0) {
+    const error = new Error('부모 댓글을 찾을 수 없습니다.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const nicknameResult = await pool.query(
+    'SELECT nickname FROM users WHERE user_id = $1',
+    [user.id]
+  );
+  const nickname = nicknameResult.rows[0]?.nickname || `user_${user.id}`;
+
+  const result = await pool.query(
+    `INSERT INTO recipe_comments (recipe_id, user_id, content, parent_comment_id)
+     VALUES ($1, $2, $3, $4)
+     RETURNING comment_id, content, like_count, created_at`,
+    [recipeId, user.id, content, parentCommentId]
+  );
+
+  const c = result.rows[0];
+  return {
+    comment_id:        Number(c.comment_id),
+    recipe_id:         recipeId,
+    parent_comment_id: parentCommentId,
+    user_id:           Number(user.id),
+    nickname:          nickname,
+    content:           c.content,
+    like_count:        Number(c.like_count),
+    created_at:        c.created_at,
+  };
+};
+
+module.exports = { getCommentsByRecipeId, createComment, updateComment, deleteComment, getCommentById, likeComment, unlikeComment, getReplies, createReply };

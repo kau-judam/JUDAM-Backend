@@ -38,31 +38,45 @@ const createRecipe = async (recipeData, user) => {
 };
 
 // 레시피 목록 조회 (GET /api/recipes)
-const getRecipes = async (sort, status, page, size) => {
+// userId가 null이면 is_interested는 항상 false (비로그인)
+const getRecipes = async (sort, status, page, size, userId) => {
   const offset = page * size;
-  const orderClause = sort === 'popular' ? 'ORDER BY interest_count DESC' : 'ORDER BY created_at DESC';
+  const orderClause = sort === 'popular' ? 'ORDER BY r.interest_count DESC' : 'ORDER BY r.created_at DESC';
 
   let dataQuery, countQuery, dataParams, countParams;
 
+  const selectFields = `
+    r.recipe_id, r.title, r.summary, r.main_ingredient, r.author_type,
+    r.status, r.is_fundable, r.interest_count, r.image_url, r.created_at,
+    u.nickname AS author_nickname,
+    u.profile_image AS author_profile_image,
+    (SELECT COUNT(*)::INT FROM recipe_comments WHERE recipe_id = r.recipe_id) AS comment_count,
+    CASE WHEN ri.interest_id IS NOT NULL THEN true ELSE false END AS is_interested
+  `;
+
   if (status && status !== 'ALL') {
     dataQuery = `
-      SELECT recipe_id, title, summary, main_ingredient, author_type, status, is_fundable, interest_count, image_url, created_at
-      FROM recipes
-      WHERE status = $1
+      SELECT ${selectFields}
+      FROM recipes r
+      JOIN users u ON u.user_id = r.user_id
+      LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $4
+      WHERE r.status = $1
       ${orderClause}
       LIMIT $2 OFFSET $3
     `;
-    dataParams = [status, size, offset];
+    dataParams = [status, size, offset, userId];
     countQuery = 'SELECT COUNT(*) FROM recipes WHERE status = $1';
     countParams = [status];
   } else {
     dataQuery = `
-      SELECT recipe_id, title, summary, main_ingredient, author_type, status, is_fundable, interest_count, image_url, created_at
-      FROM recipes
+      SELECT ${selectFields}
+      FROM recipes r
+      JOIN users u ON u.user_id = r.user_id
+      LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $3
       ${orderClause}
       LIMIT $1 OFFSET $2
     `;
-    dataParams = [size, offset];
+    dataParams = [size, offset, userId];
     countQuery = 'SELECT COUNT(*) FROM recipes';
     countParams = [];
   }
@@ -76,7 +90,11 @@ const getRecipes = async (sort, status, page, size) => {
   const totalPages = Math.ceil(totalElements / size) || 1;
 
   return {
-    recipes: dataResult.rows.map((r) => ({ ...r, recipe_id: Number(r.recipe_id) })),
+    recipes: dataResult.rows.map((r) => ({
+      ...r,
+      recipe_id: Number(r.recipe_id),
+      comment_count: Number(r.comment_count),
+    })),
     totalElements,
     totalPages,
     currentPage: page,
@@ -84,17 +102,26 @@ const getRecipes = async (sort, status, page, size) => {
 };
 
 // 레시피 상세 조회 (GET /api/recipes/:recipeId)
-const getRecipeById = async (recipeId) => {
+// userId가 null이면 is_interested는 항상 false (비로그인)
+const getRecipeById = async (recipeId, userId) => {
   const result = await pool.query(
-    `SELECT recipe_id, title, content, abv_range, main_ingredient, ai_sub_ingredient,
-            target_flavor, concept, summary, author_type, status, is_fundable,
-            interest_count, image_url, created_at, updated_at
-     FROM recipes WHERE recipe_id = $1`,
-    [recipeId]
+    `SELECT
+       r.recipe_id, r.title, r.content, r.abv_range, r.main_ingredient, r.ai_sub_ingredient,
+       r.target_flavor, r.concept, r.summary, r.author_type, r.status, r.is_fundable,
+       r.interest_count, r.image_url, r.created_at, r.updated_at,
+       u.nickname AS author_nickname,
+       u.profile_image AS author_profile_image,
+       (SELECT COUNT(*)::INT FROM recipe_comments WHERE recipe_id = r.recipe_id) AS comment_count,
+       CASE WHEN ri.interest_id IS NOT NULL THEN true ELSE false END AS is_interested
+     FROM recipes r
+     JOIN users u ON u.user_id = r.user_id
+     LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $2
+     WHERE r.recipe_id = $1`,
+    [recipeId, userId]
   );
   const row = result.rows[0] || null;
   if (!row) return null;
-  return { ...row, recipe_id: Number(row.recipe_id) };
+  return { ...row, recipe_id: Number(row.recipe_id), comment_count: Number(row.comment_count) };
 };
 
 // 관심 등록 (POST /api/recipes/:recipeId/interests)
