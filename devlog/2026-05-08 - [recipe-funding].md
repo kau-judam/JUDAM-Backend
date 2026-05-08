@@ -21,7 +21,7 @@
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
 | title | String | ✅ | 펀딩 프로젝트 제목 |
-| description | String | ❌ | 펀딩 상세 설명 |
+| description | String | ✅ | 펀딩 상세 설명 |
 | goal_amount | Int | ✅ | 목표 금액 (원) |
 | start_date | String | ✅ | 펀딩 시작일 (YYYY-MM-DD) |
 | end_date | String | ✅ | 펀딩 마감일 (YYYY-MM-DD) |
