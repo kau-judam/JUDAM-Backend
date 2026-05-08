@@ -274,4 +274,69 @@ const getConsumerRecipes = async (status, page, size) => {
   };
 };
 
-module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes };
+// 양조장 펀딩 전환 (POST /api/recipes/:recipeId/funding)
+const convertRecipeToFunding = async (recipeId, breweryUserId, body) => {
+  const { title, description, goal_amount, start_date, end_date } = body;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const recipeResult = await client.query(
+      'SELECT recipe_id, status FROM recipes WHERE recipe_id = $1',
+      [recipeId]
+    );
+    if (recipeResult.rows.length === 0) {
+      const error = new Error('해당 레시피를 찾을 수 없습니다.');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const recipe = recipeResult.rows[0];
+    if (recipe.status === 'FUNDING_IN_PROGRESS') {
+      const error = new Error('이미 펀딩이 진행중인 레시피입니다.');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (recipe.status !== 'FUNDING_READY') {
+      const error = new Error('펀딩 전환 가능 상태(FUNDING_READY)인 레시피만 전환할 수 있습니다.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const fundingResult = await client.query(
+      `INSERT INTO funding_projects
+         (recipe_id, brewery_user_id, title, description, goal_amount, start_date, end_date, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')
+       RETURNING funding_id, recipe_id, title, goal_amount, current_amount, start_date, end_date, status`,
+      [recipeId, breweryUserId, title, description || null, goal_amount, start_date, end_date]
+    );
+
+    await client.query(
+      `UPDATE recipes SET status = 'FUNDING_IN_PROGRESS' WHERE recipe_id = $1`,
+      [recipeId]
+    );
+
+    await client.query('COMMIT');
+
+    const row = fundingResult.rows[0];
+    return {
+      funding_id: Number(row.funding_id),
+      recipe_id: Number(row.recipe_id),
+      title: row.title,
+      goal_amount: row.goal_amount,
+      current_amount: row.current_amount,
+      start_date: row.start_date,
+      end_date: row.end_date,
+      funding_status: row.status,
+      recipe_status: 'FUNDING_IN_PROGRESS',
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding };

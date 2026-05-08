@@ -1,6 +1,6 @@
 const multer = require('multer');
 const { uploadFileToS3 } = require('../services/s3.service');
-const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes } = require('../services/recipeService');
+const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding } = require('../services/recipeService');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -150,4 +150,32 @@ const getBreweryRecipes = async (req, res) => {
   }
 };
 
-module.exports = { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes };
+// 양조장 펀딩 전환 핸들러 (POST /api/recipes/:recipeId/funding)
+const FUNDING_REQUIRED_FIELDS = ['title', 'description', 'goal_amount', 'start_date', 'end_date'];
+
+const postRecipeFunding = async (req, res) => {
+  const recipeId = parseInt(req.params.recipeId, 10);
+  const missing = FUNDING_REQUIRED_FIELDS.filter((f) => req.body[f] === undefined || req.body[f] === null || req.body[f] === '');
+  if (missing.length > 0) {
+    return res.status(400).json({ status: 400, message: '필수 항목이 누락되었습니다.' });
+  }
+
+  try {
+    const funding = await convertRecipeToFunding(recipeId, req.user.id, req.body);
+    return res.status(201).json({
+      status: 201,
+      message: '펀딩 프로젝트가 등록되었습니다.',
+      funding,
+    });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({ status: 400, message: error.message });
+    }
+    if (error.statusCode === 404) {
+      return res.status(404).json({ status: 404, message: error.message });
+    }
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+module.exports = { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes, postRecipeFunding };
