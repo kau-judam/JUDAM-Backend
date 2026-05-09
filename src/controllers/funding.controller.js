@@ -1027,6 +1027,327 @@ const createFundingInquiry = (req, res) => {
   });
 };
 
+//추가부분1: 양조일지 등록
+const createBreweryLog = (req, res) => {
+  const { fundingId } = req.params;
+  const { stage, title, content } = req.body;
+  const files = req.files || [];
+
+  const allowedStages = [
+    'INGREDIENT',
+    'FERMENTATION',
+    'AGING',
+    'BOTTLING',
+    'SHIPPING',
+  ];
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  if (!stage || !title || !content) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조일지 제목과 내용을 입력해야 합니다.',
+    });
+  }
+
+  if (!allowedStages.includes(stage)) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조 진행 단계가 올바르지 않습니다.',
+    });
+  }
+
+  const imageUrls = files.map(
+    (file) => `https://s3.amazonaws.com/judam/${file.originalname}`
+  );
+
+  return res.status(201).json({
+    breweryLogId: 1,
+    fundingId: Number(fundingId),
+    stage,
+    title,
+    imageUrls,
+    message: '양조일지가 등록되었습니다.',
+  });
+};
+
+//추가부분2: 양조일지 수정
+const updateBreweryLog = (req, res) => {
+  const { fundingId, breweryLogId } = req.params;
+  const { stage, title, content, deleteImageUrls } = req.body;
+  const files = req.files || [];
+
+  const allowedStages = [
+    'INGREDIENT',
+    'FERMENTATION',
+    'AGING',
+    'BOTTLING',
+    'SHIPPING',
+  ];
+
+  // fundingId, breweryLogId 검증
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !breweryLogId ||
+    isNaN(Number(breweryLogId))
+  ) {
+    return res.status(404).json({
+      status: 404,
+      message: '양조일지를 찾을 수 없습니다.',
+    });
+  }
+
+  // 아무 수정값도 없는 경우
+  if (!stage && !title && !content && files.length === 0 && !deleteImageUrls) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조일지 수정값이 올바르지 않습니다.',
+    });
+  }
+
+  // stage Enum 검증
+  if (stage && !allowedStages.includes(stage)) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조 진행 단계가 올바르지 않습니다.',
+    });
+  }
+
+  // 새로 업로드된 이미지 URL mock 처리
+  const uploadedImageUrls = files.map(
+    (file) => `https://s3.amazonaws.com/judam/${file.originalname}`
+  );
+
+  // 기존 이미지 mock
+  const existingImageUrls = [
+    'https://s3.amazonaws.com/judam/existing-log1.png',
+    'https://s3.amazonaws.com/judam/existing-log2.png',
+  ];
+
+  // 삭제할 이미지 URL 처리
+  const deleteTargets = Array.isArray(deleteImageUrls)
+    ? deleteImageUrls
+    : deleteImageUrls
+      ? [deleteImageUrls]
+      : [];
+
+  const remainingImageUrls = existingImageUrls.filter(
+    (url) => !deleteTargets.includes(url)
+  );
+
+  const imageUrls = [...remainingImageUrls, ...uploadedImageUrls];
+
+  return res.status(200).json({
+    breweryLogId: Number(breweryLogId),
+    fundingId: Number(fundingId),
+    stage: stage || 'AGING',
+    title: title || '숙성 단계에 들어갔습니다.',
+    imageUrls,
+    message: '양조일지가 수정되었습니다.',
+  });
+};
+
+//추가3: 양조일지 삭제
+const deleteBreweryLog = (req, res) => {
+  const { fundingId, breweryLogId } = req.params;
+
+  // fundingId, breweryLogId 검증
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !breweryLogId ||
+    isNaN(Number(breweryLogId))
+  ) {
+    return res.status(404).json({
+      status: 404,
+      message: '양조일지를 찾을 수 없습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    breweryLogId: Number(breweryLogId),
+    fundingId: Number(fundingId),
+    message: '양조일지가 삭제되었습니다.',
+  });
+};
+
+//추가4: 펀딩 공유 링크 조회
+const getFundingShareLink = (req, res) => {
+  const { fundingId } = req.params;
+
+  // fundingId 검증
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  return res.status(200).json({
+    fundingId: Number(fundingId),
+    shareUrl: `https://judam.com/fundings/${fundingId}`,
+    message: '공유 링크가 생성되었습니다.',
+  });
+};
+
+//추가부분5: 펀딩 신고 등록
+const createFundingReport = (req, res) => {
+  const { fundingId } = req.params;
+  const { reason, content } = req.body;
+
+  const allowedReasons = [
+    'FALSE_INFORMATION',
+    'INAPPROPRIATE_CONTENT',
+    'COPYRIGHT',
+    'FRAUD',
+    'ETC',
+  ];
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  if (!reason || !allowedReasons.includes(reason)) {
+    return res.status(400).json({
+      status: 400,
+      message: '신고 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  return res.status(201).json({
+    reportId: 1,
+    fundingId: Number(fundingId),
+    reason,
+    message: '신고가 접수되었습니다.',
+  });
+};
+
+//추가부분6: 펀딩 신고 목록 조회
+const getFundingReports = (req, res) => {
+  const { status, page = 0, size = 10 } = req.query;
+
+  const allowedStatuses = ['PENDING', 'REVIEWING', 'RESOLVED', 'REJECTED'];
+
+  if (status && !allowedStatuses.includes(status)) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  if (isNaN(Number(page)) || isNaN(Number(size))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청 파라미터입니다.',
+    });
+  }
+
+  return res.status(200).json({
+    content: [
+      {
+        reportId: 1,
+        fundingId: 12,
+        fundingTitle: '벚꽃 막걸리 프로젝트',
+        reporterId: 5,
+        reporterNickname: '술좋아하는재원',
+        reason: 'FALSE_INFORMATION',
+        content: '프로젝트 설명에 사실과 다른 내용이 포함되어 있습니다.',
+        status: status || 'PENDING',
+        createdAt: '2026-05-10T13:30:00',
+      },
+    ],
+    page: Number(page),
+    size: Number(size),
+    totalElements: 24,
+    totalPages: 3,
+  });
+};
+
+//추가부분8: 후기작성
+const createFundingReview = (req, res) => {
+  const { fundingId } = req.params;
+  const { rating, content } = req.body;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  if (
+    !rating ||
+    isNaN(Number(rating)) ||
+    Number(rating) < 0 ||
+    Number(rating) > 5 ||
+    !content
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '후기 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  const imageUrls = req.files
+    ? req.files.map((file) => `/uploads/reviews/${file.filename}`)
+    : [];
+
+  return res.status(201).json({
+    reviewId: 31,
+    fundingId: Number(fundingId),
+    rating: Number(rating),
+    imageUrls,
+    message: '후기가 등록되었습니다.',
+  });
+};
+
+//추가부분9: 펀딩 찜 등록
+const likeFundingProject = (req, res) => {
+  const { fundingId } = req.params;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청입니다.',
+    });
+  }
+
+  return res.status(201).json({
+    fundingId: Number(fundingId),
+    liked: true,
+    likeCount: 128,
+    message: '펀딩 프로젝트를 찜했습니다.',
+  });
+};
+
+//추가부분10: 펀딩 찜 해제
+const unlikeFundingProject = (req, res) => {
+  const { fundingId } = req.params;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청입니다.',
+    });
+  }
+
+  return res.status(200).json({
+    fundingId: Number(fundingId),
+    liked: false,
+    likeCount: 127,
+    message: '펀딩 프로젝트 찜이 해제되었습니다.',
+  });
+};
+
 
 module.exports = {
   saveAgreement,
@@ -1051,4 +1372,15 @@ module.exports = {
   getSupportOptions,
   createFundingOrder,
   createFundingInquiry,
+  getFundingShareLink,
+
+  createBreweryLog,
+  updateBreweryLog,
+  deleteBreweryLog,
+  getFundingShareLink,
+  createFundingReport,
+  getFundingReports,
+  createFundingReview,
+  likeFundingProject,
+  unlikeFundingProject,
 };
