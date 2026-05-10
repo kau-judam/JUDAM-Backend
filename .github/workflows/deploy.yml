@@ -1,0 +1,137 @@
+name: Deploy Dev Server to EC2 with SSM
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy to EC2 using SSM
+        id: deploy
+        run: |
+          DEPLOY_SCRIPT=$(cat <<'REMOTE_SCRIPT'
+          sudo -iu ubuntu bash -l <<'EC2_DEPLOY_SCRIPT'
+          set -euo pipefail
+
+          cd "${{ secrets.PROJECT_PATH }}"
+
+          AWS_CLI_REGION="${{ secrets.AWS_REGION }}"
+
+          SECRET_JSON=$(aws --region "$AWS_CLI_REGION" secretsmanager get-secret-value \
+            --secret-id "judam/backend/secrets" \
+            --query "SecretString" \
+            --output text)
+
+          get_param() {
+            aws --region "$AWS_CLI_REGION" ssm get-parameter \
+              --name "$1" \
+              --with-decryption \
+              --query "Parameter.Value" \
+              --output text
+          }
+
+          get_secret() {
+            printf '%s' "$SECRET_JSON" | jq -er --arg key "$1" '.[$key]'
+          }
+
+          env_value() {
+            printf '%s' "$1" | jq -Rs .
+          }
+
+          PORT=$(get_param "/judam/backend/PORT")
+          DB_HOST=$(get_param "/judam/backend/DB_HOST")
+          DB_PORT=$(get_param "/judam/backend/DB_PORT")
+          DB_NAME=$(get_param "/judam/backend/DB_NAME")
+          AWS_REGION=$(get_param "/judam/backend/AWS_REGION")
+          AWS_S3_BUCKET=$(get_param "/judam/backend/AWS_S3_BUCKET")
+          AI_SERVER_BASE_URL=$(get_param "/judam/backend/AI_SERVER_BASE_URL")
+
+          DB_USER=$(get_secret "DB_USER")
+          DB_PASSWORD=$(get_secret "DB_PASSWORD")
+          AWS_ACCESS_KEY_ID=$(get_secret "AWS_ACCESS_KEY_ID")
+          AWS_SECRET_ACCESS_KEY=$(get_secret "AWS_SECRET_ACCESS_KEY")
+          KAKAO_REST_API_KEY=$(get_secret "KAKAO_REST_API_KEY")
+          KAKAO_REDIRECT_URI=$(get_secret "KAKAO_REDIRECT_URI")
+          KAKAO_CLIENT_SECRET=$(get_secret "KAKAO_CLIENT_SECRET")
+          JWT_SECRET=$(get_secret "JWT_SECRET")
+
+          umask 077
+          ENV_TMP=$(mktemp .env.XXXXXX)
+          trap 'rm -f "$ENV_TMP"' EXIT
+
+          {
+            printf 'PORT=%s\n' "$(env_value "$PORT")"
+            printf 'DB_HOST=%s\n' "$(env_value "$DB_HOST")"
+            printf 'DB_PORT=%s\n' "$(env_value "$DB_PORT")"
+            printf 'DB_NAME=%s\n' "$(env_value "$DB_NAME")"
+            printf 'AWS_REGION=%s\n' "$(env_value "$AWS_REGION")"
+            printf 'AWS_S3_BUCKET=%s\n' "$(env_value "$AWS_S3_BUCKET")"
+            printf 'AI_SERVER_BASE_URL=%s\n' "$(env_value "$AI_SERVER_BASE_URL")"
+            printf 'DB_USER=%s\n' "$(env_value "$DB_USER")"
+            printf 'DB_PASSWORD=%s\n' "$(env_value "$DB_PASSWORD")"
+            printf 'AWS_ACCESS_KEY_ID=%s\n' "$(env_value "$AWS_ACCESS_KEY_ID")"
+            printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$(env_value "$AWS_SECRET_ACCESS_KEY")"
+            printf 'KAKAO_REST_API_KEY=%s\n' "$(env_value "$KAKAO_REST_API_KEY")"
+            printf 'KAKAO_REDIRECT_URI=%s\n' "$(env_value "$KAKAO_REDIRECT_URI")"
+            printf 'KAKAO_CLIENT_SECRET=%s\n' "$(env_value "$KAKAO_CLIENT_SECRET")"
+            printf 'JWT_SECRET=%s\n' "$(env_value "$JWT_SECRET")"
+          } > "$ENV_TMP"
+
+          mv "$ENV_TMP" .env
+          trap - EXIT
+
+          git fetch origin dev
+          git reset --hard origin/dev
+          npm install
+
+          if pm2 describe "${{ secrets.PM2_APP_NAME }}" > /dev/null 2>&1; then
+            pm2 restart "${{ secrets.PM2_APP_NAME }}" --update-env
+          else
+            pm2 start index.js --name "${{ secrets.PM2_APP_NAME }}"
+          fi
+
+          pm2 save
+          curl -fsS http://localhost:3000/api/ai/health
+          EC2_DEPLOY_SCRIPT
+          REMOTE_SCRIPT
+          )
+
+          PARAMETERS=$(jq -n --arg command "$DEPLOY_SCRIPT" '{commands: [$command]}')
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ secrets.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy Judam backend dev server" \
+            --parameters "$PARAMETERS" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for deploy command
+        run: |
+          aws ssm wait command-executed \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ secrets.INSTANCE_ID }}"
+
+      - name: Print deploy result
+        run: |
+          aws ssm get-command-invocation \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ secrets.INSTANCE_ID }}" \
+            --query "{Status:Status, StandardOutput:StandardOutputContent, StandardError:StandardErrorContent}" \
+            --output json
