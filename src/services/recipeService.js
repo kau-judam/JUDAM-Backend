@@ -339,4 +339,30 @@ const convertRecipeToFunding = async (recipeId, breweryUserId, body) => {
   }
 };
 
-module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding };
+// 레시피 삭제 (DELETE /api/recipes/:recipeId)
+const deleteRecipe = async (recipeId, userId) => {
+  const result = await pool.query(
+    'SELECT recipe_id, user_id, status FROM recipes WHERE recipe_id = $1',
+    [recipeId]
+  );
+  if (result.rows.length === 0) {
+    const error = new Error('해당 레시피를 찾을 수 없습니다.');
+    error.statusCode = 404;
+    throw error;
+  }
+  const recipe = result.rows[0];
+  if (Number(recipe.user_id) !== userId) {
+    const error = new Error('본인이 작성한 레시피만 삭제할 수 있습니다.');
+    error.statusCode = 403;
+    throw error;
+  }
+  const DELETABLE_STATUSES = ['PUBLISHED', 'FUNDING_READY'];
+  if (!DELETABLE_STATUSES.includes(recipe.status)) {
+    const error = new Error('펀딩이 진행 중이거나 완료된 레시피는 삭제할 수 없습니다.');
+    error.statusCode = 400;
+    throw error;
+  }
+  await pool.query('DELETE FROM recipes WHERE recipe_id = $1', [recipeId]);
+};
+
+module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding, deleteRecipe };
