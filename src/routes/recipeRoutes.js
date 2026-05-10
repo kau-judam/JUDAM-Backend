@@ -3,7 +3,7 @@ const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
 const optionalAuthMiddleware = require('../middlewares/optionalAuthMiddleware');
 const breweryMiddleware = require('../middlewares/breweryMiddleware');
-const { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes, postRecipeFunding } = require('../controllers/recipeController');
+const { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes, postRecipeFunding, deleteRecipeHandler } = require('../controllers/recipeController');
 const { getCommentList, postComment, putComment, deleteCommentHandler, postCommentLike, deleteCommentLike, getReplyList, postReply } = require('../controllers/recipeCommentController');
 
 // 레시피 작성 — 로그인 필수, 이미지 파일 수신(multer)
@@ -20,6 +20,9 @@ router.get('/brewery', authMiddleware, breweryMiddleware, getBreweryRecipes);
 
 // 레시피 상세 조회 — 로그인 선택 (is_interested 반영)
 router.get('/:recipeId', optionalAuthMiddleware, getRecipeDetail);
+
+// 레시피 삭제 — 로그인 필수, 작성자 본인만
+router.delete('/:recipeId', authMiddleware, deleteRecipeHandler);
 
 // 펀딩 전환 — BREWERY 권한 필수
 router.post('/:recipeId/funding', authMiddleware, breweryMiddleware, postRecipeFunding);

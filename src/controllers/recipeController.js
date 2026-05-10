@@ -1,6 +1,6 @@
 const multer = require('multer');
 const { uploadFileToS3 } = require('../services/s3.service');
-const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding } = require('../services/recipeService');
+const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding, deleteRecipe } = require('../services/recipeService');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -178,4 +178,24 @@ const postRecipeFunding = async (req, res) => {
   }
 };
 
-module.exports = { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes, postRecipeFunding };
+// 레시피 삭제 핸들러 (DELETE /api/recipes/:recipeId)
+const deleteRecipeHandler = async (req, res) => {
+  const recipeId = parseInt(req.params.recipeId, 10);
+  try {
+    await deleteRecipe(recipeId, req.user.id);
+    return res.status(200).json({ status: 200, message: '레시피가 삭제되었습니다.' });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({ status: 400, message: error.message });
+    }
+    if (error.statusCode === 403) {
+      return res.status(403).json({ status: 403, message: error.message });
+    }
+    if (error.statusCode === 404) {
+      return res.status(404).json({ status: 404, message: error.message });
+    }
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+module.exports = { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes, postRecipeFunding, deleteRecipeHandler };
