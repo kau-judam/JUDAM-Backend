@@ -1,4 +1,4 @@
-const db = require('../config/db');
+const pool = require('../config/db');
 
 //펀딩 약관 동의
 const saveAgreement = (req, res) => {
@@ -536,34 +536,45 @@ const uploadDocument = (req, res) => {
 };
 
 //펀딩프로젝트 목록 조회
-const getFundingList = (req, res) => {
+const mapFundingListRow = (row) => {
+  const currentAmount = Number(row.current_amount || 0);
+  const targetAmount = Number(row.target_amount || 0);
+
+  return {
+    fundingId: Number(row.funding_id),
+    title: row.title,
+    description: row.description,
+    breweryName: row.brewery_name,
+    recipeTitle: row.recipe_title,
+    thumbnailUrl: row.thumbnail_url,
+    status: row.status,
+    currentAmount,
+    targetAmount,
+    achievementRate: targetAmount > 0 ? Math.floor((currentAmount / targetAmount) * 100) : 0,
+    startDate: row.start_date,
+    endDate: row.end_date,
+  };
+};
+
+const getFundingList = async (req, res) => {
   const { status, sort, page = 0, size = 10 } = req.query;
+  const { keyword } = req.query;
 
-  const allowedStatuses = ['UPCOMING', 'ONGOING', 'ENDED'];
-  const allowedSorts = ['POPULAR', 'LATEST', 'DEADLINE'];
-
-  if (status && !allowedStatuses.includes(status)) {
-    return res.status(400).json({
-      status: 400,
-      message: '잘못된 요청 파라미터입니다.',
-    });
-  }
-
-  if (sort && !allowedSorts.includes(sort)) {
-    return res.status(400).json({
-      status: 400,
-      message: '잘못된 요청 파라미터입니다.',
-    });
-  }
-
-  const pageNumber = Number(page);
-  const sizeNumber = Number(size);
+  const validFundingSorts = ['POPULAR', 'LATEST', 'DEADLINE'];
+  const normalizedSort = sort || 'LATEST';
+  const normalizedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
+  const normalizedStatus = typeof status === 'string' && status.trim()
+    ? status.trim().toUpperCase()
+    : null;
+  const requestedPageNumber = Number(page);
+  const requestedSizeNumber = Number(size);
 
   if (
-    Number.isNaN(pageNumber) ||
-    Number.isNaN(sizeNumber) ||
-    pageNumber < 0 ||
-    sizeNumber <= 0
+    !validFundingSorts.includes(normalizedSort) ||
+    !Number.isInteger(requestedPageNumber) ||
+    !Number.isInteger(requestedSizeNumber) ||
+    requestedPageNumber < 0 ||
+    requestedSizeNumber <= 0
   ) {
     return res.status(400).json({
       status: 400,
@@ -571,25 +582,97 @@ const getFundingList = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    content: [
-      {
-        fundingId: 1,
-        title: '벚꽃 막걸리 프로젝트',
-        thumbnailUrl: 'https://example.com/image.jpg',
-        breweryName: '삼해소주가',
-        currentAmount: 3200000,
-        targetAmount: 5000000,
-        achievementRate: 64,
-        status: 'ONGOING',
-        endDate: '2026-05-30',
-      },
-    ],
-    page: pageNumber,
-    size: sizeNumber,
-    totalElements: 25,
-    totalPages: 3,
-  });
+  const values = [];
+  const conditions = [];
+
+  if (normalizedStatus) {
+    values.push(normalizedStatus);
+    conditions.push(`fp.status = $${values.length}`);
+  }
+
+  if (normalizedKeyword) {
+    values.push(`%${normalizedKeyword}%`);
+    const keywordParam = `$${values.length}`;
+    conditions.push(`(
+      fp.title ILIKE ${keywordParam}
+      OR COALESCE(fp.description, '') ILIKE ${keywordParam}
+      OR COALESCE(ba.brewery_name, u.nickname, '') ILIKE ${keywordParam}
+      OR r.title ILIKE ${keywordParam}
+    )`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const fromClause = `
+    FROM funding_projects fp
+    JOIN recipes r ON r.recipe_id = fp.recipe_id
+    JOIN users u ON u.user_id = fp.brewery_user_id
+    LEFT JOIN LATERAL (
+      SELECT brewery_name
+      FROM brewery_auth
+      WHERE user_id = fp.brewery_user_id
+      ORDER BY
+        CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
+        updated_at DESC,
+        application_id DESC
+      LIMIT 1
+    ) ba ON TRUE
+  `;
+  const orderBy = {
+    POPULAR: 'ORDER BY fp.current_amount DESC, fp.created_at DESC',
+    LATEST: 'ORDER BY fp.created_at DESC',
+    DEADLINE: 'ORDER BY fp.end_date ASC, fp.created_at DESC',
+  }[normalizedSort];
+
+  try {
+    const countResult = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total_count
+        ${fromClause}
+        ${whereClause}
+      `,
+      values,
+    );
+
+    const totalElements = countResult.rows[0]?.total_count || 0;
+    const listValues = [...values, requestedSizeNumber, requestedPageNumber * requestedSizeNumber];
+    const { rows } = await pool.query(
+      `
+        SELECT
+          fp.funding_id,
+          fp.title,
+          fp.description,
+          COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
+          r.title AS recipe_title,
+          r.image_url AS thumbnail_url,
+          fp.status,
+          fp.current_amount,
+          fp.goal_amount AS target_amount,
+          fp.start_date,
+          fp.end_date
+        ${fromClause}
+        ${whereClause}
+        ${orderBy}
+        LIMIT $${listValues.length - 1}
+        OFFSET $${listValues.length}
+      `,
+      listValues,
+    );
+
+    return res.status(200).json({
+      status: 200,
+      message: '펀딩 목록 조회 성공',
+      data: rows.map(mapFundingListRow),
+      page: requestedPageNumber,
+      size: requestedSizeNumber,
+      totalElements,
+      totalPages: Math.ceil(totalElements / requestedSizeNumber),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '서버 내부 오류',
+    });
+  }
 };
 
 //펀딩 프러젝트 상세조회

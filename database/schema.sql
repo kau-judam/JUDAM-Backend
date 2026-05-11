@@ -279,6 +279,9 @@ CREATE TABLE IF NOT EXISTS brewery_auth (
   status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
   location VARCHAR(255),
   brewery_name VARCHAR(100),
+  document_url TEXT,
+  document_key TEXT,
+  reject_reason TEXT,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_brewery_auth_user

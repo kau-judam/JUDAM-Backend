@@ -5,8 +5,13 @@ const mapApplication = (row) => ({
   userId: row.user_id,
   breweryName: row.brewery_name,
   licenseNumber: row.license_number,
-  location: row.location,
+  location: row.location ?? null,
+  documentUrl: row.document_url,
+  documentKey: row.document_key,
+  rejectReason: row.reject_reason,
   status: row.status,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
 });
 
 const createServiceError = (statusCode, message, detail) => {
@@ -16,13 +21,13 @@ const createServiceError = (statusCode, message, detail) => {
   return error;
 };
 
-const createApplication = async ({ userId, breweryName, licenseNumber, location }) => {
+const createApplication = async ({ userId, breweryName, licenseNumber, location, documentUrl, documentKey }) => {
   const existingApplication = await pool.query(
     `
       SELECT application_id, status
       FROM brewery_auth
       WHERE user_id = $1
-        AND status IN ('PENDING', 'APPROVED')
+        AND status = 'PENDING'
       LIMIT 1
     `,
     [userId],
@@ -31,7 +36,7 @@ const createApplication = async ({ userId, breweryName, licenseNumber, location 
   if (existingApplication.rows.length > 0) {
     throw createServiceError(
       409,
-      '이미 진행 중이거나 승인된 양조장 인증 신청이 있습니다.',
+      '이미 진행 중인 양조장 인증 신청이 있습니다.',
       `application_id=${existingApplication.rows[0].application_id}, status=${existingApplication.rows[0].status}`,
     );
   }
@@ -44,22 +49,61 @@ const createApplication = async ({ userId, breweryName, licenseNumber, location 
         status,
         location,
         brewery_name,
+        document_url,
+        document_key,
         created_at,
         updated_at
       )
-      VALUES ($1, $2, 'PENDING', $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, 'PENDING', $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING
         application_id,
         user_id,
         brewery_name,
         license_number,
-        location,
-        status
+        location AS location,
+        document_url,
+        document_key,
+        reject_reason,
+        status,
+        created_at,
+        updated_at
     `,
-    [userId, licenseNumber, location || null, breweryName],
+    [userId, licenseNumber, location || null, breweryName, documentUrl, documentKey || null],
   );
 
   return mapApplication(rows[0]);
+};
+
+const getApplications = async ({ status } = {}) => {
+  const values = [];
+  const whereClause = status ? 'WHERE status = $1' : '';
+
+  if (status) {
+    values.push(status);
+  }
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        application_id,
+        user_id,
+        brewery_name,
+        license_number,
+        location AS location,
+        document_url,
+        document_key,
+        reject_reason,
+        status,
+        created_at,
+        updated_at
+      FROM brewery_auth
+      ${whereClause}
+      ORDER BY created_at DESC
+    `,
+    values,
+  );
+
+  return rows.map(mapApplication);
 };
 
 const getApplicationByUserId = async (userId) => {
@@ -70,8 +114,13 @@ const getApplicationByUserId = async (userId) => {
         user_id,
         brewery_name,
         license_number,
-        location,
-        status
+        location AS location,
+        document_url,
+        document_key,
+        reject_reason,
+        status,
+        created_at,
+        updated_at
       FROM brewery_auth
       WHERE user_id = $1
       ORDER BY created_at DESC
@@ -153,8 +202,46 @@ const approveApplication = async (applicationId) => {
   }
 };
 
+const rejectApplication = async ({ applicationId, rejectReason }) => {
+  const { rows } = await pool.query(
+    `
+      UPDATE brewery_auth
+      SET
+        status = 'REJECTED',
+        reject_reason = $2,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE application_id = $1
+      RETURNING
+        application_id,
+        user_id,
+        brewery_name,
+        license_number,
+        location AS location,
+        document_url,
+        document_key,
+        reject_reason,
+        status,
+        created_at,
+        updated_at
+    `,
+    [applicationId, rejectReason],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(
+      404,
+      '?묒“???몄쬆 ?좎껌??李얠쓣 ???놁뒿?덈떎.',
+      `application_id=${applicationId}`,
+    );
+  }
+
+  return mapApplication(rows[0]);
+};
+
 module.exports = {
   createApplication,
+  getApplications,
   getApplicationByUserId,
   approveApplication,
+  rejectApplication,
 };
