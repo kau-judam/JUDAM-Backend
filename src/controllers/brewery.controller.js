@@ -61,7 +61,11 @@ const createBreweryApplication = async (req, res) => {
       documentKey: normalizedDocumentKey,
     });
 
-    return res.status(201).json(application);
+    return res.status(201).json({
+      status: 201,
+      message: '양조장 인증 신청 성공',
+      data: application,
+    });
   } catch (error) {
     return sendError(
       res,
@@ -119,7 +123,14 @@ const getMyBreweryApplication = async (req, res) => {
 
   try {
     const application = await getApplicationByUserId(userId);
-    return res.status(200).json(application);
+    console.log('getMyBreweryApplication response keys:', Object.keys(application));
+    console.log('getMyBreweryApplication response:', application);
+
+    return res.status(200).json({
+      status: 200,
+      message: '내 양조장 인증 신청 조회 성공',
+      data: application,
+    });
   } catch (error) {
     return sendError(
       res,
