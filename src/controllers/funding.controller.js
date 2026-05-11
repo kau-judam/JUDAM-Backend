@@ -169,8 +169,8 @@ const updateFundingDraft = (req, res) => {
     message: '임시저장 프로젝트가 수정되었습니다.',
   });
 };
-//프로젝트 기본정보 저장 
-const saveBasicInfo = (req, res) => {
+// 프로젝트 기본정보 저장(수정버전)
+const saveBasicInfo = async (req, res) => {
   const { draftId } = req.params;
 
   const {
@@ -198,12 +198,64 @@ const saveBasicInfo = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    draftId: Number(draftId),
-    section: 'BASIC_INFO',
-    progressRate: 33,
-    message: '기본정보가 저장되었습니다.',
-  });
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        title = $1,
+        short_title = $2,
+        category = $3,
+        main_ingredient = $4,
+        sub_ingredients = $5,
+        alcohol_percentage = $6,
+        summary = $7,
+        thumbnail_url = $8,
+        progress_rate = 33,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $9
+      RETURNING draft_id, progress_rate, updated_at
+      `,
+      [
+        title || null,
+        shortTitle || null,
+        category || null,
+        mainIngredient || null,
+        subIngredients ? JSON.stringify(subIngredients) : null,
+        alcoholPercentage !== undefined && alcoholPercentage !== null
+          ? Number(alcoholPercentage)
+          : null,
+        summary || null,
+        thumbnailUrl || null,
+        Number(draftId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      section: 'BASIC_INFO',
+      progressRate: draft.progress_rate,
+      updatedAt: draft.updated_at,
+      message: '기본정보가 저장되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '기본정보 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 //목표금액 & 일정 
 const saveSchedule = (req, res) => {
