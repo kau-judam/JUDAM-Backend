@@ -1,13 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
-const {
-  getMe,
-  updateMe,
-  deleteMe,
-  checkNickname,
-  getMyFundingOrders,
-} = require('../controllers/user.controller');
+const { getMe, updateMe, deleteMe, checkNickname } = require('../controllers/user.controller');
 const { getMyRecipeList, getMyInterestRecipeList, getMyRecipeCommentList } = require('../controllers/mypageController');
 
 router.get('/check-nickname', checkNickname);
@@ -23,8 +17,5 @@ router.get('/me/interests/recipes', authMiddleware, getMyInterestRecipeList);
 
 // 내가 작성한 레시피 댓글 목록 — 로그인 필수
 router.get('/me/recipe-comments', authMiddleware, getMyRecipeCommentList);
-
-//마이페이지 후원 내역 조회
-router.get('/me/funding-orders', authMiddleware, getMyFundingOrders);
 
 module.exports = router;

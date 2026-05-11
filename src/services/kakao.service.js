@@ -1,10 +1,9 @@
 const axios = require('axios');
 
-const getKakaoToken = async (code, redirectUri) => {
+const getKakaoToken = async (code) => {
   const { KAKAO_REST_API_KEY, KAKAO_REDIRECT_URI, KAKAO_CLIENT_SECRET } = process.env;
-  const resolvedRedirectUri = redirectUri || KAKAO_REDIRECT_URI;
 
-  if (!KAKAO_REST_API_KEY || !resolvedRedirectUri || !KAKAO_CLIENT_SECRET) {
+  if (!KAKAO_REST_API_KEY || !KAKAO_REDIRECT_URI || !KAKAO_CLIENT_SECRET) {
     const error = new Error('Kakao OAuth environment variables are missing');
     error.statusCode = 500;
     throw error;
@@ -13,7 +12,7 @@ const getKakaoToken = async (code, redirectUri) => {
   const tokenParams = new URLSearchParams({
     grant_type: 'authorization_code',
     client_id: KAKAO_REST_API_KEY,
-    redirect_uri: resolvedRedirectUri,
+    redirect_uri: KAKAO_REDIRECT_URI,
     client_secret: KAKAO_CLIENT_SECRET,
     code,
   });

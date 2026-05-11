@@ -64,31 +64,7 @@ const getOrderDetail = (req, res) => {
   });
 };
 
-//추가부분7: 결제 정보 조회
-const getPaymentInfo = (req, res) => {
-  const { orderId } = req.params;
-
-  if (!orderId || isNaN(Number(orderId))) {
-    return res.status(400).json({
-      status: 400,
-      message: '잘못된 요청입니다.',
-    });
-  }
-
-  return res.status(200).json({
-    paymentId: 501,
-    orderId: Number(orderId),
-    paymentMethod: 'CARD',
-    paymentProvider: 'TOSS',
-    paymentStatus: 'COMPLETED',
-    amount: 36000,
-    approvedAt: '2026-05-10T15:20:00',
-    createdAt: '2026-05-10T15:10:00',
-  });
-};
-
 module.exports = {
   requestPayment,
   getOrderDetail,
-  getPaymentInfo,
 };
