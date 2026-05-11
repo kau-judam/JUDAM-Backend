@@ -38,31 +38,45 @@ const createRecipe = async (recipeData, user) => {
 };
 
 // 레시피 목록 조회 (GET /api/recipes)
-const getRecipes = async (sort, status, page, size) => {
+// userId가 null이면 is_interested는 항상 false (비로그인)
+const getRecipes = async (sort, status, page, size, userId) => {
   const offset = page * size;
-  const orderClause = sort === 'popular' ? 'ORDER BY interest_count DESC' : 'ORDER BY created_at DESC';
+  const orderClause = sort === 'popular' ? 'ORDER BY r.interest_count DESC' : 'ORDER BY r.created_at DESC';
 
   let dataQuery, countQuery, dataParams, countParams;
 
+  const selectFields = `
+    r.recipe_id, r.title, r.summary, r.main_ingredient, r.author_type,
+    r.status, r.is_fundable, r.interest_count, r.image_url, r.created_at,
+    u.nickname AS author_nickname,
+    u.profile_image AS author_profile_image,
+    (SELECT COUNT(*)::INT FROM recipe_comments WHERE recipe_id = r.recipe_id) AS comment_count,
+    CASE WHEN ri.interest_id IS NOT NULL THEN true ELSE false END AS is_interested
+  `;
+
   if (status && status !== 'ALL') {
     dataQuery = `
-      SELECT recipe_id, title, summary, main_ingredient, author_type, status, is_fundable, interest_count, image_url, created_at
-      FROM recipes
-      WHERE status = $1
+      SELECT ${selectFields}
+      FROM recipes r
+      JOIN users u ON u.user_id = r.user_id
+      LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $4
+      WHERE r.status = $1
       ${orderClause}
       LIMIT $2 OFFSET $3
     `;
-    dataParams = [status, size, offset];
+    dataParams = [status, size, offset, userId];
     countQuery = 'SELECT COUNT(*) FROM recipes WHERE status = $1';
     countParams = [status];
   } else {
     dataQuery = `
-      SELECT recipe_id, title, summary, main_ingredient, author_type, status, is_fundable, interest_count, image_url, created_at
-      FROM recipes
+      SELECT ${selectFields}
+      FROM recipes r
+      JOIN users u ON u.user_id = r.user_id
+      LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $3
       ${orderClause}
       LIMIT $1 OFFSET $2
     `;
-    dataParams = [size, offset];
+    dataParams = [size, offset, userId];
     countQuery = 'SELECT COUNT(*) FROM recipes';
     countParams = [];
   }
@@ -76,7 +90,11 @@ const getRecipes = async (sort, status, page, size) => {
   const totalPages = Math.ceil(totalElements / size) || 1;
 
   return {
-    recipes: dataResult.rows.map((r) => ({ ...r, recipe_id: Number(r.recipe_id) })),
+    recipes: dataResult.rows.map((r) => ({
+      ...r,
+      recipe_id: Number(r.recipe_id),
+      comment_count: Number(r.comment_count),
+    })),
     totalElements,
     totalPages,
     currentPage: page,
@@ -84,17 +102,26 @@ const getRecipes = async (sort, status, page, size) => {
 };
 
 // 레시피 상세 조회 (GET /api/recipes/:recipeId)
-const getRecipeById = async (recipeId) => {
+// userId가 null이면 is_interested는 항상 false (비로그인)
+const getRecipeById = async (recipeId, userId) => {
   const result = await pool.query(
-    `SELECT recipe_id, title, content, abv_range, main_ingredient, ai_sub_ingredient,
-            target_flavor, concept, summary, author_type, status, is_fundable,
-            interest_count, image_url, created_at, updated_at
-     FROM recipes WHERE recipe_id = $1`,
-    [recipeId]
+    `SELECT
+       r.recipe_id, r.title, r.content, r.abv_range, r.main_ingredient, r.ai_sub_ingredient,
+       r.target_flavor, r.concept, r.summary, r.author_type, r.status, r.is_fundable,
+       r.interest_count, r.image_url, r.created_at, r.updated_at,
+       u.nickname AS author_nickname,
+       u.profile_image AS author_profile_image,
+       (SELECT COUNT(*)::INT FROM recipe_comments WHERE recipe_id = r.recipe_id) AS comment_count,
+       CASE WHEN ri.interest_id IS NOT NULL THEN true ELSE false END AS is_interested
+     FROM recipes r
+     JOIN users u ON u.user_id = r.user_id
+     LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $2
+     WHERE r.recipe_id = $1`,
+    [recipeId, userId]
   );
   const row = result.rows[0] || null;
   if (!row) return null;
-  return { ...row, recipe_id: Number(row.recipe_id) };
+  return { ...row, recipe_id: Number(row.recipe_id), comment_count: Number(row.comment_count) };
 };
 
 // 관심 등록 (POST /api/recipes/:recipeId/interests)
@@ -247,4 +274,95 @@ const getConsumerRecipes = async (status, page, size) => {
   };
 };
 
-module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes };
+// 양조장 펀딩 전환 (POST /api/recipes/:recipeId/funding)
+const convertRecipeToFunding = async (recipeId, breweryUserId, body) => {
+  const { title, description, goal_amount, start_date, end_date } = body;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const recipeResult = await client.query(
+      'SELECT recipe_id, status FROM recipes WHERE recipe_id = $1',
+      [recipeId]
+    );
+    if (recipeResult.rows.length === 0) {
+      const error = new Error('해당 레시피를 찾을 수 없습니다.');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const recipe = recipeResult.rows[0];
+    if (recipe.status === 'FUNDING_IN_PROGRESS') {
+      const error = new Error('이미 펀딩이 진행중인 레시피입니다.');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (recipe.status !== 'FUNDING_READY') {
+      const error = new Error('펀딩 전환 가능 상태(FUNDING_READY)인 레시피만 전환할 수 있습니다.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const fundingResult = await client.query(
+      `INSERT INTO funding_projects
+         (recipe_id, brewery_user_id, title, description, goal_amount, start_date, end_date, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')
+       RETURNING funding_id, recipe_id, title, goal_amount, current_amount, start_date, end_date, status`,
+      [recipeId, breweryUserId, title, description || null, goal_amount, start_date, end_date]
+    );
+
+    await client.query(
+      `UPDATE recipes SET status = 'FUNDING_IN_PROGRESS' WHERE recipe_id = $1`,
+      [recipeId]
+    );
+
+    await client.query('COMMIT');
+
+    const row = fundingResult.rows[0];
+    return {
+      funding_id: Number(row.funding_id),
+      recipe_id: Number(row.recipe_id),
+      title: row.title,
+      goal_amount: row.goal_amount,
+      current_amount: row.current_amount,
+      start_date: row.start_date,
+      end_date: row.end_date,
+      funding_status: row.status,
+      recipe_status: 'FUNDING_IN_PROGRESS',
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// 레시피 삭제 (DELETE /api/recipes/:recipeId)
+const deleteRecipe = async (recipeId, userId) => {
+  const result = await pool.query(
+    'SELECT recipe_id, user_id, status FROM recipes WHERE recipe_id = $1',
+    [recipeId]
+  );
+  if (result.rows.length === 0) {
+    const error = new Error('해당 레시피를 찾을 수 없습니다.');
+    error.statusCode = 404;
+    throw error;
+  }
+  const recipe = result.rows[0];
+  if (Number(recipe.user_id) !== userId) {
+    const error = new Error('본인이 작성한 레시피만 삭제할 수 있습니다.');
+    error.statusCode = 403;
+    throw error;
+  }
+  const DELETABLE_STATUSES = ['PUBLISHED', 'FUNDING_READY'];
+  if (!DELETABLE_STATUSES.includes(recipe.status)) {
+    const error = new Error('펀딩이 진행 중이거나 완료된 레시피는 삭제할 수 없습니다.');
+    error.statusCode = 400;
+    throw error;
+  }
+  await pool.query('DELETE FROM recipes WHERE recipe_id = $1', [recipeId]);
+};
+
+module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding, deleteRecipe };
