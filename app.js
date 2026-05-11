@@ -22,7 +22,12 @@ app.get('/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/auth', legacyAuthRoutes);
+<<<<<<< HEAD
+app.use('/users', userRoutes);
+// 이 부분은 테스트용인데 확인 부탁스 app.use('/api/users', userRoutes); 
+=======
 app.use('/api/users', userRoutes);
+>>>>>>> origin/dev
 app.use('/api/recipes', recipeRoutes);
 app.use('/api/fundings', fundingRoutes);
 app.use('/api/orders', orderRoutes);

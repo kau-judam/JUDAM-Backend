@@ -18,4 +18,7 @@ router.get('/me/interests/recipes', authMiddleware, getMyInterestRecipeList);
 // 내가 작성한 레시피 댓글 목록 — 로그인 필수
 router.get('/me/recipe-comments', authMiddleware, getMyRecipeCommentList);
 
+//마이페이지 후원 내역 조회
+router.get( '/me/funding-orders', getMyFundingOrders);
+
 module.exports = router;
