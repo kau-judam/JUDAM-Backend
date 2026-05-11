@@ -34,17 +34,19 @@ const saveAgreement = (req, res) => {
   });
 };
 
-//펀딩 프로젝트 임시저장
-const createFundingDraft = (req, res) => {
+// 펀딩 프로젝트 임시저장 생성(수정 버전)
+const createFundingDraft = async (req, res) => {
   const {
     breweryId,
     title,
     shortTitle,
     category,
     mainIngredient,
+    subIngredients,
     subIngredient,
     alcoholPercentage,
     summary,
+    thumbnailUrl,
   } = req.body;
 
   if (!breweryId) {
@@ -59,7 +61,7 @@ const createFundingDraft = (req, res) => {
     shortTitle,
     category,
     mainIngredient,
-    subIngredient,
+    subIngredients || subIngredient,
     alcoholPercentage,
     summary,
   ];
@@ -70,13 +72,62 @@ const createFundingDraft = (req, res) => {
 
   const progressRate = Math.round((filledCount / progressFields.length) * 30);
 
-  return res.status(201).json({
-    draftId: 1,
-    breweryId,
-    status: 'DRAFT',
-    progressRate,
-    message: '펀딩 프로젝트가 임시저장되었습니다.',
-  });
+  try {
+    const result = await pool.query(
+      `
+      INSERT INTO funding_drafts (
+        brewery_id,
+        title,
+        short_title,
+        category,
+        main_ingredient,
+        sub_ingredients,
+        alcohol_percentage,
+        summary,
+        thumbnail_url,
+        status,
+        progress_rate
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'DRAFT', $10)
+      RETURNING draft_id, brewery_id, status, progress_rate, created_at
+      `,
+      [
+        Number(breweryId),
+        title || null,
+        shortTitle || null,
+        category || null,
+        mainIngredient || null,
+        subIngredients
+          ? JSON.stringify(subIngredients)
+          : subIngredient || null,
+        alcoholPercentage !== undefined && alcoholPercentage !== null
+          ? Number(alcoholPercentage)
+          : null,
+        summary || null,
+        thumbnailUrl || null,
+        progressRate,
+      ]
+    );
+
+    const draft = result.rows[0];
+
+    return res.status(201).json({
+      draftId: draft.draft_id,
+      breweryId: draft.brewery_id,
+      status: draft.status,
+      progressRate: draft.progress_rate,
+      createdAt: draft.created_at,
+      message: '펀딩 프로젝트가 임시저장되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '펀딩 프로젝트 임시저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //임시저장 프로젝트 수정
@@ -989,7 +1040,7 @@ const getSupportOptions = async (req, res) => {
   }
 
   try {
-    const result = await db.query(
+    const result = await pool.query(
       `
       SELECT
         option_id,
@@ -1080,7 +1131,7 @@ const createFundingOrder = async (req, res) => {
   }
 
   try {
-    const optionResult = await db.query(
+    const optionResult = await pool.query(
       `
       SELECT option_id, funding_id, price, remaining_stock
       FROM funding_support_options
@@ -1114,7 +1165,7 @@ const createFundingOrder = async (req, res) => {
     // TODO: JWT 연결 후 req.user.userId 사용
     const userId = req.user?.userId || 1;
 
-    const orderResult = await db.query(
+    const orderResult = await pool.query(
       `
       INSERT INTO orders (
         user_id,
