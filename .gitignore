@@ -12,4 +12,3 @@ logs/
 .DS_Store
 Thumbs.db
 npm-debug.log
-ssm-params.json
