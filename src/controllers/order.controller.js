@@ -1,7 +1,8 @@
-//결제요청
-const requestPayment = (req, res) => {
-  const { orderId } = req.params;
+const pool = require('../config/db');
 
+// 결제 요청
+const requestPayment = async (req, res) => {
+  const { orderId } = req.params;
   const { paymentMethod, paymentProvider, amount } = req.body;
 
   if (!orderId || isNaN(Number(orderId))) {
@@ -18,26 +19,77 @@ const requestPayment = (req, res) => {
     });
   }
 
-  const orderAmount = 36000;
+  try {
+    const orderResult = await pool.query(
+      `
+      SELECT order_id, total_amount, order_status
+      FROM orders
+      WHERE order_id = $1
+      `,
+      [Number(orderId)]
+    );
 
-  if (amount !== orderAmount) {
-    return res.status(400).json({
-      status: 400,
-      message: '주문 금액과 결제 요청 금액이 일치하지 않습니다.',
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '주문을 찾을 수 없습니다.',
+      });
+    }
+
+    const order = orderResult.rows[0];
+
+    if (Number(amount) !== Number(order.total_amount)) {
+      return res.status(400).json({
+        status: 400,
+        message: '주문 금액과 결제 요청 금액이 일치하지 않습니다.',
+      });
+    }
+
+    const paymentResult = await pool.query(
+      `
+      INSERT INTO payments (
+        order_id,
+        payment_method,
+        payment_provider,
+        amount,
+        payment_status,
+        payment_url
+      )
+      VALUES ($1, $2, $3, $4, 'READY', $5)
+      RETURNING payment_id, order_id, payment_status, payment_url, created_at
+      `,
+      [
+        Number(orderId),
+        paymentMethod,
+        paymentProvider,
+        Number(amount),
+        `https://payment.example.com/pay/${orderId}`,
+      ]
+    );
+
+    const payment = paymentResult.rows[0];
+
+    return res.status(200).json({
+      orderId: payment.order_id,
+      paymentId: payment.payment_id,
+      paymentStatus: payment.payment_status,
+      paymentUrl: payment.payment_url,
+      createdAt: payment.created_at,
+      message: '결제 요청이 생성되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '결제 요청 생성 중 서버 오류가 발생했습니다.',
+      error: error.message,
     });
   }
-
-  return res.status(200).json({
-    orderId: Number(orderId),
-    paymentId: 501,
-    paymentStatus: 'READY',
-    paymentUrl: 'https://payment.example.com/pay/501',
-    message: '결제 요청이 생성되었습니다.',
-  });
 };
 
-//주문상세조회
-const getOrderDetail = (req, res) => {
+// 주문 상세 조회
+const getOrderDetail = async (req, res) => {
   const { orderId } = req.params;
 
   if (!orderId || isNaN(Number(orderId))) {
@@ -47,25 +99,71 @@ const getOrderDetail = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    orderId: Number(orderId),
-    fundingId: 1,
-    fundingTitle: '벚꽃 막걸리 프로젝트',
-    optionName: '벚꽃 막걸리 1병',
-    quantity: 2,
-    totalAmount: 36000,
-    orderStatus: 'PAID',
-    paymentStatus: 'COMPLETED',
-    recipientName: '양재원',
-    recipientPhone: '010-1234-5678',
-    shippingAddress: '서울특별시 강서구 하늘길 123',
-    shippingDetailAddress: '101동 1001호',
-    createdAt: '2026-05-01T13:20:00',
-  });
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        o.order_id,
+        o.funding_id,
+        fp.title AS funding_title,
+        fso.name AS option_name,
+        o.quantity,
+        o.total_amount,
+        o.order_status,
+        p.payment_status,
+        o.recipient_name,
+        o.recipient_phone,
+        o.shipping_address,
+        o.shipping_detail_address,
+        o.created_at
+      FROM orders o
+      LEFT JOIN funding_projects fp ON o.funding_id = fp.funding_id
+      LEFT JOIN funding_support_options fso ON o.option_id = fso.option_id
+      LEFT JOIN payments p ON o.order_id = p.order_id
+      WHERE o.order_id = $1
+      ORDER BY p.created_at DESC
+      LIMIT 1
+      `,
+      [Number(orderId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '주문을 찾을 수 없습니다.',
+      });
+    }
+
+    const order = result.rows[0];
+
+    return res.status(200).json({
+      orderId: order.order_id,
+      fundingId: order.funding_id,
+      fundingTitle: order.funding_title,
+      optionName: order.option_name,
+      quantity: order.quantity,
+      totalAmount: order.total_amount,
+      orderStatus: order.order_status,
+      paymentStatus: order.payment_status || 'PENDING',
+      recipientName: order.recipient_name,
+      recipientPhone: order.recipient_phone,
+      shippingAddress: order.shipping_address,
+      shippingDetailAddress: order.shipping_detail_address,
+      createdAt: order.created_at,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '주문 상세 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
-//추가부분7: 결제 정보 조회
-const getPaymentInfo = (req, res) => {
+// 결제 정보 조회
+const getPaymentInfo = async (req, res) => {
   const { orderId } = req.params;
 
   if (!orderId || isNaN(Number(orderId))) {
@@ -75,16 +173,54 @@ const getPaymentInfo = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    paymentId: 501,
-    orderId: Number(orderId),
-    paymentMethod: 'CARD',
-    paymentProvider: 'TOSS',
-    paymentStatus: 'COMPLETED',
-    amount: 36000,
-    approvedAt: '2026-05-10T15:20:00',
-    createdAt: '2026-05-10T15:10:00',
-  });
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        payment_id,
+        order_id,
+        payment_method,
+        payment_provider,
+        payment_status,
+        amount,
+        paid_at,
+        created_at
+      FROM payments
+      WHERE order_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [Number(orderId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '결제 정보를 찾을 수 없습니다.',
+      });
+    }
+
+    const payment = result.rows[0];
+
+    return res.status(200).json({
+      paymentId: payment.payment_id,
+      orderId: payment.order_id,
+      paymentMethod: payment.payment_method,
+      paymentProvider: payment.payment_provider,
+      paymentStatus: payment.payment_status,
+      amount: payment.amount,
+      approvedAt: payment.paid_at,
+      createdAt: payment.created_at,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '결제 정보 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 module.exports = {
