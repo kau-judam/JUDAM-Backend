@@ -778,8 +778,8 @@ const getFundingList = async (req, res) => {
   }
 };
 
-//펀딩 프러젝트 상세조회
-const getFundingDetail = (req, res) => {
+// 펀딩 프로젝트 상세조회
+const getFundingDetail = async (req, res) => {
   const { fundingId } = req.params;
 
   if (!fundingId || isNaN(Number(fundingId))) {
@@ -789,43 +789,103 @@ const getFundingDetail = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    fundingId: Number(fundingId),
-    title: '벚꽃 막걸리 프로젝트',
-    summary: '못난이 쌀과 벚꽃 추출물을 활용한 봄 한정 막걸리',
-    thumbnailUrl: 'https://example.com/image.jpg',
-    breweryName: '삼해소주가',
-    status: 'ONGOING',
-    currentAmount: 3200000,
-    targetAmount: 5000000,
-    achievementRate: 64,
-    supporterCount: 128,
-    startDate: '2026-05-01',
-    endDate: '2026-05-30',
-    expectedDeliveryDate: '2026-06-20',
-    tasteProfile: {
-      sweetness: 3,
-      acidity: 4,
-      body: 2,
-      carbonation: 3,
-      alcoholIntensity: 2,
-      flavorNotes: ['쌀향', '꽃향', '산뜻함'],
-    },
-    supportOptions: [
-      {
-        optionId: 1,
-        name: '벚꽃 막걸리 1병',
-        price: 18000,
-        description: '750ml 1병 구성',
-      },
-      {
-        optionId: 2,
-        name: '벚꽃 막걸리 3병 세트',
-        price: 50000,
-        description: '750ml 3병 구성',
-      },
-    ],
-  });
+  try {
+    const fundingResult = await pool.query(
+      `
+      SELECT
+        fp.funding_id,
+        fp.title,
+        fp.description,
+        fp.status,
+        fp.current_amount,
+        fp.goal_amount AS target_amount,
+        fp.start_date,
+        fp.end_date,
+        fp.created_at,
+        COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
+        r.title AS recipe_title,
+        r.image_url AS thumbnail_url
+      FROM funding_projects fp
+      JOIN recipes r ON r.recipe_id = fp.recipe_id
+      JOIN users u ON u.user_id = fp.brewery_user_id
+      LEFT JOIN LATERAL (
+        SELECT brewery_name
+        FROM brewery_auth
+        WHERE user_id = fp.brewery_user_id
+        ORDER BY
+          CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
+          updated_at DESC,
+          application_id DESC
+        LIMIT 1
+      ) ba ON TRUE
+      WHERE fp.funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (fundingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const funding = fundingResult.rows[0];
+
+    const optionResult = await pool.query(
+      `
+      SELECT
+        option_id,
+        name,
+        price,
+        description,
+        stock,
+        remaining_stock,
+        max_per_user
+      FROM funding_support_options
+      WHERE funding_id = $1
+      ORDER BY option_id ASC
+      `,
+      [Number(fundingId)]
+    );
+
+    const achievementRate =
+      Number(funding.target_amount) > 0
+        ? Math.floor((Number(funding.current_amount) / Number(funding.target_amount)) * 100)
+        : 0;
+
+    return res.status(200).json({
+      fundingId: Number(funding.funding_id),
+      title: funding.title,
+      summary: funding.description,
+      description: funding.description,
+      thumbnailUrl: funding.thumbnail_url,
+      breweryName: funding.brewery_name,
+      status: funding.status,
+      currentAmount: Number(funding.current_amount),
+      targetAmount: Number(funding.target_amount),
+      achievementRate,
+      startDate: funding.start_date,
+      endDate: funding.end_date,
+      supportOptions: optionResult.rows.map((option) => ({
+        optionId: Number(option.option_id),
+        name: option.name,
+        price: Number(option.price),
+        description: option.description,
+        stock: option.stock,
+        remainingStock: option.remaining_stock,
+        maxPerUser: option.max_per_user,
+      })),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '펀딩 상세 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //프로젝트 소개 조회
@@ -1140,6 +1200,7 @@ const createFundingOrder = async (req, res) => {
   const {
     optionId,
     quantity,
+    donationAmount = 0,
     recipientName,
     recipientPhone,
     shippingAddress,
@@ -1155,9 +1216,12 @@ const createFundingOrder = async (req, res) => {
     });
   }
 
+  const bottleCount = Number(quantity || optionId);
+
   if (
-    !optionId ||
-    !quantity ||
+    !bottleCount ||
+    !Number.isInteger(bottleCount) ||
+    bottleCount <= 0 ||
     !recipientName ||
     !recipientPhone ||
     !shippingAddress
@@ -1182,39 +1246,53 @@ const createFundingOrder = async (req, res) => {
     });
   }
 
+  const donationAmountNumber = Number(donationAmount || 0);
+
+  if (
+    !Number.isInteger(donationAmountNumber) ||
+    donationAmountNumber < 0
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '추가 후원금 입력값이 올바르지 않습니다.',
+    });
+  }
+
   try {
-    const optionResult = await pool.query(
+    const fundingResult = await pool.query(
       `
-      SELECT option_id, funding_id, price, remaining_stock
-      FROM funding_support_options
-      WHERE option_id = $1
-        AND funding_id = $2
+      SELECT
+        funding_id,
+        price_per_bottle,
+        shipping_fee
+      FROM funding_projects
+      WHERE funding_id = $1
       `,
-      [Number(optionId), Number(fundingId)]
+      [Number(fundingId)]
     );
 
-    if (optionResult.rows.length === 0) {
+    if (fundingResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '후원 옵션을 찾을 수 없습니다.',
+        message: '펀딩 프로젝트를 찾을 수 없습니다.',
       });
     }
 
-    const option = optionResult.rows[0];
+    const funding = fundingResult.rows[0];
 
-    if (
-      option.remaining_stock !== null &&
-      option.remaining_stock < Number(quantity)
-    ) {
+    if (!funding.price_per_bottle) {
       return res.status(400).json({
         status: 400,
-        message: '남은 수량이 부족합니다.',
+        message: '프로젝트 1병 가격이 설정되어 있지 않습니다.',
       });
     }
 
-    const totalAmount = Number(option.price) * Number(quantity);
+    const pricePerBottle = Number(funding.price_per_bottle);
+    const shippingFee = Number(funding.shipping_fee || 3000);
 
-    // TODO: JWT 연결 후 req.user.userId 사용
+    const totalAmount =
+      pricePerBottle * bottleCount + shippingFee + donationAmountNumber;
+
     const userId = req.user?.userId || 1;
 
     const orderResult = await pool.query(
@@ -1224,6 +1302,9 @@ const createFundingOrder = async (req, res) => {
         funding_id,
         option_id,
         quantity,
+        price_per_bottle,
+        shipping_fee,
+        donation_amount,
         total_amount,
         order_status,
         recipient_name,
@@ -1233,14 +1314,27 @@ const createFundingOrder = async (req, res) => {
         adult_verified,
         notice_agreed
       )
-      VALUES ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11)
-      RETURNING order_id, funding_id, option_id, quantity, total_amount, order_status, created_at
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CREATED', $9, $10, $11, $12, $13, $14)
+      RETURNING
+        order_id,
+        funding_id,
+        option_id,
+        quantity,
+        price_per_bottle,
+        shipping_fee,
+        donation_amount,
+        total_amount,
+        order_status,
+        created_at
       `,
       [
         userId,
         Number(fundingId),
-        Number(optionId),
-        Number(quantity),
+        bottleCount,
+        bottleCount,
+        pricePerBottle,
+        shippingFee,
+        donationAmountNumber,
         totalAmount,
         recipientName,
         recipientPhone,
@@ -1258,6 +1352,9 @@ const createFundingOrder = async (req, res) => {
       fundingId: order.funding_id,
       optionId: order.option_id,
       quantity: order.quantity,
+      pricePerBottle: order.price_per_bottle,
+      shippingFee: order.shipping_fee,
+      donationAmount: order.donation_amount,
       totalAmount: order.total_amount,
       orderStatus: order.order_status,
       createdAt: order.created_at,
