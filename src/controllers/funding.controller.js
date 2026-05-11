@@ -1,3 +1,5 @@
+const db = require('../config/db');
+
 //펀딩 약관 동의
 const saveAgreement = (req, res) => {
   const {
@@ -893,7 +895,7 @@ const getFundingReviews = (req, res) => {
 };
 
 //후원옵션조회
-const getSupportOptions = (req, res) => {
+const getSupportOptions = async (req, res) => {
   const { fundingId } = req.params;
 
   if (!fundingId || isNaN(Number(fundingId))) {
@@ -903,33 +905,50 @@ const getSupportOptions = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    fundingId: Number(fundingId),
-    supportOptions: [
-      {
-        optionId: 1,
-        name: '벚꽃 막걸리 1병',
-        price: 18000,
-        description: '750ml 1병 구성',
-        stock: 100,
-        remainingStock: 42,
-        maxPerUser: 3,
-      },
-      {
-        optionId: 2,
-        name: '벚꽃 막걸리 3병 세트',
-        price: 50000,
-        description: '750ml 3병 구성',
-        stock: 50,
-        remainingStock: 10,
-        maxPerUser: 2,
-      },
-    ],
-  });
+  try {
+    const result = await db.query(
+      `
+      SELECT
+        option_id,
+        funding_id,
+        name,
+        price,
+        description,
+        stock,
+        remaining_stock,
+        max_per_user
+      FROM funding_support_options
+      WHERE funding_id = $1
+      ORDER BY option_id ASC
+      `,
+      [Number(fundingId)]
+    );
+
+    return res.status(200).json({
+      fundingId: Number(fundingId),
+      supportOptions: result.rows.map((option) => ({
+        optionId: option.option_id,
+        name: option.name,
+        price: option.price,
+        description: option.description,
+        stock: option.stock,
+        remainingStock: option.remaining_stock,
+        maxPerUser: option.max_per_user,
+      })),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '후원 옵션 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
-//후원생성주문
-const createFundingOrder = (req, res) => {
+// 후원 주문 생성
+const createFundingOrder = async (req, res) => {
   const { fundingId } = req.params;
 
   const {
@@ -977,19 +996,96 @@ const createFundingOrder = (req, res) => {
     });
   }
 
-  const optionPrice = 18000;
+  try {
+    const optionResult = await db.query(
+      `
+      SELECT option_id, funding_id, price, remaining_stock
+      FROM funding_support_options
+      WHERE option_id = $1
+        AND funding_id = $2
+      `,
+      [Number(optionId), Number(fundingId)]
+    );
 
-  const totalAmount = optionPrice * quantity;
+    if (optionResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '후원 옵션을 찾을 수 없습니다.',
+      });
+    }
 
-  return res.status(201).json({
-    orderId: 1001,
-    fundingId: Number(fundingId),
-    optionId,
-    quantity,
-    totalAmount,
-    orderStatus: 'CREATED',
-    message: '후원 주문이 생성되었습니다.',
-  });
+    const option = optionResult.rows[0];
+
+    if (
+      option.remaining_stock !== null &&
+      option.remaining_stock < Number(quantity)
+    ) {
+      return res.status(400).json({
+        status: 400,
+        message: '남은 수량이 부족합니다.',
+      });
+    }
+
+    const totalAmount = Number(option.price) * Number(quantity);
+
+    // TODO: JWT 연결 후 req.user.userId 사용
+    const userId = req.user?.userId || 1;
+
+    const orderResult = await db.query(
+      `
+      INSERT INTO orders (
+        user_id,
+        funding_id,
+        option_id,
+        quantity,
+        total_amount,
+        order_status,
+        recipient_name,
+        recipient_phone,
+        shipping_address,
+        shipping_detail_address,
+        adult_verified,
+        notice_agreed
+      )
+      VALUES ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11)
+      RETURNING order_id, funding_id, option_id, quantity, total_amount, order_status, created_at
+      `,
+      [
+        userId,
+        Number(fundingId),
+        Number(optionId),
+        Number(quantity),
+        totalAmount,
+        recipientName,
+        recipientPhone,
+        shippingAddress,
+        shippingDetailAddress || null,
+        adultVerified,
+        noticeAgreed,
+      ]
+    );
+
+    const order = orderResult.rows[0];
+
+    return res.status(201).json({
+      orderId: order.order_id,
+      fundingId: order.funding_id,
+      optionId: order.option_id,
+      quantity: order.quantity,
+      totalAmount: order.total_amount,
+      orderStatus: order.order_status,
+      createdAt: order.created_at,
+      message: '후원 주문이 생성되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '후원 주문 생성 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //양조장문의등록
