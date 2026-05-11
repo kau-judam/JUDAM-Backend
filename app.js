@@ -5,7 +5,9 @@ const legacyAuthRoutes = require('./src/routes/authRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const recipeRoutes = require('./src/routes/recipeRoutes');
 const fundingRoutes = require('./src/routes/fundingRoutes');
+const aiRoutes = require('./src/routes/ai.routes');
 const orderRoutes = require('./src/routes/orderRoutes'); //결제요청
+const breweryRoutes = require('./src/routes/brewery.routes');
 
 const app = express();
 
@@ -20,10 +22,16 @@ app.get('/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/auth', legacyAuthRoutes);
+<<<<<<< HEAD
 app.use('/users', userRoutes);
 // 이 부분은 테스트용인데 확인 부탁스 app.use('/api/users', userRoutes); 
+=======
+app.use('/api/users', userRoutes);
+>>>>>>> origin/dev
 app.use('/api/recipes', recipeRoutes);
 app.use('/api/fundings', fundingRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/breweries', breweryRoutes);
 
 module.exports = app;
