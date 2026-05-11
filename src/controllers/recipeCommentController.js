@@ -40,7 +40,7 @@ const postComment = async (req, res) => {
     const comment = await createComment(recipeId, content.trim(), req.user);
     return res.status(201).json({
       status: 201,
-      message: '댓글이 등록되었습니다.',
+      message: '댓글이 작성되었습니다.',
       comment,
     });
   } catch {
@@ -123,7 +123,7 @@ const postCommentLike = async (req, res) => {
       return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
     }
     if (result.error === 'duplicate') {
-      return res.status(409).json({ status: 409, message: '이미 좋아요를 누른 댓글입니다.' });
+      return res.status(400).json({ status: 400, message: '이미 좋아요한 댓글입니다.' });
     }
 
     return res.status(200).json({
@@ -152,7 +152,7 @@ const deleteCommentLike = async (req, res) => {
       return res.status(404).json({ status: 404, message: '해당 댓글을 찾을 수 없습니다.' });
     }
     if (result.error === 'not_liked') {
-      return res.status(404).json({ status: 404, message: '좋아요를 누르지 않은 댓글입니다.' });
+      return res.status(400).json({ status: 400, message: '좋아요를 누르지 않은 댓글입니다.' });
     }
 
     return res.status(200).json({
