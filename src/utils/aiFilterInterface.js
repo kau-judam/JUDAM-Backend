@@ -6,14 +6,48 @@
 
 const AI_SERVER_URL = process.env.AI_SERVER_URL || 'http://localhost:8000';
 const AI_FILTER_TIMEOUT_MS = 5000;
+const DEFAULT_RECIPE_TITLE = 'recipe';
 
 /**
  * @param {Object} recipeData - 레시피 요청 바디
  * @param {string} recipeData.title
  * @param {string} recipeData.content
+ * @param {string} recipeData.abv_range
  * @param {string} recipeData.main_ingredient
+ * @param {string} recipeData.target_flavor
+ * @param {string} recipeData.concept
+ * @param {string} recipeData.summary
  * @returns {Promise<{ passed: boolean, reason: string | null }>}
  */
+const buildRecipeDescription = (recipeData = {}) => {
+  const fields = [
+    ['content', recipeData.content],
+    ['abv_range', recipeData.abv_range],
+    ['main_ingredient', recipeData.main_ingredient],
+    ['target_flavor', recipeData.target_flavor],
+    ['concept', recipeData.concept],
+    ['summary', recipeData.summary],
+  ];
+
+  return fields
+    .map(([label, value]) => `${label}: ${value === undefined || value === null ? '' : String(value)}`)
+    .join('\n');
+};
+
+const buildViolationReason = (result) => {
+  if (result.recommendation) {
+    return result.recommendation;
+  }
+
+  if (Array.isArray(result.details) && result.details.length > 0) {
+    return result.details
+      .map((detail) => (typeof detail === 'string' ? detail : JSON.stringify(detail)))
+      .join('\n');
+  }
+
+  return 'Recipe content cannot be registered. Please check the recipe content.';
+};
+
 const checkRecipeLegalFilter = async (recipeData) => {
   try {
     const controller = new AbortController();
@@ -23,11 +57,9 @@ const checkRecipeLegalFilter = async (recipeData) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        title: recipeData?.title || DEFAULT_RECIPE_TITLE,
         content_type: 'recipe',
-        title: recipeData.title || '',
-        description: recipeData.content || '',
-        ingredients: recipeData.main_ingredient ? [recipeData.main_ingredient] : [],
-        target_region: '서울',
+        description: buildRecipeDescription(recipeData),
       }),
       signal: controller.signal,
     });
@@ -44,7 +76,7 @@ const checkRecipeLegalFilter = async (recipeData) => {
     if (result.violation) {
       return {
         passed: false,
-        reason: result.recommendation || '등록할 수 없는 내용이 포함되어 있습니다. 레시피 내용을 다시 확인해 주세요.',
+        reason: buildViolationReason(result),
       };
     }
 
