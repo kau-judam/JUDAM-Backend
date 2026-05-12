@@ -4,7 +4,10 @@
  * AI 서버 다운·타임아웃·오류 등 어떤 이유로든 통과 응답을 받지 못하면 등록을 차단한다.
  */
 
-const AI_SERVER_URL = process.env.AI_SERVER_URL || 'http://localhost:8000';
+const AI_SERVER_URL =
+  process.env.AI_SERVER_BASE_URL ||
+  process.env.AI_SERVER_URL ||
+  'http://localhost:8000';
 const AI_FILTER_TIMEOUT_MS = 5000;
 const DEFAULT_RECIPE_TITLE = 'recipe';
 
