@@ -130,15 +130,19 @@ const createFundingDraft = async (req, res) => {
   }
 };
 
-//임시저장 프로젝트 수정
-const updateFundingDraft = (req, res) => {
+// 임시저장 프로젝트 수정 (임시저장 수정용!)
+const updateFundingDraft = async (req, res) => {
   const { draftId } = req.params;
 
   const {
     title,
     shortTitle,
-    summary,
+    category,
+    mainIngredient,
+    subIngredients,
     alcoholPercentage,
+    summary,
+    thumbnailUrl,
   } = req.body;
 
   if (!draftId || isNaN(Number(draftId))) {
@@ -148,11 +152,21 @@ const updateFundingDraft = (req, res) => {
     });
   }
 
+  if (subIngredients && !Array.isArray(subIngredients)) {
+    return res.status(400).json({
+      status: 400,
+      message: '입력값이 올바르지 않습니다.',
+    });
+  }
+
   const progressFields = [
     title,
     shortTitle,
-    summary,
+    category,
+    mainIngredient,
+    subIngredients,
     alcoholPercentage,
+    summary,
   ];
 
   const filledCount = progressFields.filter(
@@ -161,13 +175,87 @@ const updateFundingDraft = (req, res) => {
 
   const progressRate = Math.round((filledCount / progressFields.length) * 33);
 
-  return res.status(200).json({
-    draftId: Number(draftId),
-    status: 'DRAFT',
-    progressRate,
-    updatedAt: new Date().toISOString(),
-    message: '임시저장 프로젝트가 수정되었습니다.',
-  });
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        title = COALESCE($1, title),
+        short_title = COALESCE($2, short_title),
+        category = COALESCE($3, category),
+        main_ingredient = COALESCE($4, main_ingredient),
+        sub_ingredients = COALESCE($5, sub_ingredients),
+        alcohol_percentage = COALESCE($6, alcohol_percentage),
+        summary = COALESCE($7, summary),
+        thumbnail_url = COALESCE($8, thumbnail_url),
+        progress_rate = GREATEST(progress_rate, $9),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $10
+      RETURNING
+        draft_id,
+        title,
+        short_title,
+        category,
+        main_ingredient,
+        sub_ingredients,
+        alcohol_percentage,
+        summary,
+        thumbnail_url,
+        status,
+        progress_rate,
+        updated_at
+      `,
+      [
+        title || null,
+        shortTitle || null,
+        category || null,
+        mainIngredient || null,
+        subIngredients ? JSON.stringify(subIngredients) : null,
+        alcoholPercentage !== undefined && alcoholPercentage !== null
+          ? Number(alcoholPercentage)
+          : null,
+        summary || null,
+        thumbnailUrl || null,
+        progressRate,
+        Number(draftId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      status: draft.status,
+      progressRate: draft.progress_rate,
+      updatedAt: draft.updated_at,
+      draft: {
+        title: draft.title,
+        shortTitle: draft.short_title,
+        category: draft.category,
+        mainIngredient: draft.main_ingredient,
+        subIngredients: draft.sub_ingredients,
+        alcoholPercentage: draft.alcohol_percentage,
+        summary: draft.summary,
+        thumbnailUrl: draft.thumbnail_url,
+      },
+      message: '임시저장 프로젝트가 수정되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '임시저장 프로젝트 수정 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 // 프로젝트 기본정보 저장(수정버전)
 const saveBasicInfo = async (req, res) => {
@@ -1122,6 +1210,255 @@ const submitFundingDraft = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '펀딩 프로젝트 제출 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+// 임시저장 단건 조회
+const getFundingDraft = async (req, res) => {
+  const { draftId } = req.params;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '임시저장 조회 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM funding_drafts
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    return res.status(200).json({
+      draft: result.rows[0],
+      message: '임시저장 프로젝트 조회 성공',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '임시저장 프로젝트 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+// 임시저장 목록 조회
+const getFundingDraftList = async (req, res) => {
+  const { breweryId } = req.query;
+
+  if (!breweryId || isNaN(Number(breweryId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조장 ID는 필수입니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        draft_id,
+        brewery_id,
+        title,
+        short_title,
+        category,
+        status,
+        progress_rate,
+        created_at,
+        updated_at
+      FROM funding_drafts
+      WHERE brewery_id = $1
+      ORDER BY updated_at DESC
+      `,
+      [Number(breweryId)]
+    );
+
+    return res.status(200).json({
+      drafts: result.rows,
+      message: '임시저장 목록 조회 성공',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '임시저장 목록 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+// 임시저장 삭제
+const deleteFundingDraft = async (req, res) => {
+  const { draftId } = req.params;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '임시저장 삭제 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    await pool.query(
+      `
+      DELETE FROM funding_documents
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    const result = await pool.query(
+      `
+      DELETE FROM funding_drafts
+      WHERE draft_id = $1
+      RETURNING draft_id
+      `,
+      [Number(draftId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    return res.status(200).json({
+      draftId: result.rows[0].draft_id,
+      message: '임시저장 프로젝트가 삭제되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '임시저장 삭제 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+// 프로젝트 미리보기
+const getFundingDraftPreview = async (req, res) => {
+  const { draftId } = req.params;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '미리보기 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const draftResult = await pool.query(
+      `
+      SELECT *
+      FROM funding_drafts
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    if (draftResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const documentResult = await pool.query(
+      `
+      SELECT
+        document_id,
+        document_type,
+        file_name,
+        file_url,
+        created_at
+      FROM funding_documents
+      WHERE draft_id = $1
+      ORDER BY document_id ASC
+      `,
+      [Number(draftId)]
+    );
+
+    const draft = draftResult.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      status: draft.status,
+      progressRate: draft.progress_rate,
+      basicInfo: {
+        title: draft.title,
+        shortTitle: draft.short_title,
+        category: draft.category,
+        mainIngredient: draft.main_ingredient,
+        subIngredients: draft.sub_ingredients,
+        alcoholPercentage: draft.alcohol_percentage,
+        summary: draft.summary,
+        thumbnailUrl: draft.thumbnail_url,
+      },
+      schedule: {
+        pricePerBottle: draft.price_per_bottle,
+        totalQuantity: draft.total_quantity,
+        targetAmount: draft.target_amount,
+        fundingStartDate: draft.funding_start_date,
+        fundingPeriodDays: draft.funding_period_days,
+        fundingEndDate: draft.funding_end_date,
+        expectedDeliveryDate: draft.expected_delivery_date,
+      },
+      legalInfo: {
+        productType: draft.product_type,
+        volume: draft.volume,
+        rawMaterials: draft.raw_materials,
+      },
+      tasteProfile: {
+        sweetness: draft.sweetness,
+        acidity: draft.acidity,
+        body: draft.body,
+        carbonation: draft.carbonation,
+        alcoholIntensity: draft.alcohol_intensity,
+        flavorNotes: draft.flavor_notes,
+      },
+      plan: {
+        introduction: draft.introduction,
+        budgetPlan: draft.budget_plan,
+        schedulePlan: draft.schedule_plan,
+      },
+      breweryInfo: {
+        breweryName: draft.brewery_name,
+        representativeName: draft.representative_name,
+        businessRegistrationNumber: draft.business_registration_number,
+        businessAddress: draft.business_address,
+        contactEmail: draft.contact_email,
+        contactPhone: draft.contact_phone,
+        bankName: draft.bank_name,
+        accountNumber: draft.account_number,
+        accountHolder: draft.account_holder,
+      },
+      notices: {
+        refundPolicy: draft.refund_policy,
+        exchangePolicy: draft.exchange_policy,
+        adultVerificationNotice: draft.adult_verification_notice,
+        riskNotice: draft.risk_notice,
+      },
+      documents: documentResult.rows,
+      message: '프로젝트 미리보기 조회 성공',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '프로젝트 미리보기 조회 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -2230,6 +2567,10 @@ module.exports = {
   saveNotices,
   uploadDocument,
   submitFundingDraft, //프로젝트제출
+  getFundingDraft,    //임시저장 단건 조회
+  getFundingDraftList, //임시저장 목록 조회
+  deleteFundingDraft,  //임시저장 삭제
+  getFundingDraftPreview,  //프로젝트 미리보기
   getFundingList,
   getFundingDetail,
   getFundingIntro,

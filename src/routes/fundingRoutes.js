@@ -23,6 +23,10 @@ const {
   saveNotices,
   submitFundingDraft,
   uploadDocument,
+  getFundingDraft,
+  getFundingDraftList,
+  deleteFundingDraft,
+  getFundingDraftPreview,
   getFundingList,
   getFundingDetail,
   getFundingIntro,
@@ -58,6 +62,10 @@ router.patch('/drafts/:draftId/plan', savePlan);
 router.patch('/drafts/:draftId/brewery-info', saveBreweryInfo);
 router.patch('/drafts/:draftId/notices', saveNotices);
 router.post('/drafts/:draftId/submit', submitFundingDraft); //프로젝트 제출
+router.get('/drafts', getFundingDraftList);
+router.get('/drafts/:draftId', getFundingDraft);
+router.delete('/drafts/:draftId', deleteFundingDraft);
+router.get('/drafts/:draftId/preview', getFundingDraftPreview);
 router.post('/drafts/:draftId/documents', upload.single('file'), uploadDocument);
 router.get('/', getFundingList);
 //- 핀딩 신고 목록 조회
