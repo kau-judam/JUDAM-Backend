@@ -23,13 +23,126 @@ jobs:
       - name: Deploy to EC2 using SSM
         id: deploy
         run: |
+          cat > deploy-backend.sh <<'SCRIPT'
+          set -e
+
+          cd "${PROJECT_PATH}"
+
+          git fetch origin dev
+          git reset --hard origin/dev
+
+          npm install
+
+          REGION="${AWS_REGION}"
+
+          PORT=$(aws ssm get-parameter \
+            --name "/judam/backend/PORT" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          DB_HOST=$(aws ssm get-parameter \
+            --name "/judam/backend/DB_HOST" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          DB_PORT=$(aws ssm get-parameter \
+            --name "/judam/backend/DB_PORT" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          DB_NAME=$(aws ssm get-parameter \
+            --name "/judam/backend/DB_NAME" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          APP_AWS_REGION=$(aws ssm get-parameter \
+            --name "/judam/backend/AWS_REGION" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          AWS_S3_BUCKET=$(aws ssm get-parameter \
+            --name "/judam/backend/AWS_S3_BUCKET" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          AI_SERVER_BASE_URL=$(aws ssm get-parameter \
+            --name "/judam/backend/AI_SERVER_BASE_URL" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          AWS_SQS_AI_TASK_QUEUE_URL=$(aws ssm get-parameter \
+            --name "/judam/backend/AWS_SQS_AI_TASK_QUEUE_URL" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id "judam/backend/secrets" \
+            --region "$REGION" \
+            --query "SecretString" \
+            --output text)
+
+          export SECRET_JSON
+
+          DB_USER=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['DB_USER'])")
+          DB_PASSWORD=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['DB_PASSWORD'])")
+          AWS_ACCESS_KEY_ID=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['AWS_ACCESS_KEY_ID'])")
+          AWS_SECRET_ACCESS_KEY=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['AWS_SECRET_ACCESS_KEY'])")
+          KAKAO_REST_API_KEY=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['KAKAO_REST_API_KEY'])")
+          KAKAO_REDIRECT_URI=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['KAKAO_REDIRECT_URI'])")
+          KAKAO_CLIENT_SECRET=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['KAKAO_CLIENT_SECRET'])")
+          JWT_SECRET=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['JWT_SECRET'])")
+
+          ENV_TMP=$(mktemp .env.XXXXXX)
+
+          {
+            echo "PORT=$PORT"
+            echo "DB_HOST=$DB_HOST"
+            echo "DB_PORT=$DB_PORT"
+            echo "DB_NAME=$DB_NAME"
+            echo "DB_USER=$DB_USER"
+            echo "DB_PASSWORD=$DB_PASSWORD"
+            echo "AWS_REGION=$APP_AWS_REGION"
+            echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+            echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
+            echo "AWS_S3_BUCKET=$AWS_S3_BUCKET"
+            echo "AI_SERVER_BASE_URL=$AI_SERVER_BASE_URL"
+            echo "AWS_SQS_AI_TASK_QUEUE_URL=$AWS_SQS_AI_TASK_QUEUE_URL"
+            echo "KAKAO_REST_API_KEY=$KAKAO_REST_API_KEY"
+            echo "KAKAO_REDIRECT_URI=$KAKAO_REDIRECT_URI"
+            echo "KAKAO_CLIENT_SECRET=$KAKAO_CLIENT_SECRET"
+            echo "JWT_SECRET=$JWT_SECRET"
+          } > "$ENV_TMP"
+
+          chmod 600 "$ENV_TMP"
+          mv "$ENV_TMP" .env
+
+          pm2 restart "${PM2_APP_NAME}" --update-env || pm2 start index.js --name "${PM2_APP_NAME}"
+          pm2 save
+          SCRIPT
+
+          sed -i "s|\${PROJECT_PATH}|${{ secrets.PROJECT_PATH }}|g" deploy-backend.sh
+          sed -i "s|\${AWS_REGION}|${{ secrets.AWS_REGION }}|g" deploy-backend.sh
+          sed -i "s|\${PM2_APP_NAME}|${{ secrets.PM2_APP_NAME }}|g" deploy-backend.sh
+
+          SCRIPT_B64=$(base64 -w 0 deploy-backend.sh)
+
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy Judam backend dev server" \
-            --parameters 'commands=[
-              "sudo -iu ubuntu bash -lc '\''cd ${{ secrets.PROJECT_PATH }} && git fetch origin dev && git reset --hard origin/dev && npm install && pm2 restart ${{ secrets.PM2_APP_NAME }} || pm2 start index.js --name ${{ secrets.PM2_APP_NAME }} && pm2 save'\''"
-            ]' \
+            --parameters "commands=[
+              \"echo $SCRIPT_B64 | base64 -d > /tmp/deploy-backend.sh\",
+              \"chmod +x /tmp/deploy-backend.sh\",
+              \"sudo -iu ubuntu bash /tmp/deploy-backend.sh\"
+            ]" \
             --query "Command.CommandId" \
             --output text)
 
