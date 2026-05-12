@@ -223,8 +223,125 @@ const getPaymentInfo = async (req, res) => {
   }
 };
 
+// 결제 완료 처리
+const completePayment = async (req, res) => {
+  const { orderId } = req.params;
+
+  if (!orderId || isNaN(Number(orderId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 주문 ID입니다.',
+    });
+  }
+
+  try {
+    // 주문 조회
+    const orderResult = await pool.query(
+      `
+      SELECT
+        order_id,
+        funding_id,
+        total_amount,
+        order_status
+      FROM orders
+      WHERE order_id = $1
+      `,
+      [Number(orderId)]
+    );
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '주문을 찾을 수 없습니다.',
+      });
+    }
+
+    const order = orderResult.rows[0];
+
+    // 결제 조회
+    const paymentResult = await pool.query(
+      `
+      SELECT
+        payment_id,
+        payment_status,
+        amount
+      FROM payments
+      WHERE order_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [Number(orderId)]
+    );
+
+    if (paymentResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '결제 정보가 없습니다.',
+      });
+    }
+
+    const payment = paymentResult.rows[0];
+
+    if (payment.payment_status === 'PAID') {
+      return res.status(400).json({
+        status: 400,
+        message: '이미 결제 완료된 주문입니다.',
+      });
+    }
+
+    // payments 상태 변경
+    await pool.query(
+      `
+      UPDATE payments
+      SET
+        payment_status = 'PAID',
+        paid_at = NOW()
+      WHERE payment_id = $1
+      `,
+      [payment.payment_id]
+    );
+
+    // orders 상태 변경
+    await pool.query(
+      `
+      UPDATE orders
+      SET order_status = 'PAID'
+      WHERE order_id = $1
+      `,
+      [Number(orderId)]
+    );
+
+    // funding 현재 금액 증가
+    await pool.query(
+      `
+      UPDATE funding_projects
+      SET current_amount = current_amount + $1
+      WHERE funding_id = $2
+      `,
+      [payment.amount, order.funding_id]
+    );
+
+    return res.status(200).json({
+      orderId: order.order_id,
+      paymentId: payment.payment_id,
+      paymentStatus: 'PAID',
+      paidAmount: payment.amount,
+      message: '결제가 완료되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '결제 완료 처리 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   requestPayment,
   getOrderDetail,
   getPaymentInfo,
+  completePayment,
 };

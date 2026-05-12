@@ -27,6 +27,7 @@ const {
   getFundingDraftList,
   deleteFundingDraft,
   getFundingDraftPreview,
+  updateFundingProject,
   getFundingList,
   getFundingDetail,
   getFundingIntro,
@@ -66,6 +67,7 @@ router.get('/drafts', getFundingDraftList);
 router.get('/drafts/:draftId', getFundingDraft);
 router.delete('/drafts/:draftId', deleteFundingDraft);
 router.get('/drafts/:draftId/preview', getFundingDraftPreview);
+router.patch('/:fundingId', updateFundingProject);
 router.post('/drafts/:draftId/documents', upload.single('file'), uploadDocument);
 router.get('/', getFundingList);
 //- 핀딩 신고 목록 조회

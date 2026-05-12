@@ -1464,6 +1464,140 @@ const getFundingDraftPreview = async (req, res) => {
   }
 };
 
+// 공개된 펀딩 프로젝트 수정
+const updateFundingProject = async (req, res) => {
+  const { fundingId } = req.params;
+
+  const {
+    title,
+    description,
+    thumbnailUrl,
+    goalAmount,
+    startDate,
+    endDate,
+    pricePerBottle,
+    shippingFee,
+    status,
+  } = req.body;
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청입니다.',
+    });
+  }
+
+  const allowedStatuses = ['ONGOING', 'ACTIVE', 'ENDED', 'CANCELLED'];
+
+  if (status && !allowedStatuses.includes(status)) {
+    return res.status(400).json({
+      status: 400,
+      message: '펀딩 상태값이 올바르지 않습니다.',
+    });
+  }
+
+  if (
+    goalAmount !== undefined &&
+    (!Number.isInteger(Number(goalAmount)) || Number(goalAmount) < 0)
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '목표 금액 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  if (
+    pricePerBottle !== undefined &&
+    (!Number.isInteger(Number(pricePerBottle)) || Number(pricePerBottle) <= 0)
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '병당 가격 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  if (
+    shippingFee !== undefined &&
+    (!Number.isInteger(Number(shippingFee)) || Number(shippingFee) < 0)
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '배송비 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_projects
+      SET
+        title = COALESCE($1, title),
+        description = COALESCE($2, description),
+        goal_amount = COALESCE($3, goal_amount),
+        start_date = COALESCE($4, start_date),
+        end_date = COALESCE($5, end_date),
+        price_per_bottle = COALESCE($6, price_per_bottle),
+        shipping_fee = COALESCE($7, shipping_fee),
+        status = COALESCE($8, status)
+      WHERE funding_id = $9
+      RETURNING
+        funding_id,
+        title,
+        description,
+        goal_amount,
+        current_amount,
+        start_date,
+        end_date,
+        price_per_bottle,
+        shipping_fee,
+        status
+      `,
+      [
+        title || null,
+        description || null,
+        goalAmount !== undefined ? Number(goalAmount) : null,
+        startDate || null,
+        endDate || null,
+        pricePerBottle !== undefined ? Number(pricePerBottle) : null,
+        shippingFee !== undefined ? Number(shippingFee) : null,
+        status || null,
+        Number(fundingId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const funding = result.rows[0];
+
+    return res.status(200).json({
+      fundingId: funding.funding_id,
+      title: funding.title,
+      description: funding.description,
+      goalAmount: funding.goal_amount,
+      currentAmount: funding.current_amount,
+      startDate: funding.start_date,
+      endDate: funding.end_date,
+      pricePerBottle: funding.price_per_bottle,
+      shippingFee: funding.shipping_fee,
+      status: funding.status,
+      message: '펀딩 프로젝트가 수정되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '펀딩 프로젝트 수정 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
 //펀딩프로젝트 목록 조회
 const mapFundingListRow = (row) => {
   const currentAmount = Number(row.current_amount || 0);
@@ -2571,6 +2705,7 @@ module.exports = {
   getFundingDraftList, //임시저장 목록 조회
   deleteFundingDraft,  //임시저장 삭제
   getFundingDraftPreview,  //프로젝트 미리보기
+  updateFundingProject, // 공개된 펀딩 프로젝트 수정
   getFundingList,
   getFundingDetail,
   getFundingIntro,
