@@ -257,8 +257,8 @@ const saveBasicInfo = async (req, res) => {
     });
   }
 };
-//목표금액 & 일정 
-const saveSchedule = (req, res) => {
+// 목표금액 & 일정 저장
+const saveSchedule = async (req, res) => {
   const { draftId } = req.params;
 
   const {
@@ -286,6 +286,24 @@ const saveSchedule = (req, res) => {
     });
   }
 
+  const pricePerBottleNumber = Number(pricePerBottle);
+  const totalQuantityNumber = Number(totalQuantity);
+  const fundingPeriodDaysNumber = Number(fundingPeriodDays);
+
+  if (
+    !Number.isInteger(pricePerBottleNumber) ||
+    !Number.isInteger(totalQuantityNumber) ||
+    !Number.isInteger(fundingPeriodDaysNumber) ||
+    pricePerBottleNumber <= 0 ||
+    totalQuantityNumber <= 0 ||
+    fundingPeriodDaysNumber <= 0
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '입력값이 올바르지 않습니다.',
+    });
+  }
+
   const endDate = new Date(fundingEndDate);
   const deliveryDate = new Date(expectedDeliveryDate);
 
@@ -299,23 +317,70 @@ const saveSchedule = (req, res) => {
     });
   }
 
-  const targetAmount = pricePerBottle * totalQuantity;
+  const targetAmount = pricePerBottleNumber * totalQuantityNumber;
   const platformFeeRate = 7;
   const platformFeeAmount = Math.round(targetAmount * (platformFeeRate / 100));
 
-  return res.status(200).json({
-    draftId: Number(draftId),
-    section: 'SCHEDULE',
-    targetAmount,
-    platformFeeRate,
-    platformFeeAmount,
-    progressRate: 47,
-    message: '목표 금액 및 일정이 저장되었습니다.',
-  });
-};
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        price_per_bottle = $1,
+        total_quantity = $2,
+        target_amount = $3,
+        funding_start_date = $4,
+        funding_period_days = $5,
+        funding_end_date = $6,
+        expected_delivery_date = $7,
+        progress_rate = 47,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $8
+      RETURNING draft_id, target_amount, progress_rate, updated_at
+      `,
+      [
+        pricePerBottleNumber,
+        totalQuantityNumber,
+        targetAmount,
+        fundingStartDate,
+        fundingPeriodDaysNumber,
+        fundingEndDate,
+        expectedDeliveryDate,
+        Number(draftId),
+      ]
+    );
 
-//법적 고시 정보 저장
-const saveLegalInfo = (req, res) => {
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      section: 'SCHEDULE',
+      targetAmount: draft.target_amount,
+      platformFeeRate,
+      platformFeeAmount,
+      progressRate: draft.progress_rate,
+      updatedAt: draft.updated_at,
+      message: '목표 금액 및 일정이 저장되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '목표 금액 및 일정 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+// 법적 고시 정보 저장
+const saveLegalInfo = async (req, res) => {
   const { draftId } = req.params;
 
   const {
@@ -357,16 +422,69 @@ const saveLegalInfo = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    draftId: Number(draftId),
-    section: 'LEGAL_INFO',
-    progressRate: 57,
-    message: '법적 고시 정보가 저장되었습니다.',
-  });
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        product_type = $1,
+        volume = $2,
+        alcohol_percentage = $3,
+        raw_materials = $4,
+        progress_rate = 57,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $5
+      RETURNING
+        draft_id,
+        product_type,
+        volume,
+        alcohol_percentage,
+        raw_materials,
+        progress_rate,
+        updated_at
+      `,
+      [
+        productType,
+        volume,
+        alcoholPercentage,
+        JSON.stringify(rawMaterials),
+        Number(draftId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      section: 'LEGAL_INFO',
+      productType: draft.product_type,
+      volume: draft.volume,
+      alcoholPercentage: draft.alcohol_percentage,
+      rawMaterials: draft.raw_materials,
+      progressRate: draft.progress_rate,
+      updatedAt: draft.updated_at,
+      message: '법적 고시 정보가 저장되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '법적 고시 정보 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
-//맛지표관련
-const saveTasteProfile = (req, res) => {
+// 맛지표 저장
+const saveTasteProfile = async (req, res) => {
   const { draftId } = req.params;
 
   const {
@@ -419,16 +537,77 @@ const saveTasteProfile = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    draftId: Number(draftId),
-    section: 'TASTE_PROFILE',
-    progressRate: 64,
-    message: '맛지표 정보가 저장되었습니다.',
-  });
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        sweetness = $1,
+        acidity = $2,
+        body = $3,
+        carbonation = $4,
+        alcohol_intensity = $5,
+        flavor_notes = $6,
+        progress_rate = 64,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $7
+      RETURNING
+        draft_id,
+        sweetness,
+        acidity,
+        body,
+        carbonation,
+        alcohol_intensity,
+        flavor_notes,
+        progress_rate,
+        updated_at
+      `,
+      [
+        sweetness,
+        acidity,
+        body,
+        carbonation,
+        alcoholIntensity,
+        JSON.stringify(flavorNotes || []),
+        Number(draftId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      section: 'TASTE_PROFILE',
+      sweetness: draft.sweetness,
+      acidity: draft.acidity,
+      body: draft.body,
+      carbonation: draft.carbonation,
+      alcoholIntensity: draft.alcohol_intensity,
+      flavorNotes: draft.flavor_notes,
+      progressRate: draft.progress_rate,
+      updatedAt: draft.updated_at,
+      message: '맛지표 정보가 저장되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '맛지표 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
-//프로젝트 계획 정보 저장 API(프로젝트소개+예산배열검증+일정배열검증)
-const savePlan = (req, res) => {
+// 프로젝트 계획 정보 저장 API
+const savePlan = async (req, res) => {
   const { draftId } = req.params;
 
   const { introduction, budgetPlan, schedulePlan } = req.body;
@@ -461,7 +640,10 @@ const savePlan = (req, res) => {
   }
 
   const hasInvalidBudget = budgetPlan.some(
-    (budget) => !budget.category || !budget.amount || typeof budget.amount !== 'number'
+    (budget) =>
+      !budget.category ||
+      budget.amount === undefined ||
+      typeof budget.amount !== 'number'
   );
 
   if (hasInvalidBudget) {
@@ -482,16 +664,65 @@ const savePlan = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    draftId: Number(draftId),
-    section: 'PLAN',
-    progressRate: 78,
-    message: '프로젝트 계획 정보가 저장되었습니다.',
-  });
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        introduction = $1,
+        budget_plan = $2,
+        schedule_plan = $3,
+        progress_rate = 78,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $4
+      RETURNING
+        draft_id,
+        introduction,
+        budget_plan,
+        schedule_plan,
+        progress_rate,
+        updated_at
+      `,
+      [
+        introduction,
+        JSON.stringify(budgetPlan),
+        JSON.stringify(schedulePlan),
+        Number(draftId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      section: 'PLAN',
+      introduction: draft.introduction,
+      budgetPlan: draft.budget_plan,
+      schedulePlan: draft.schedule_plan,
+      progressRate: draft.progress_rate,
+      updatedAt: draft.updated_at,
+      message: '프로젝트 계획 정보가 저장되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '프로젝트 계획 정보 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
-//창작자/정산/사업자 정보 저장
-const saveBreweryInfo = (req, res) => {
+// 창작자/정산/사업자 정보 저장
+const saveBreweryInfo = async (req, res) => {
   const { draftId } = req.params;
 
   const {
@@ -534,16 +765,89 @@ const saveBreweryInfo = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    draftId: Number(draftId),
-    section: 'BREWERY_INFO',
-    progressRate: 85,
-    message: '창작자/정산/사업자 정보가 저장되었습니다.',
-  });
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        brewery_name = $1,
+        representative_name = $2,
+        business_registration_number = $3,
+        business_address = $4,
+        contact_email = $5,
+        contact_phone = $6,
+        bank_name = $7,
+        account_number = $8,
+        account_holder = $9,
+        progress_rate = 85,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $10
+      RETURNING
+        draft_id,
+        brewery_name,
+        representative_name,
+        business_registration_number,
+        business_address,
+        contact_email,
+        contact_phone,
+        bank_name,
+        account_number,
+        account_holder,
+        progress_rate,
+        updated_at
+      `,
+      [
+        breweryName,
+        representativeName,
+        businessRegistrationNumber,
+        businessAddress,
+        contactEmail,
+        contactPhone,
+        bankName,
+        accountNumber,
+        accountHolder,
+        Number(draftId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      section: 'BREWERY_INFO',
+      breweryName: draft.brewery_name,
+      representativeName: draft.representative_name,
+      businessRegistrationNumber: draft.business_registration_number,
+      businessAddress: draft.business_address,
+      contactEmail: draft.contact_email,
+      contactPhone: draft.contact_phone,
+      bankName: draft.bank_name,
+      accountNumber: draft.account_number,
+      accountHolder: draft.account_holder,
+      progressRate: draft.progress_rate,
+      updatedAt: draft.updated_at,
+      message: '창작자/정산/사업자 정보가 저장되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '창작자/정산/사업자 정보 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
-//환불/교환/성인인증/리스크 안내 저장
-const saveNotices = (req, res) => {
+// 환불/교환/성인인증/리스크 안내 저장
+const saveNotices = async (req, res) => {
   const { draftId } = req.params;
 
   const {
@@ -572,16 +876,69 @@ const saveNotices = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    draftId: Number(draftId),
-    section: 'NOTICES',
-    progressRate: 92,
-    message: '안내사항 정보가 저장되었습니다.',
-  });
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        refund_policy = $1,
+        exchange_policy = $2,
+        adult_verification_notice = $3,
+        risk_notice = $4,
+        progress_rate = 92,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $5
+      RETURNING
+        draft_id,
+        refund_policy,
+        exchange_policy,
+        adult_verification_notice,
+        risk_notice,
+        progress_rate,
+        updated_at
+      `,
+      [
+        refundPolicy,
+        exchangePolicy,
+        adultVerificationNotice,
+        riskNotice,
+        Number(draftId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      section: 'NOTICES',
+      refundPolicy: draft.refund_policy,
+      exchangePolicy: draft.exchange_policy,
+      adultVerificationNotice: draft.adult_verification_notice,
+      riskNotice: draft.risk_notice,
+      progressRate: draft.progress_rate,
+      updatedAt: draft.updated_at,
+      message: '안내사항 정보가 저장되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '안내사항 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
-//필수 서류 업로드
-const uploadDocument = (req, res) => {
+// 필수 서류 업로드
+const uploadDocument = async (req, res) => {
   const { draftId } = req.params;
   const { documentType } = req.body;
   const file = req.file;
@@ -615,11 +972,7 @@ const uploadDocument = (req, res) => {
     });
   }
 
-  const allowedMimeTypes = [
-    'application/pdf',
-    'image/jpeg',
-    'image/png',
-  ];
+  const allowedMimeTypes = ['application/pdf', 'image/jpeg', 'image/png'];
 
   if (!allowedMimeTypes.includes(file.mimetype)) {
     return res.status(400).json({
@@ -628,14 +981,150 @@ const uploadDocument = (req, res) => {
     });
   }
 
-  return res.status(201).json({
-    draftId: Number(draftId),
-    documentId: 10,
-    documentType,
-    fileName: file.originalname,
-    fileUrl: `https://storage.example.com/documents/${file.originalname}`,
-    message: '필수 서류가 업로드되었습니다.',
-  });
+  try {
+    const fileUrl = `https://storage.example.com/documents/${file.originalname}`;
+
+    const result = await pool.query(
+      `
+      INSERT INTO funding_documents (
+        draft_id,
+        document_type,
+        file_name,
+        file_url
+      )
+      VALUES ($1, $2, $3, $4)
+      RETURNING
+        document_id,
+        draft_id,
+        document_type,
+        file_name,
+        file_url,
+        created_at
+      `,
+      [
+        Number(draftId),
+        documentType,
+        file.originalname,
+        fileUrl,
+      ]
+    );
+
+    const document = result.rows[0];
+
+    return res.status(201).json({
+      draftId: document.draft_id,
+      documentId: document.document_id,
+      documentType: document.document_type,
+      fileName: document.file_name,
+      fileUrl: document.file_url,
+      createdAt: document.created_at,
+      message: '필수 서류가 업로드되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '필수 서류 업로드 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+//펀딩프로젝트 제출 (새로 추가!!)
+// 펀딩 프로젝트 제출
+const submitFundingDraft = async (req, res) => {
+  const { draftId } = req.params;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '제출 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const draftResult = await pool.query(
+      `
+      SELECT *
+      FROM funding_drafts
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    if (draftResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = draftResult.rows[0];
+
+    if (draft.status === 'SUBMITTED') {
+      return res.status(400).json({
+        status: 400,
+        message: '이미 제출된 프로젝트입니다.',
+      });
+    }
+
+    if (Number(draft.progress_rate) < 92) {
+      return res.status(400).json({
+        status: 400,
+        message: '필수 정보를 모두 입력한 후 제출할 수 있습니다.',
+      });
+    }
+
+    const documentResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS document_count
+      FROM funding_documents
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    if (documentResult.rows[0].document_count === 0) {
+      return res.status(400).json({
+        status: 400,
+        message: '필수 서류 업로드 후 제출할 수 있습니다.',
+      });
+    }
+
+    const submitResult = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        status = 'SUBMITTED',
+        progress_rate = 100,
+        submitted_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $1
+      RETURNING draft_id, status, progress_rate, submitted_at, updated_at
+      `,
+      [Number(draftId)]
+    );
+
+    const submittedDraft = submitResult.rows[0];
+
+    return res.status(200).json({
+      draftId: submittedDraft.draft_id,
+      status: submittedDraft.status,
+      progressRate: submittedDraft.progress_rate,
+      submittedAt: submittedDraft.submitted_at,
+      updatedAt: submittedDraft.updated_at,
+      message: '펀딩 프로젝트가 제출되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '펀딩 프로젝트 제출 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //펀딩프로젝트 목록 조회
@@ -1740,6 +2229,7 @@ module.exports = {
   saveBreweryInfo,
   saveNotices,
   uploadDocument,
+  submitFundingDraft, //프로젝트제출
   getFundingList,
   getFundingDetail,
   getFundingIntro,

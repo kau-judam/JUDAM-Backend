@@ -21,6 +21,7 @@ const {
   savePlan,
   saveBreweryInfo,
   saveNotices,
+  submitFundingDraft,
   uploadDocument,
   getFundingList,
   getFundingDetail,
@@ -56,6 +57,7 @@ router.patch('/drafts/:draftId/taste-profile', saveTasteProfile);
 router.patch('/drafts/:draftId/plan', savePlan);
 router.patch('/drafts/:draftId/brewery-info', saveBreweryInfo);
 router.patch('/drafts/:draftId/notices', saveNotices);
+router.post('/drafts/:draftId/submit', submitFundingDraft); //프로젝트 제출
 router.post('/drafts/:draftId/documents', upload.single('file'), uploadDocument);
 router.get('/', getFundingList);
 //- 핀딩 신고 목록 조회
