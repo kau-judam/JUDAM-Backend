@@ -1,6 +1,7 @@
 const multer = require('multer');
 const { uploadFileToS3 } = require('../services/s3.service');
 const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding, deleteRecipe } = require('../services/recipeService');
+const { sendAiTaskMessage } = require('../services/sqs.service');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -12,11 +13,36 @@ const REQUIRED_FIELDS = ['title', 'content', 'abv_range', 'main_ingredient', 'ta
 // 이 목록에 없는 값이 오면 'ALL'(전체)로 처리
 const VALID_STATUSES = new Set(['ALL', 'PUBLISHED', 'FUNDING_READY', 'FUNDING_IN_PROGRESS', 'COMPLETED']);
 
+const publishRecipeAiReviewRequest = async (recipe, user) => {
+  const recipeId = recipe?.recipe_id ?? recipe?.recipeId ?? null;
+  const userId = user?.id ?? user?.userId ?? null;
+
+  if (!recipeId) {
+    console.error('[SQS] Failed to publish recipe AI review request: recipeId is missing');
+    return;
+  }
+
+  try {
+    await sendAiTaskMessage({
+      type: 'RECIPE_AI_REVIEW_REQUESTED',
+      source: 'backend-api',
+      recipeId,
+      userId,
+    });
+  } catch (error) {
+    console.error('[SQS] Failed to publish recipe AI review request:', {
+      recipeId,
+      userId,
+      error: error.message,
+    });
+  }
+};
+
 // 레시피 작성 핸들러 (POST /api/recipes)
 // - 로그인 필수 (authMiddleware에서 JWT 검증 후 req.user에 사용자 정보 주입)
 // - 이미지 파일(req.file)이 있으면 S3에 업로드 후 URL을 recipeData에 주입
 const postRecipe = async (req, res) => {
-const body = req.body || {};
+  const body = req.body || {};
   const missing = REQUIRED_FIELDS.filter((f) => !body[f]);
   if (missing.length > 0) {
     return res.status(400).json({
@@ -33,6 +59,7 @@ const body = req.body || {};
 
     const recipeData = { ...body, image_url: imageUrl };
     const recipe = await createRecipe(recipeData, req.user);
+    publishRecipeAiReviewRequest(recipe, req.user);
     return res.status(201).json({
       status: 201,
       message: '레시피가 등록되었습니다.',
@@ -127,6 +154,7 @@ const postBreweryRecipe = async (req, res) => {
 
   try {
     const recipe = await createBreweryRecipe(req.body, req.user);
+    publishRecipeAiReviewRequest(recipe, req.user);
     return res.status(201).json({ status: 201, message: '레시피가 등록되었습니다.', recipe });
   } catch (error) {
     if (error.statusCode === 400) {
