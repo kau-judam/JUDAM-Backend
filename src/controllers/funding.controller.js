@@ -1625,8 +1625,8 @@ const mapFundingListRow = (row) => {
 const getFundingList = async (req, res) => {
   const { status, sort, page = 0, size = 10, keyword } = req.query;
 
-  const validFundingSorts = ['POPULAR', 'LATEST', 'DEADLINE'];
-  const normalizedSort = sort || 'LATEST';
+  const validFundingSorts = ['POPULAR', 'LATEST', 'DEADLINE', 'ID_ASC'];
+  const normalizedSort = sort || 'ID_ASC';
   const normalizedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
   const normalizedStatus =
     typeof status === 'string' && status.trim()
@@ -1694,6 +1694,7 @@ const getFundingList = async (req, res) => {
     POPULAR: 'ORDER BY fp.current_amount DESC, fp.created_at DESC',
     LATEST: 'ORDER BY fp.created_at DESC',
     DEADLINE: 'ORDER BY fp.end_date ASC, fp.created_at DESC',
+    ID_ASC: 'ORDER BY fp.funding_id ASC',
   }[normalizedSort];
 
   try {
@@ -2175,6 +2176,8 @@ const getSupportOptions = async (req, res) => {
         name,
         price,
         description,
+        volume,
+        alcohol,
         stock,
         remaining_stock,
         max_per_user
@@ -2190,8 +2193,10 @@ const getSupportOptions = async (req, res) => {
       supportOptions: result.rows.map((option) => ({
         optionId: option.option_id,
         name: option.name,
-        price: option.price,
+        price: Number(option.price || 0),
         description: option.description,
+        volume: option.volume,
+        alcohol: option.alcohol,
         stock: option.stock,
         remainingStock: option.remaining_stock,
         maxPerUser: option.max_per_user,
