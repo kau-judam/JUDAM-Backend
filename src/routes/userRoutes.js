@@ -7,6 +7,7 @@ const {
   deleteMe,
   checkNickname,
   getMyFundingOrders,
+  getMyLikedFundings,
 } = require('../controllers/user.controller');
 const { getMyRecipeList, getMyInterestRecipeList, getMyRecipeCommentList } = require('../controllers/mypageController');
 
@@ -25,6 +26,9 @@ router.get('/me/interests/recipes', authMiddleware, getMyInterestRecipeList);
 router.get('/me/recipe-comments', authMiddleware, getMyRecipeCommentList);
 
 //마이페이지 후원 내역 조회
-router.get('/me/funding-orders', authMiddleware, getMyFundingOrders);
+//router.get('/me/funding-orders', authMiddleware, getMyFundingOrders);
+router.get('/me/funding-orders', getMyFundingOrders);
+
+router.get('/me/liked-fundings', getMyLikedFundings);
 
 module.exports = router;

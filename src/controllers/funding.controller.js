@@ -1598,7 +1598,7 @@ const updateFundingProject = async (req, res) => {
   }
 };
 
-//펀딩프로젝트 목록 조회
+// 펀딩프로젝트 목록 조회
 const mapFundingListRow = (row) => {
   const currentAmount = Number(row.current_amount || 0);
   const targetAmount = Number(row.target_amount || 0);
@@ -1613,22 +1613,26 @@ const mapFundingListRow = (row) => {
     status: row.status,
     currentAmount,
     targetAmount,
-    achievementRate: targetAmount > 0 ? Math.floor((currentAmount / targetAmount) * 100) : 0,
+    achievementRate:
+      targetAmount > 0 ? Math.floor((currentAmount / targetAmount) * 100) : 0,
     startDate: row.start_date,
     endDate: row.end_date,
+    liked: row.liked,
+    likeCount: Number(row.like_count || 0),
   };
 };
 
 const getFundingList = async (req, res) => {
-  const { status, sort, page = 0, size = 10 } = req.query;
-  const { keyword } = req.query;
+  const { status, sort, page = 0, size = 10, keyword } = req.query;
 
   const validFundingSorts = ['POPULAR', 'LATEST', 'DEADLINE'];
   const normalizedSort = sort || 'LATEST';
   const normalizedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
-  const normalizedStatus = typeof status === 'string' && status.trim()
-    ? status.trim().toUpperCase()
-    : null;
+  const normalizedStatus =
+    typeof status === 'string' && status.trim()
+      ? status.trim().toUpperCase()
+      : null;
+
   const requestedPageNumber = Number(page);
   const requestedSizeNumber = Number(size);
 
@@ -1644,6 +1648,9 @@ const getFundingList = async (req, res) => {
       message: '잘못된 요청 파라미터입니다.',
     });
   }
+
+  // TODO: JWT 연동 후 req.user.userId 사용
+  const userId = req.user?.userId || 1;
 
   const values = [];
   const conditions = [];
@@ -1664,7 +1671,9 @@ const getFundingList = async (req, res) => {
     )`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
   const fromClause = `
     FROM funding_projects fp
     JOIN recipes r ON r.recipe_id = fp.recipe_id
@@ -1680,6 +1689,7 @@ const getFundingList = async (req, res) => {
       LIMIT 1
     ) ba ON TRUE
   `;
+
   const orderBy = {
     POPULAR: 'ORDER BY fp.current_amount DESC, fp.created_at DESC',
     LATEST: 'ORDER BY fp.created_at DESC',
@@ -1689,36 +1699,59 @@ const getFundingList = async (req, res) => {
   try {
     const countResult = await pool.query(
       `
-        SELECT COUNT(*)::int AS total_count
-        ${fromClause}
-        ${whereClause}
+      SELECT COUNT(*)::int AS total_count
+      ${fromClause}
+      ${whereClause}
       `,
-      values,
+      values
     );
 
     const totalElements = countResult.rows[0]?.total_count || 0;
-    const listValues = [...values, requestedSizeNumber, requestedPageNumber * requestedSizeNumber];
+
+    const listValues = [
+      ...values,
+      userId,
+      requestedSizeNumber,
+      requestedPageNumber * requestedSizeNumber,
+    ];
+
+    const userIdParam = `$${values.length + 1}`;
+    const limitParam = `$${values.length + 2}`;
+    const offsetParam = `$${values.length + 3}`;
+
     const { rows } = await pool.query(
       `
-        SELECT
-          fp.funding_id,
-          fp.title,
-          fp.description,
-          COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
-          r.title AS recipe_title,
-          r.image_url AS thumbnail_url,
-          fp.status,
-          fp.current_amount,
-          fp.goal_amount AS target_amount,
-          fp.start_date,
-          fp.end_date
-        ${fromClause}
-        ${whereClause}
-        ${orderBy}
-        LIMIT $${listValues.length - 1}
-        OFFSET $${listValues.length}
+      SELECT
+        fp.funding_id,
+        fp.title,
+        fp.description,
+        COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
+        r.title AS recipe_title,
+        r.image_url AS thumbnail_url,
+        fp.status,
+        fp.current_amount,
+        fp.goal_amount AS target_amount,
+        fp.start_date,
+        fp.end_date,
+        COALESCE(like_counts.like_count, 0) AS like_count,
+        EXISTS (
+          SELECT 1
+          FROM funding_likes my_like
+          WHERE my_like.funding_id = fp.funding_id
+          AND my_like.user_id = ${userIdParam}
+        ) AS liked
+      ${fromClause}
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS like_count
+        FROM funding_likes fl
+        WHERE fl.funding_id = fp.funding_id
+      ) like_counts ON TRUE
+      ${whereClause}
+      ${orderBy}
+      LIMIT ${limitParam}
+      OFFSET ${offsetParam}
       `,
-      listValues,
+      listValues
     );
 
     return res.status(200).json({
@@ -1731,9 +1764,12 @@ const getFundingList = async (req, res) => {
       totalPages: Math.ceil(totalElements / requestedSizeNumber),
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       status: 500,
       message: '서버 내부 오류',
+      error: error.message,
     });
   }
 };
@@ -1748,6 +1784,9 @@ const getFundingDetail = async (req, res) => {
       message: '펀딩 프로젝트를 찾을 수 없습니다.',
     });
   }
+
+  // TODO: JWT 연동 후 req.user.userId 사용
+  const userId = req.user?.userId || 1;
 
   try {
     const fundingResult = await pool.query(
@@ -1764,7 +1803,14 @@ const getFundingDetail = async (req, res) => {
         fp.created_at,
         COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
         r.title AS recipe_title,
-        r.image_url AS thumbnail_url
+        r.image_url AS thumbnail_url,
+        COALESCE(like_counts.like_count, 0) AS like_count,
+        EXISTS (
+          SELECT 1
+          FROM funding_likes my_like
+          WHERE my_like.funding_id = fp.funding_id
+          AND my_like.user_id = $2
+        ) AS liked
       FROM funding_projects fp
       JOIN recipes r ON r.recipe_id = fp.recipe_id
       JOIN users u ON u.user_id = fp.brewery_user_id
@@ -1778,9 +1824,14 @@ const getFundingDetail = async (req, res) => {
           application_id DESC
         LIMIT 1
       ) ba ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS like_count
+        FROM funding_likes fl
+        WHERE fl.funding_id = fp.funding_id
+      ) like_counts ON TRUE
       WHERE fp.funding_id = $1
       `,
-      [Number(fundingId)]
+      [Number(fundingId), userId]
     );
 
     if (fundingResult.rows.length === 0) {
@@ -1811,7 +1862,9 @@ const getFundingDetail = async (req, res) => {
 
     const achievementRate =
       Number(funding.target_amount) > 0
-        ? Math.floor((Number(funding.current_amount) / Number(funding.target_amount)) * 100)
+        ? Math.floor(
+            (Number(funding.current_amount) / Number(funding.target_amount)) * 100
+          )
         : 0;
 
     return res.status(200).json({
@@ -1827,6 +1880,8 @@ const getFundingDetail = async (req, res) => {
       achievementRate,
       startDate: funding.start_date,
       endDate: funding.end_date,
+      liked: funding.liked,
+      likeCount: Number(funding.like_count || 0),
       supportOptions: optionResult.rows.map((option) => ({
         optionId: Number(option.option_id),
         name: option.name,
@@ -2165,6 +2220,9 @@ const createFundingOrder = async (req, res) => {
     recipientPhone,
     shippingAddress,
     shippingDetailAddress,
+    supporterEmail,
+    supportMessage,
+    postalCode,
     adultVerified,
     noticeAgreed,
   } = req.body;
@@ -2208,10 +2266,7 @@ const createFundingOrder = async (req, res) => {
 
   const donationAmountNumber = Number(donationAmount || 0);
 
-  if (
-    !Number.isInteger(donationAmountNumber) ||
-    donationAmountNumber < 0
-  ) {
+  if (!Number.isInteger(donationAmountNumber) || donationAmountNumber < 0) {
     return res.status(400).json({
       status: 400,
       message: '추가 후원금 입력값이 올바르지 않습니다.',
@@ -2249,7 +2304,6 @@ const createFundingOrder = async (req, res) => {
 
     const pricePerBottle = Number(funding.price_per_bottle);
     const shippingFee = Number(funding.shipping_fee || 3000);
-
     const totalAmount =
       pricePerBottle * bottleCount + shippingFee + donationAmountNumber;
 
@@ -2271,10 +2325,17 @@ const createFundingOrder = async (req, res) => {
         recipient_phone,
         shipping_address,
         shipping_detail_address,
+        supporter_email,
+        support_message,
+        postal_code,
         adult_verified,
         notice_agreed
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CREATED', $9, $10, $11, $12, $13, $14)
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        'CREATED',
+        $9, $10, $11, $12, $13, $14, $15, $16, $17
+      )
       RETURNING
         order_id,
         funding_id,
@@ -2285,12 +2346,21 @@ const createFundingOrder = async (req, res) => {
         donation_amount,
         total_amount,
         order_status,
+        recipient_name,
+        recipient_phone,
+        shipping_address,
+        shipping_detail_address,
+        supporter_email,
+        support_message,
+        postal_code,
+        adult_verified,
+        notice_agreed,
         created_at
       `,
       [
         userId,
         Number(fundingId),
-        bottleCount,
+        Number(optionId || bottleCount),
         bottleCount,
         pricePerBottle,
         shippingFee,
@@ -2300,8 +2370,11 @@ const createFundingOrder = async (req, res) => {
         recipientPhone,
         shippingAddress,
         shippingDetailAddress || null,
-        adultVerified,
-        noticeAgreed,
+        supporterEmail || null,
+        supportMessage || null,
+        postalCode || null,
+        Boolean(adultVerified),
+        Boolean(noticeAgreed),
       ]
     );
 
@@ -2317,6 +2390,15 @@ const createFundingOrder = async (req, res) => {
       donationAmount: order.donation_amount,
       totalAmount: order.total_amount,
       orderStatus: order.order_status,
+      recipientName: order.recipient_name,
+      recipientPhone: order.recipient_phone,
+      shippingAddress: order.shipping_address,
+      shippingDetailAddress: order.shipping_detail_address,
+      supporterEmail: order.supporter_email,
+      supportMessage: order.support_message,
+      postalCode: order.postal_code,
+      adultVerified: order.adult_verified,
+      noticeAgreed: order.notice_agreed,
       createdAt: order.created_at,
       message: '후원 주문이 생성되었습니다.',
     });
@@ -2650,41 +2732,122 @@ const createFundingReview = (req, res) => {
 };
 
 //추가부분9: 펀딩 찜 등록
-const likeFundingProject = (req, res) => {
+const likeFundingProject = async (req, res) => {
   const { fundingId } = req.params;
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '잘못된 펀딩 ID입니다.',
     });
   }
 
-  return res.status(201).json({
-    fundingId: Number(fundingId),
-    liked: true,
-    likeCount: 128,
-    message: '펀딩 프로젝트를 찜했습니다.',
-  });
+  // TODO: JWT 연동 후 req.user.userId 사용
+  const userId = req.user?.userId || 1;
+
+  try {
+    const fundingResult = await pool.query(
+      `
+      SELECT funding_id
+      FROM funding_projects
+      WHERE funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (fundingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO funding_likes (
+        user_id,
+        funding_id
+      )
+      VALUES ($1, $2)
+      ON CONFLICT (user_id, funding_id) DO NOTHING
+      `,
+      [userId, Number(fundingId)]
+    );
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS like_count
+      FROM funding_likes
+      WHERE funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    return res.status(201).json({
+      fundingId: Number(fundingId),
+      liked: true,
+      likeCount: countResult.rows[0].like_count,
+      message: '펀딩 프로젝트를 찜했습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '찜 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //추가부분10: 펀딩 찜 해제
-const unlikeFundingProject = (req, res) => {
+const unlikeFundingProject = async (req, res) => {
   const { fundingId } = req.params;
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '잘못된 펀딩 ID입니다.',
     });
   }
 
-  return res.status(200).json({
-    fundingId: Number(fundingId),
-    liked: false,
-    likeCount: 127,
-    message: '펀딩 프로젝트 찜이 해제되었습니다.',
-  });
+  // TODO: JWT 연동 후 req.user.userId 사용
+  const userId = req.user?.userId || 1;
+
+  try {
+    await pool.query(
+      `
+      DELETE FROM funding_likes
+      WHERE user_id = $1
+      AND funding_id = $2
+      `,
+      [userId, Number(fundingId)]
+    );
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS like_count
+      FROM funding_likes
+      WHERE funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    return res.status(200).json({
+      fundingId: Number(fundingId),
+      liked: false,
+      likeCount: countResult.rows[0].like_count,
+      message: '펀딩 프로젝트 찜을 해제했습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '찜 해제 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 
