@@ -1,3 +1,5 @@
+const pool = require('../config/db');
+
 const {
   findUserById,
   updateUserProfile,
@@ -179,37 +181,183 @@ const checkNickname = async (req, res) => {
     });
   }
 };
-const getMyFundingOrders = (req, res) => {
+
+//마이페이지 후원
+const getMyFundingOrders = async (req, res) => {
   const { status, page = 0, size = 10 } = req.query;
 
-  if (isNaN(Number(page)) || isNaN(Number(size))) {
+  const pageNumber = Number(page);
+  const sizeNumber = Number(size);
+
+  if (
+    Number.isNaN(pageNumber) ||
+    Number.isNaN(sizeNumber) ||
+    pageNumber < 0 ||
+    sizeNumber <= 0
+  ) {
     return res.status(400).json({
       status: 400,
       message: '잘못된 요청 파라미터입니다.',
     });
   }
 
-  return res.status(200).json({
-    content: [
-      {
-        orderId: 1001,
-        fundingId: 12,
-        fundingTitle: '벚꽃 막걸리 프로젝트',
-        thumbnailUrl: 'https://s3.amazonaws.com/judam/funding-thumbnail.png',
-        optionName: '벚꽃 막걸리 1병',
-        quantity: 2,
-        totalAmount: 36000,
-        orderStatus: status || 'PAID',
-        paymentStatus: 'COMPLETED',
-        expectedDeliveryDate: '2026-06-20',
-        orderedAt: '2026-05-10T15:30:00',
-      },
-    ],
-    page: Number(page),
-    size: Number(size),
-    totalElements: 5,
-    totalPages: 1,
-  });
+  // TODO: JWT 완전 연동 후 req.user.userId만 사용
+  const userId = req.user?.userId || 1;
+
+  const values = [userId];
+  const conditions = ['o.user_id = $1'];
+
+  if (status) {
+    values.push(status);
+    conditions.push(`o.order_status = $${values.length}`);
+  }
+
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+  try {
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS total_count
+      FROM orders o
+      ${whereClause}
+      `,
+      values
+    );
+
+    const totalElements = countResult.rows[0].total_count;
+
+    const listValues = [
+      ...values,
+      sizeNumber,
+      pageNumber * sizeNumber,
+    ];
+
+    const result = await pool.query(
+      `
+      SELECT
+        o.order_id,
+        o.funding_id,
+        fp.title AS funding_title,
+        r.image_url AS thumbnail_url,
+        o.option_id,
+        o.quantity,
+        o.price_per_bottle,
+        o.shipping_fee,
+        o.donation_amount,
+        o.total_amount,
+        o.order_status,
+        o.created_at AS ordered_at,
+        fp.end_date AS expected_delivery_date,
+        p.payment_status
+      FROM orders o
+      JOIN funding_projects fp ON fp.funding_id = o.funding_id
+      LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+      LEFT JOIN LATERAL (
+        SELECT payment_status
+        FROM payments
+        WHERE order_id = o.order_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) p ON TRUE
+      ${whereClause}
+      ORDER BY o.created_at DESC
+      LIMIT $${listValues.length - 1}
+      OFFSET $${listValues.length}
+      `,
+      listValues
+    );
+
+    return res.status(200).json({
+      content: result.rows.map((order) => ({
+        orderId: order.order_id,
+        fundingId: order.funding_id,
+        fundingTitle: order.funding_title,
+        thumbnailUrl: order.thumbnail_url,
+        optionId: order.option_id,
+        optionName: `${order.quantity}병`,
+        quantity: order.quantity,
+        pricePerBottle: order.price_per_bottle,
+        shippingFee: order.shipping_fee,
+        donationAmount: order.donation_amount,
+        totalAmount: order.total_amount,
+        orderStatus: order.order_status,
+        paymentStatus: order.payment_status || null,
+        expectedDeliveryDate: order.expected_delivery_date,
+        orderedAt: order.ordered_at,
+      })),
+      page: pageNumber,
+      size: sizeNumber,
+      totalElements,
+      totalPages: Math.ceil(totalElements / sizeNumber),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '마이페이지 후원 내역 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
-module.exports = { getMe, updateMe, deleteMe, checkNickname,getMyFundingOrders };
+//찜한 펀딩 목록 조회
+const getMyLikedFundings = async (req, res) => {
+    
+    //if (!req.user?.userId) {
+    //return res.status(401).json({
+     // status: 401,
+      //message: '유효하지 않거나 만료된 토큰입니다.',
+    //});
+    const userId = req.user?.userId || 1; //테스트용
+  
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        fp.funding_id,
+        fp.title,
+        
+        fp.goal_amount,
+        fp.current_amount,
+        fp.start_date,
+        fp.end_date,
+        COUNT(fl.like_id) AS like_count
+      FROM funding_likes my_like
+      JOIN funding_projects fp
+        ON my_like.funding_id = fp.funding_id
+      LEFT JOIN funding_likes fl
+        ON fp.funding_id = fl.funding_id
+      WHERE my_like.user_id = $1
+      GROUP BY fp.funding_id
+      ORDER BY MAX(my_like.created_at) DESC
+      `,
+      [userId]//[req.user.userId]
+    );
+
+    return res.status(200).json({
+      content: result.rows.map((funding) => ({
+        fundingId: funding.funding_id,
+        title: funding.title,
+        //thumbnailUrl: funding.thumbnail_url,
+        goalAmount: funding.goal_amount,
+        currentAmount: funding.current_amount,
+        startDate: funding.start_date,
+        endDate: funding.end_date,
+        liked: true,
+        likeCount: Number(funding.like_count),
+      })),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '찜한 펀딩 목록 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+module.exports = { getMe, updateMe, deleteMe, checkNickname,getMyFundingOrders,getMyLikedFundings };
