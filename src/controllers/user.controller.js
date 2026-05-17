@@ -360,4 +360,60 @@ const getMyLikedFundings = async (req, res) => {
   }
 };
 
-module.exports = { getMe, updateMe, deleteMe, checkNickname,getMyFundingOrders,getMyLikedFundings };
+//최근 주문 배송지 불러오기
+const getRecentShippingAddress = async (req, res) => {
+  const userId = req.user?.userId || 1;
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        recipient_name,
+        recipient_phone,
+        shipping_address,
+        shipping_detail_address,
+        postal_code
+      FROM orders
+      WHERE user_id = $1
+        AND recipient_name IS NOT NULL
+        AND recipient_phone IS NOT NULL
+        AND shipping_address IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '최근 배송지 정보가 없습니다.',
+      });
+    }
+
+    const address = result.rows[0];
+
+    return res.status(200).json({
+      recipientName: address.recipient_name,
+      recipientPhone: address.recipient_phone,
+      shippingAddress: address.shipping_address,
+      shippingDetailAddress: address.shipping_detail_address,
+      postalCode: address.postal_code,
+      message: '최근 배송지 조회 성공',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '최근 배송지 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+module.exports = { getMe, updateMe, deleteMe, checkNickname,
+    getMyFundingOrders,
+    getMyLikedFundings,
+    getRecentShippingAddress,
+ };

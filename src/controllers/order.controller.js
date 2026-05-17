@@ -115,7 +115,12 @@ const getOrderDetail = async (req, res) => {
         o.recipient_phone,
         o.shipping_address,
         o.shipping_detail_address,
-        o.created_at
+        o.created_at,
+        o.donation_amount,
+        o.shipping_fee,
+        o.supporter_email,
+        o.support_message,
+        o.postal_code,
       FROM orders o
       LEFT JOIN funding_projects fp ON o.funding_id = fp.funding_id
       LEFT JOIN funding_support_options fso ON o.option_id = fso.option_id
@@ -150,6 +155,11 @@ const getOrderDetail = async (req, res) => {
       shippingAddress: order.shipping_address,
       shippingDetailAddress: order.shipping_detail_address,
       createdAt: order.created_at,
+      donationAmount: order.donation_amount,
+      shippingFee: order.shipping_fee,
+      supporterEmail: order.supporter_email,
+      supportMessage: order.support_message,
+      postalCode: order.postal_code,
     });
   } catch (error) {
     console.error(error);
