@@ -1,6 +1,6 @@
-const pool = require('../db');
+﻿const pool = require('../db');
 
-const VALID_BOARD_TYPES = new Set(['FREE', 'TASTING_REVIEW', 'RECIPE_DISCUSSION']);
+const VALID_BOARD_TYPES = new Set(['FREE', 'INFO']);
 
 // 게시글 작성 (POST /api/posts)
 // imageUrls: 컨트롤러에서 S3 업로드 후 전달된 URL 배열
