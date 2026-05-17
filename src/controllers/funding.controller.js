@@ -2322,7 +2322,10 @@ const createFundingOrder = async (req, res) => {
     }
 
     const pricePerBottle = Number(funding.price_per_bottle);
-    const shippingFee = Number(funding.shipping_fee || 3000);
+    const shippingFee =
+      funding.shipping_fee !== null && funding.shipping_fee !== undefined
+        ? Number(funding.shipping_fee)
+        : 3000;
     const totalAmount =
       pricePerBottle * bottleCount + shippingFee + donationAmountNumber;
 
