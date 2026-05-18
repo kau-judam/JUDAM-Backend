@@ -14,6 +14,7 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
        u.role            AS author_type,
        rc.content,
        rc.like_count,
+       (SELECT COUNT(*)::INT FROM recipe_comments WHERE parent_comment_id = rc.comment_id) AS reply_count,
        rc.created_at,
        rc.updated_at,
        CASE WHEN rcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
@@ -44,6 +45,7 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
     author_type:          c.author_type,
     content:              c.content,
     like_count:           Number(c.like_count),
+    reply_count:          Number(c.reply_count),
     is_liked:             c.is_liked,
     is_mine:              c.is_mine,
     created_at:           c.created_at,
@@ -250,16 +252,22 @@ const createReply = async (recipeId, parentCommentId, content, user) => {
     [recipeId, user.id, content, parentCommentId]
   );
 
+  const replyCountResult = await pool.query(
+    'SELECT COUNT(*)::INT AS reply_count FROM recipe_comments WHERE parent_comment_id = $1',
+    [parentCommentId]
+  );
+
   const c = result.rows[0];
   return {
-    comment_id:        Number(c.comment_id),
-    recipe_id:         recipeId,
-    parent_comment_id: parentCommentId,
-    user_id:           Number(user.id),
-    nickname:          nickname,
-    content:           c.content,
-    like_count:        Number(c.like_count),
-    created_at:        c.created_at,
+    comment_id:         Number(c.comment_id),
+    recipe_id:          recipeId,
+    parent_comment_id:  parentCommentId,
+    user_id:            Number(user.id),
+    nickname:           nickname,
+    content:            c.content,
+    like_count:         Number(c.like_count),
+    created_at:         c.created_at,
+    parent_reply_count: Number(replyCountResult.rows[0].reply_count),
   };
 };
 

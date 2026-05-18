@@ -198,6 +198,7 @@ const postReply = async (req, res) => {
       status: 201,
       message: '대댓글이 등록되었습니다.',
       reply,
+      parent_reply_count: reply.parent_reply_count,
     });
   } catch (error) {
     if (error.statusCode === 404) {
