@@ -3,7 +3,13 @@ const pool = require('../config/db');
 // 결제 요청
 const requestPayment = async (req, res) => {
   const { orderId } = req.params;
-  const { paymentMethod, paymentProvider, amount } = req.body;
+  const {
+    paymentMethod,
+    paymentProvider,
+    amount,
+    successUrl,
+    failUrl,
+  } = req.body;
 
   if (!orderId || isNaN(Number(orderId))) {
     return res.status(404).json({
@@ -45,6 +51,13 @@ const requestPayment = async (req, res) => {
       });
     }
 
+    const basePaymentUrl = `https://payment.example.com/pay/${orderId}`;
+
+    const paymentUrl =
+      successUrl || failUrl
+        ? `${basePaymentUrl}?successUrl=${encodeURIComponent(successUrl || '')}&failUrl=${encodeURIComponent(failUrl || '')}`
+        : basePaymentUrl;
+
     const paymentResult = await pool.query(
       `
       INSERT INTO payments (
@@ -63,7 +76,7 @@ const requestPayment = async (req, res) => {
         paymentMethod,
         paymentProvider,
         Number(amount),
-        `https://payment.example.com/pay/${orderId}`,
+        paymentUrl,
       ]
     );
 
@@ -74,6 +87,7 @@ const requestPayment = async (req, res) => {
       paymentId: payment.payment_id,
       paymentStatus: payment.payment_status,
       paymentUrl: payment.payment_url,
+      checkoutUrl: payment.payment_url,
       createdAt: payment.created_at,
       message: '결제 요청이 생성되었습니다.',
     });
