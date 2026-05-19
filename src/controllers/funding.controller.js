@@ -1625,8 +1625,8 @@ const mapFundingListRow = (row) => {
 const getFundingList = async (req, res) => {
   const { status, sort, page = 0, size = 10, keyword } = req.query;
 
-  const validFundingSorts = ['POPULAR', 'LATEST', 'DEADLINE'];
-  const normalizedSort = sort || 'LATEST';
+  const validFundingSorts = ['POPULAR', 'LATEST', 'DEADLINE', 'ID_ASC'];
+  const normalizedSort = sort || 'ID_ASC';
   const normalizedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
   const normalizedStatus =
     typeof status === 'string' && status.trim()
@@ -1694,6 +1694,7 @@ const getFundingList = async (req, res) => {
     POPULAR: 'ORDER BY fp.current_amount DESC, fp.created_at DESC',
     LATEST: 'ORDER BY fp.created_at DESC',
     DEADLINE: 'ORDER BY fp.end_date ASC, fp.created_at DESC',
+    ID_ASC: 'ORDER BY fp.funding_id ASC',
   }[normalizedSort];
 
   try {
@@ -1850,6 +1851,8 @@ const getFundingDetail = async (req, res) => {
         name,
         price,
         description,
+        volumn,
+        alcohol,
         stock,
         remaining_stock,
         max_per_user
@@ -1887,6 +1890,8 @@ const getFundingDetail = async (req, res) => {
         name: option.name,
         price: Number(option.price),
         description: option.description,
+        volume: option.volume,
+        alcohol: option.alcohol,
         stock: option.stock,
         remainingStock: option.remaining_stock,
         maxPerUser: option.max_per_user,
@@ -2175,6 +2180,8 @@ const getSupportOptions = async (req, res) => {
         name,
         price,
         description,
+        volume,
+        alcohol,
         stock,
         remaining_stock,
         max_per_user
@@ -2188,10 +2195,12 @@ const getSupportOptions = async (req, res) => {
     return res.status(200).json({
       fundingId: Number(fundingId),
       supportOptions: result.rows.map((option) => ({
-        optionId: option.option_id,
+        optionId: Number(option.option_id),
         name: option.name,
-        price: option.price,
+        price: Number(option.price || 0),
         description: option.description,
+        volume: option.volume,
+        alcohol: option.alcohol,
         stock: option.stock,
         remainingStock: option.remaining_stock,
         maxPerUser: option.max_per_user,
@@ -2225,6 +2234,7 @@ const createFundingOrder = async (req, res) => {
     postalCode,
     adultVerified,
     noticeAgreed,
+    privacyAgreed,
   } = req.body;
 
   if (!fundingId || isNaN(Number(fundingId))) {
@@ -2233,6 +2243,8 @@ const createFundingOrder = async (req, res) => {
       message: '펀딩 프로젝트를 찾을 수 없습니다.',
     });
   }
+
+
 
   const bottleCount = Number(quantity || optionId);
 
@@ -2261,6 +2273,13 @@ const createFundingOrder = async (req, res) => {
     return res.status(400).json({
       status: 400,
       message: '환불/교환/리스크 안내에 동의해야 합니다.',
+    });
+  }
+
+  if (!privacyAgreed) {
+    return res.status(400).json({
+      status: 400,
+      message: '개인정보 제3자 제공에 동의해야 합니다.',
     });
   }
 
@@ -2303,7 +2322,10 @@ const createFundingOrder = async (req, res) => {
     }
 
     const pricePerBottle = Number(funding.price_per_bottle);
-    const shippingFee = Number(funding.shipping_fee || 3000);
+    const shippingFee =
+      funding.shipping_fee !== null && funding.shipping_fee !== undefined
+        ? Number(funding.shipping_fee)
+        : 3000;
     const totalAmount =
       pricePerBottle * bottleCount + shippingFee + donationAmountNumber;
 
@@ -2329,12 +2351,13 @@ const createFundingOrder = async (req, res) => {
         support_message,
         postal_code,
         adult_verified,
-        notice_agreed
+        notice_agreed,
+        privacy_agreed
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8,
         'CREATED',
-        $9, $10, $11, $12, $13, $14, $15, $16, $17
+        $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
       )
       RETURNING
         order_id,
@@ -2355,6 +2378,7 @@ const createFundingOrder = async (req, res) => {
         postal_code,
         adult_verified,
         notice_agreed,
+        privacy_agreed,
         created_at
       `,
       [
@@ -2375,6 +2399,7 @@ const createFundingOrder = async (req, res) => {
         postalCode || null,
         Boolean(adultVerified),
         Boolean(noticeAgreed),
+        Boolean(privacyAgreed),
       ]
     );
 
@@ -2400,6 +2425,7 @@ const createFundingOrder = async (req, res) => {
       adultVerified: order.adult_verified,
       noticeAgreed: order.notice_agreed,
       createdAt: order.created_at,
+      privacyAgreed: order.privacy_agreed,
       message: '후원 주문이 생성되었습니다.',
     });
   } catch (error) {

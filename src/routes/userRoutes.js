@@ -8,6 +8,7 @@ const {
   checkNickname,
   getMyFundingOrders,
   getMyLikedFundings,
+  getRecentShippingAddress,
 } = require('../controllers/user.controller');
 const { getMyRecipeList, getMyInterestRecipeList, getMyRecipeCommentList } = require('../controllers/mypageController');
 
@@ -30,5 +31,8 @@ router.get('/me/recipe-comments', authMiddleware, getMyRecipeCommentList);
 router.get('/me/funding-orders', getMyFundingOrders);
 
 router.get('/me/liked-fundings', getMyLikedFundings);
+
+//최근배송지 불러오기
+router.get('/me/recent-shipping-address', authMiddleware, getRecentShippingAddress);
 
 module.exports = router;

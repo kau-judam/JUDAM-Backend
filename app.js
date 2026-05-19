@@ -9,6 +9,7 @@ const aiRoutes = require('./src/routes/ai.routes');
 const orderRoutes = require('./src/routes/orderRoutes'); //결제요청
 const breweryRoutes = require('./src/routes/brewery.routes');
 const adminRoutes = require('./src/routes/adminRoutes');
+const paymentRoutes = require('./src/routes/payment.routes');
 const sqsRoutes = require('./src/routes/sqsRoutes');
 const aiRecipeRoutes = require('./src/routes/aiRecipe.routes');
 const postRoutes = require('./src/routes/postRoutes');
@@ -34,6 +35,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/sqs', sqsRoutes);
 app.use('/api/breweries', breweryRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api/recipe', aiRecipeRoutes);
 app.use('/api/posts', postRoutes);
 
