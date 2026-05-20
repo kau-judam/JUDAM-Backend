@@ -12,6 +12,7 @@ const adminRoutes = require('./src/routes/adminRoutes');
 const paymentRoutes = require('./src/routes/payment.routes');
 const sqsRoutes = require('./src/routes/sqsRoutes');
 const aiRecipeRoutes = require('./src/routes/aiRecipe.routes');
+const aiSurveyRoutes = require('./src/routes/aiSurvey.routes');
 const postRoutes = require('./src/routes/postRoutes');
 
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/breweries', breweryRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/recipe', aiRecipeRoutes);
+app.use('/api/survey', aiSurveyRoutes);
 app.use('/api/posts', postRoutes);
 
 module.exports = app;
