@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 
-//펀딩 약관 동의
+// 펀딩 약관 동의
 const saveAgreement = (req, res) => {
   const {
     breweryId,
@@ -9,6 +9,8 @@ const saveAgreement = (req, res) => {
     isSettlementInfoAgreed,
     isFeePolicyAgreed,
     isResponsibilityAgreed,
+    isLiquorLicenseConfirmed,
+    isRecipeLicenseAgreed,
   } = req.body;
 
   if (
@@ -17,7 +19,9 @@ const saveAgreement = (req, res) => {
     !isContactInfoAgreed ||
     !isSettlementInfoAgreed ||
     !isFeePolicyAgreed ||
-    !isResponsibilityAgreed
+    !isResponsibilityAgreed ||
+    !isLiquorLicenseConfirmed ||
+    !isRecipeLicenseAgreed
   ) {
     return res.status(400).json({
       status: 400,
@@ -30,6 +34,15 @@ const saveAgreement = (req, res) => {
   return res.status(200).json({
     agreementId,
     breweryId,
+    agreements: {
+      isAdultConfirmed,
+      isContactInfoAgreed,
+      isSettlementInfoAgreed,
+      isFeePolicyAgreed,
+      isResponsibilityAgreed,
+      isLiquorLicenseConfirmed,
+      isRecipeLicenseAgreed,
+    },
     message: '펀딩 약관 동의가 저장되었습니다.',
   });
 };
@@ -47,6 +60,8 @@ const createFundingDraft = async (req, res) => {
     alcoholPercentage,
     summary,
     thumbnailUrl,
+    imageUrls,
+    tags,
   } = req.body;
 
   if (!breweryId) {
@@ -55,6 +70,31 @@ const createFundingDraft = async (req, res) => {
       message: '양조장 ID는 필수입니다.',
     });
   }
+
+    if (imageUrls && !Array.isArray(imageUrls)) {
+      return res.status(400).json({
+        status: 400,
+        message: '대표 이미지 목록 입력값이 올바르지 않습니다.',
+      });
+    }
+
+    if (imageUrls && imageUrls.length > 5) {
+      return res.status(400).json({
+        status: 400,
+        message: '대표 이미지는 최대 5개까지 등록할 수 있습니다.',
+      });
+    }
+
+    if (tags && !Array.isArray(tags)) {
+      return res.status(400).json({
+        status: 400,
+        message: '검색 태그 입력값이 올바르지 않습니다.',
+      });
+    }
+
+    const normalizedImageUrls = imageUrls || [];
+    const normalizedThumbnailUrl =
+      normalizedImageUrls.length > 0 ? normalizedImageUrls[0] : thumbnailUrl || null;
 
   const progressFields = [
     title,
@@ -85,11 +125,13 @@ const createFundingDraft = async (req, res) => {
         alcohol_percentage,
         summary,
         thumbnail_url,
+        image_urls,
+        tags,
         status,
         progress_rate
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'DRAFT', $10)
-      RETURNING draft_id, brewery_id, status, progress_rate, created_at
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'DRAFT', $12)
+      RETURNING draft_id, brewery_id, thumbnail_url, image_urls, tags, status, progress_rate, created_at
       `,
       [
         Number(breweryId),
@@ -104,7 +146,9 @@ const createFundingDraft = async (req, res) => {
           ? Number(alcoholPercentage)
           : null,
         summary || null,
-        thumbnailUrl || null,
+        normalizedThumbnailUrl,
+        JSON.stringify(normalizedImageUrls),
+        JSON.stringify(tags || []),
         progressRate,
       ]
     );
@@ -117,6 +161,9 @@ const createFundingDraft = async (req, res) => {
       status: draft.status,
       progressRate: draft.progress_rate,
       createdAt: draft.created_at,
+      thumbnailUrl: draft.thumbnail_url,
+      imageUrls: draft.image_urls,
+      tags: draft.tags,
       message: '펀딩 프로젝트가 임시저장되었습니다.',
     });
   } catch (error) {
@@ -257,7 +304,7 @@ const updateFundingDraft = async (req, res) => {
     });
   }
 };
-// 프로젝트 기본정보 저장(수정버전)
+// 프로젝트 기본정보 저장
 const saveBasicInfo = async (req, res) => {
   const { draftId } = req.params;
 
@@ -270,6 +317,8 @@ const saveBasicInfo = async (req, res) => {
     alcoholPercentage,
     summary,
     thumbnailUrl,
+    imageUrls,
+    tags,
   } = req.body;
 
   if (!draftId || isNaN(Number(draftId))) {
@@ -279,12 +328,44 @@ const saveBasicInfo = async (req, res) => {
     });
   }
 
+  if (!category || !title || !mainIngredient || !alcoholPercentage || !summary) {
+    return res.status(400).json({
+      status: 400,
+      message: '필수 기본정보를 모두 입력해야 합니다.',
+    });
+  }
+
   if (subIngredients && !Array.isArray(subIngredients)) {
     return res.status(400).json({
       status: 400,
-      message: '입력값이 올바르지 않습니다.',
+      message: '서브 재료 입력값이 올바르지 않습니다.',
     });
   }
+
+  if (imageUrls && !Array.isArray(imageUrls)) {
+    return res.status(400).json({
+      status: 400,
+      message: '대표 이미지 목록 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  if (imageUrls && imageUrls.length > 5) {
+    return res.status(400).json({
+      status: 400,
+      message: '대표 이미지는 최대 5개까지 등록할 수 있습니다.',
+    });
+  }
+
+  if (tags && !Array.isArray(tags)) {
+    return res.status(400).json({
+      status: 400,
+      message: '검색 태그 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  const normalizedImageUrls = imageUrls || [];
+  const normalizedThumbnailUrl =
+    normalizedImageUrls.length > 0 ? normalizedImageUrls[0] : thumbnailUrl || null;
 
   try {
     const result = await pool.query(
@@ -299,22 +380,37 @@ const saveBasicInfo = async (req, res) => {
         alcohol_percentage = $6,
         summary = $7,
         thumbnail_url = $8,
+        image_urls = $9,
+        tags = $10,
         progress_rate = 33,
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $9
-      RETURNING draft_id, progress_rate, updated_at
+      WHERE draft_id = $11
+      RETURNING
+        draft_id,
+        title,
+        short_title,
+        category,
+        main_ingredient,
+        sub_ingredients,
+        alcohol_percentage,
+        summary,
+        thumbnail_url,
+        image_urls,
+        tags,
+        progress_rate,
+        updated_at
       `,
       [
-        title || null,
+        title,
         shortTitle || null,
-        category || null,
-        mainIngredient || null,
-        subIngredients ? JSON.stringify(subIngredients) : null,
-        alcoholPercentage !== undefined && alcoholPercentage !== null
-          ? Number(alcoholPercentage)
-          : null,
-        summary || null,
-        thumbnailUrl || null,
+        category,
+        mainIngredient,
+        subIngredients ? JSON.stringify(subIngredients) : JSON.stringify([]),
+        Number(alcoholPercentage),
+        summary,
+        normalizedThumbnailUrl,
+        JSON.stringify(normalizedImageUrls),
+        JSON.stringify(tags || []),
         Number(draftId),
       ]
     );
@@ -331,6 +427,18 @@ const saveBasicInfo = async (req, res) => {
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'BASIC_INFO',
+      basicInfo: {
+        title: draft.title,
+        shortTitle: draft.short_title,
+        category: draft.category,
+        mainIngredient: draft.main_ingredient,
+        subIngredients: draft.sub_ingredients,
+        alcoholPercentage: draft.alcohol_percentage,
+        summary: draft.summary,
+        thumbnailUrl: draft.thumbnail_url,
+        imageUrls: draft.image_urls,
+        tags: draft.tags,
+      },
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '기본정보가 저장되었습니다.',
@@ -354,7 +462,6 @@ const saveSchedule = async (req, res) => {
     totalQuantity,
     fundingStartDate,
     fundingPeriodDays,
-    fundingEndDate,
     expectedDeliveryDate,
   } = req.body;
 
@@ -365,7 +472,6 @@ const saveSchedule = async (req, res) => {
     !totalQuantity ||
     !fundingStartDate ||
     !fundingPeriodDays ||
-    !fundingEndDate ||
     !expectedDeliveryDate
   ) {
     return res.status(400).json({
@@ -384,30 +490,48 @@ const saveSchedule = async (req, res) => {
     !Number.isInteger(fundingPeriodDaysNumber) ||
     pricePerBottleNumber <= 0 ||
     totalQuantityNumber <= 0 ||
-    fundingPeriodDaysNumber <= 0
+    fundingPeriodDaysNumber < 1 ||
+    fundingPeriodDaysNumber > 365
   ) {
     return res.status(400).json({
       status: 400,
-      message: '입력값이 올바르지 않습니다.',
+      message: '가격, 수량, 프로젝트 기간 입력값이 올바르지 않습니다.',
     });
   }
 
-  const endDate = new Date(fundingEndDate);
-  const deliveryDate = new Date(expectedDeliveryDate);
+  const startDate = new Date(fundingStartDate);
 
-  const minDeliveryDate = new Date(endDate);
-  minDeliveryDate.setDate(minDeliveryDate.getDate() + 30);
-
-  if (deliveryDate < minDeliveryDate) {
+  if (Number.isNaN(startDate.getTime())) {
     return res.status(400).json({
       status: 400,
-      message: '예상 배송일은 펀딩 종료일로부터 최소 30일 이후여야 합니다.',
+      message: '펀딩 시작일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + fundingPeriodDaysNumber);
+
+  const deliveryDate = new Date(expectedDeliveryDate);
+
+  if (Number.isNaN(deliveryDate.getTime())) {
+    return res.status(400).json({
+      status: 400,
+      message: '예상 배송 시작일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (deliveryDate <= endDate) {
+    return res.status(400).json({
+      status: 400,
+      message: '예상 배송 시작일은 펀딩 종료일 이후여야 합니다.',
     });
   }
 
   const targetAmount = pricePerBottleNumber * totalQuantityNumber;
   const platformFeeRate = 7;
   const platformFeeAmount = Math.round(targetAmount * (platformFeeRate / 100));
+
+  const formatDate = (date) => date.toISOString().slice(0, 10);
 
   try {
     const result = await pool.query(
@@ -424,16 +548,26 @@ const saveSchedule = async (req, res) => {
         progress_rate = 47,
         updated_at = CURRENT_TIMESTAMP
       WHERE draft_id = $8
-      RETURNING draft_id, target_amount, progress_rate, updated_at
+      RETURNING
+        draft_id,
+        price_per_bottle,
+        total_quantity,
+        target_amount,
+        funding_start_date,
+        funding_period_days,
+        funding_end_date,
+        expected_delivery_date,
+        progress_rate,
+        updated_at
       `,
       [
         pricePerBottleNumber,
         totalQuantityNumber,
         targetAmount,
-        fundingStartDate,
+        formatDate(startDate),
         fundingPeriodDaysNumber,
-        fundingEndDate,
-        expectedDeliveryDate,
+        formatDate(endDate),
+        formatDate(deliveryDate),
         Number(draftId),
       ]
     );
@@ -450,7 +584,15 @@ const saveSchedule = async (req, res) => {
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'SCHEDULE',
-      targetAmount: draft.target_amount,
+      schedule: {
+        pricePerBottle: draft.price_per_bottle,
+        totalQuantity: draft.total_quantity,
+        targetAmount: draft.target_amount,
+        fundingStartDate: draft.funding_start_date,
+        fundingPeriodDays: draft.funding_period_days,
+        fundingEndDate: draft.funding_end_date,
+        expectedDeliveryDate: draft.expected_delivery_date,
+      },
       platformFeeRate,
       platformFeeAmount,
       progressRate: draft.progress_rate,
@@ -482,13 +624,24 @@ const saveLegalInfo = async (req, res) => {
     !draftId ||
     isNaN(Number(draftId)) ||
     !productType ||
-    !volume ||
-    !alcoholPercentage ||
+    volume === undefined ||
+    alcoholPercentage === undefined ||
     !Array.isArray(rawMaterials)
   ) {
     return res.status(400).json({
       status: 400,
       message: '법적 고시 정보 입력이 올바르지 않습니다.',
+    });
+  }
+
+  if (
+    Number(volume) <= 0 ||
+    Number(alcoholPercentage) <= 0 ||
+    Number(alcoholPercentage) > 100
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '용량 또는 도수 입력값이 올바르지 않습니다.',
     });
   }
 
@@ -533,8 +686,8 @@ const saveLegalInfo = async (req, res) => {
       `,
       [
         productType,
-        volume,
-        alcoholPercentage,
+        Number(volume),
+        Number(alcoholPercentage),
         JSON.stringify(rawMaterials),
         Number(draftId),
       ]
@@ -555,7 +708,10 @@ const saveLegalInfo = async (req, res) => {
       productType: draft.product_type,
       volume: draft.volume,
       alcoholPercentage: draft.alcohol_percentage,
-      rawMaterials: draft.raw_materials,
+      rawMaterials:
+        typeof draft.raw_materials === 'string'
+          ? JSON.parse(draft.raw_materials)
+          : draft.raw_materials,
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '법적 고시 정보가 저장되었습니다.',
@@ -607,14 +763,19 @@ const saveTasteProfile = async (req, res) => {
     alcoholIntensity,
   ];
 
-  const isOutOfRange = tasteValues.some(
-    (value) => typeof value !== 'number' || value < 1 || value > 5
-  );
+  const isOutOfRange = tasteValues.some((value) => {
+    const numberValue = Number(value);
+    return (
+      Number.isNaN(numberValue) ||
+      numberValue < 0 ||
+      numberValue > 100
+    );
+  });
 
   if (isOutOfRange) {
     return res.status(400).json({
       status: 400,
-      message: '맛지표는 1부터 5 사이의 값이어야 합니다.',
+      message: '맛지표는 0부터 100 사이의 값이어야 합니다.',
     });
   }
 
@@ -651,11 +812,11 @@ const saveTasteProfile = async (req, res) => {
         updated_at
       `,
       [
-        sweetness,
-        acidity,
-        body,
-        carbonation,
-        alcoholIntensity,
+        Number(sweetness),
+        Number(acidity),
+        Number(body),
+        Number(carbonation),
+        Number(alcoholIntensity),
         JSON.stringify(flavorNotes || []),
         Number(draftId),
       ]
@@ -673,12 +834,17 @@ const saveTasteProfile = async (req, res) => {
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'TASTE_PROFILE',
-      sweetness: draft.sweetness,
-      acidity: draft.acidity,
-      body: draft.body,
-      carbonation: draft.carbonation,
-      alcoholIntensity: draft.alcohol_intensity,
-      flavorNotes: draft.flavor_notes,
+      tasteProfile: {
+        sweetness: Number(draft.sweetness),
+        acidity: Number(draft.acidity),
+        body: Number(draft.body),
+        carbonation: Number(draft.carbonation),
+        alcoholIntensity: Number(draft.alcohol_intensity),
+        flavorNotes:
+          typeof draft.flavor_notes === 'string'
+            ? JSON.parse(draft.flavor_notes)
+            : draft.flavor_notes,
+      },
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '맛지표 정보가 저장되었습니다.',
@@ -698,54 +864,17 @@ const saveTasteProfile = async (req, res) => {
 const savePlan = async (req, res) => {
   const { draftId } = req.params;
 
-  const { introduction, budgetPlan, schedulePlan } = req.body;
+  const {
+    introduction,
+    budgetPlan,
+    schedulePlan,
+  } = req.body;
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
-    !introduction ||
-    !Array.isArray(budgetPlan) ||
-    !Array.isArray(schedulePlan)
+    !introduction
   ) {
-    return res.status(400).json({
-      status: 400,
-      message: '프로젝트 계획 입력값이 올바르지 않습니다.',
-    });
-  }
-
-  if (budgetPlan.length === 0) {
-    return res.status(400).json({
-      status: 400,
-      message: '예산 항목은 최소 1개 이상 입력해야 합니다.',
-    });
-  }
-
-  if (schedulePlan.length === 0) {
-    return res.status(400).json({
-      status: 400,
-      message: '일정 단계는 최소 1개 이상 입력해야 합니다.',
-    });
-  }
-
-  const hasInvalidBudget = budgetPlan.some(
-    (budget) =>
-      !budget.category ||
-      budget.amount === undefined ||
-      typeof budget.amount !== 'number'
-  );
-
-  if (hasInvalidBudget) {
-    return res.status(400).json({
-      status: 400,
-      message: '프로젝트 계획 입력값이 올바르지 않습니다.',
-    });
-  }
-
-  const hasInvalidSchedule = schedulePlan.some(
-    (schedule) => !schedule.step || !schedule.description || !schedule.date
-  );
-
-  if (hasInvalidSchedule) {
     return res.status(400).json({
       status: 400,
       message: '프로젝트 계획 입력값이 올바르지 않습니다.',
@@ -773,8 +902,8 @@ const savePlan = async (req, res) => {
       `,
       [
         introduction,
-        JSON.stringify(budgetPlan),
-        JSON.stringify(schedulePlan),
+        budgetPlan || null,
+        schedulePlan || null,
         Number(draftId),
       ]
     );
@@ -791,9 +920,11 @@ const savePlan = async (req, res) => {
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'PLAN',
-      introduction: draft.introduction,
-      budgetPlan: draft.budget_plan,
-      schedulePlan: draft.schedule_plan,
+      plan: {
+        introduction: draft.introduction,
+        budgetPlan: draft.budget_plan,
+        schedulePlan: draft.schedule_plan,
+      },
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '프로젝트 계획 정보가 저장되었습니다.',
@@ -814,29 +945,44 @@ const saveBreweryInfo = async (req, res) => {
   const { draftId } = req.params;
 
   const {
-    breweryName,
-    representativeName,
-    businessRegistrationNumber,
-    businessAddress,
-    contactEmail,
+    creatorName,
+    profileImageUrl,
+    creatorIntroduction,
     contactPhone,
+    phoneVerified,
+    identityDocumentUrl,
     bankName,
     accountNumber,
     accountHolder,
+    businessType,
+    businessName,
+    businessRegistrationNumber,
+    representativeName,
+    businessAddress,
+    businessCategory,
+    businessItem,
+    taxEmail,
+    businessRegistrationFileUrl,
   } = req.body;
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
-    !breweryName ||
-    !representativeName ||
-    !businessRegistrationNumber ||
-    !businessAddress ||
-    !contactEmail ||
+    !creatorName ||
     !contactPhone ||
+    phoneVerified !== true ||
     !bankName ||
     !accountNumber ||
-    !accountHolder
+    !accountHolder ||
+    !businessType ||
+    !businessName ||
+    !businessRegistrationNumber ||
+    !representativeName ||
+    !businessAddress ||
+    !businessCategory ||
+    !businessItem ||
+    !taxEmail ||
+    !businessRegistrationFileUrl
   ) {
     return res.status(400).json({
       status: 400,
@@ -858,42 +1004,69 @@ const saveBreweryInfo = async (req, res) => {
       `
       UPDATE funding_drafts
       SET
-        brewery_name = $1,
-        representative_name = $2,
-        business_registration_number = $3,
-        business_address = $4,
-        contact_email = $5,
-        contact_phone = $6,
+        creator_name = $1,
+        profile_image_url = $2,
+        creator_introduction = $3,
+        contact_phone = $4,
+        phone_verified = $5,
+        identity_document_url = $6,
         bank_name = $7,
         account_number = $8,
         account_holder = $9,
+        business_type = $10,
+        business_name = $11,
+        business_registration_number = $12,
+        representative_name = $13,
+        business_address = $14,
+        business_category = $15,
+        business_item = $16,
+        tax_email = $17,
+        business_registration_file_url = $18,
         progress_rate = 85,
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $10
+      WHERE draft_id = $19
       RETURNING
         draft_id,
-        brewery_name,
-        representative_name,
-        business_registration_number,
-        business_address,
-        contact_email,
+        creator_name,
+        profile_image_url,
+        creator_introduction,
         contact_phone,
+        phone_verified,
+        identity_document_url,
         bank_name,
         account_number,
         account_holder,
+        business_type,
+        business_name,
+        business_registration_number,
+        representative_name,
+        business_address,
+        business_category,
+        business_item,
+        tax_email,
+        business_registration_file_url,
         progress_rate,
         updated_at
       `,
       [
-        breweryName,
-        representativeName,
-        businessRegistrationNumber,
-        businessAddress,
-        contactEmail,
+        creatorName,
+        profileImageUrl || null,
+        creatorIntroduction || null,
         contactPhone,
+        Boolean(phoneVerified),
+        identityDocumentUrl || null,
         bankName,
         accountNumber,
         accountHolder,
+        businessType,
+        businessName,
+        businessRegistrationNumber,
+        representativeName,
+        businessAddress,
+        businessCategory,
+        businessItem,
+        taxEmail,
+        businessRegistrationFileUrl,
         Number(draftId),
       ]
     );
@@ -910,15 +1083,26 @@ const saveBreweryInfo = async (req, res) => {
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'BREWERY_INFO',
-      breweryName: draft.brewery_name,
-      representativeName: draft.representative_name,
-      businessRegistrationNumber: draft.business_registration_number,
-      businessAddress: draft.business_address,
-      contactEmail: draft.contact_email,
-      contactPhone: draft.contact_phone,
-      bankName: draft.bank_name,
-      accountNumber: draft.account_number,
-      accountHolder: draft.account_holder,
+      breweryInfo: {
+        creatorName: draft.creator_name,
+        profileImageUrl: draft.profile_image_url,
+        creatorIntroduction: draft.creator_introduction,
+        contactPhone: draft.contact_phone,
+        phoneVerified: draft.phone_verified,
+        identityDocumentUrl: draft.identity_document_url,
+        bankName: draft.bank_name,
+        accountNumber: draft.account_number,
+        accountHolder: draft.account_holder,
+        businessType: draft.business_type,
+        businessName: draft.business_name,
+        businessRegistrationNumber: draft.business_registration_number,
+        representativeName: draft.representative_name,
+        businessAddress: draft.business_address,
+        businessCategory: draft.business_category,
+        businessItem: draft.business_item,
+        taxEmail: draft.tax_email,
+        businessRegistrationFileUrl: draft.business_registration_file_url,
+      },
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '창작자/정산/사업자 정보가 저장되었습니다.',
@@ -929,6 +1113,269 @@ const saveBreweryInfo = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '창작자/정산/사업자 정보 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+// 프젝생성 추가1: 양조장 정보 불러오기
+const loadBreweryInfo = async (req, res) => {
+  const { draftId } = req.params;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '임시저장 프로젝트 ID가 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        creator_name,
+        profile_image_url,
+        creator_introduction,
+        business_name,
+        business_registration_number,
+        representative_name,
+        business_address,
+        business_category,
+        business_item,
+        tax_email
+      FROM funding_drafts
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const info = result.rows[0];
+
+    return res.status(200).json({
+      breweryInfo: {
+        creatorName: info.creator_name,
+        profileImageUrl: info.profile_image_url,
+        creatorIntroduction: info.creator_introduction,
+        businessName: info.business_name,
+        businessRegistrationNumber: info.business_registration_number,
+        representativeName: info.representative_name,
+        businessAddress: info.business_address,
+        businessCategory: info.business_category,
+        businessItem: info.business_item,
+        taxEmail: info.tax_email,
+      },
+      message: '양조장 정보를 불러왔습니다. 본인 인증과 입금 계좌는 직접 입력해주세요.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '양조장 정보 불러오기 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+//프젝생성 추가2: 펀딩 프로젝트 파일 업로드:이미지,신분증,사업자등록증 파일을 한 API에서 처리
+const uploadFundingDraftFile = async (req, res) => {
+  const { draftId } = req.params;
+  const { fileType } = req.body;
+  const file = req.file;
+
+  const allowedFileTypes = [
+    'PROFILE_IMAGE',
+    'IDENTITY_DOCUMENT',
+    'BUSINESS_REGISTRATION',
+  ];
+
+  if (!draftId || isNaN(Number(draftId)) || !fileType) {
+    return res.status(400).json({
+      status: 400,
+      message: '파일 업로드 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  if (!allowedFileTypes.includes(fileType)) {
+    return res.status(400).json({
+      status: 400,
+      message: '지원하지 않는 파일 유형입니다.',
+    });
+  }
+
+  if (!file) {
+    return res.status(400).json({
+      status: 400,
+      message: '업로드할 파일이 필요합니다.',
+    });
+  }
+
+  const fileUrl = `https://storage.example.com/funding-drafts/${draftId}/${file.originalname}`;
+
+  let updateColumn = null;
+
+  if (fileType === 'PROFILE_IMAGE') {
+    updateColumn = 'profile_image_url';
+  }
+
+  if (fileType === 'IDENTITY_DOCUMENT') {
+    updateColumn = 'identity_document_url';
+  }
+
+  if (fileType === 'BUSINESS_REGISTRATION') {
+    updateColumn = 'business_registration_file_url';
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET ${updateColumn} = $1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $2
+      RETURNING draft_id, ${updateColumn}, updated_at
+      `,
+      [fileUrl, Number(draftId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    return res.status(201).json({
+      draftId: result.rows[0].draft_id,
+      fileType,
+      fileUrl,
+      updatedAt: result.rows[0].updated_at,
+      message: '파일이 업로드되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '파일 업로드 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+//프젝생성 추가3: 휴대폰 본인 인증 API
+const verifyPhoneForFundingDraft = async (req, res) => {
+  const { draftId } = req.params;
+  const { contactPhone } = req.body;
+
+  if (!draftId || isNaN(Number(draftId)) || !contactPhone) {
+    return res.status(400).json({
+      status: 400,
+      message: '휴대폰 인증 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        contact_phone = $1,
+        phone_verified = TRUE,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $2
+      RETURNING draft_id, contact_phone, phone_verified, updated_at
+      `,
+      [contactPhone, Number(draftId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      contactPhone: draft.contact_phone,
+      phoneVerified: draft.phone_verified,
+      updatedAt: draft.updated_at,
+      message: '휴대폰 본인 인증이 완료되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '휴대폰 인증 처리 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+//프젝생성 추가4: 입금계좌 인증처리
+const verifyAccountForFundingDraft = async (req, res) => {
+  const { draftId } = req.params;
+  const { bankName, accountNumber, accountHolder } = req.body;
+
+  if (
+    !draftId ||
+    isNaN(Number(draftId)) ||
+    !bankName ||
+    !accountNumber ||
+    !accountHolder
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '계좌 인증 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        bank_name = $1,
+        account_number = $2,
+        account_holder = $3,
+        account_verified = TRUE,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $4
+      RETURNING
+        draft_id,
+        bank_name,
+        account_number,
+        account_holder,
+        account_verified,
+        updated_at
+      `,
+      [bankName, accountNumber, accountHolder, Number(draftId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = result.rows[0];
+
+    return res.status(200).json({
+      draftId: draft.draft_id,
+      bankName: draft.bank_name,
+      accountNumber: draft.account_number,
+      accountHolder: draft.account_holder,
+      accountVerified: draft.account_verified,
+      updatedAt: draft.updated_at,
+      message: '입금 계좌 인증이 완료되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '계좌 인증 처리 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -1034,9 +1481,16 @@ const uploadDocument = async (req, res) => {
   const allowedDocumentTypes = [
     'BUSINESS_REGISTRATION',
     'MAIL_ORDER_BUSINESS',
+    'LIQUOR_SALES_APPROVAL',
     'LIQUOR_LICENSE',
     'BANK_ACCOUNT_COPY',
     'ETC',
+  ];
+
+  const requiredDocumentTypes = [
+    'MAIL_ORDER_BUSINESS',
+    'LIQUOR_SALES_APPROVAL',
+    'LIQUOR_LICENSE',
   ];
 
   if (!draftId || isNaN(Number(draftId)) || !documentType) {
@@ -1099,14 +1553,58 @@ const uploadDocument = async (req, res) => {
 
     const document = result.rows[0];
 
+    const requiredDocumentResult = await pool.query(
+      `
+      SELECT DISTINCT document_type
+      FROM funding_documents
+      WHERE draft_id = $1
+      AND document_type = ANY($2::text[])
+      `,
+      [Number(draftId), requiredDocumentTypes]
+    );
+
+    const uploadedRequiredTypes = requiredDocumentResult.rows.map(
+      (row) => row.document_type
+    );
+
+    const isAllRequiredDocumentsUploaded = requiredDocumentTypes.every((type) =>
+      uploadedRequiredTypes.includes(type)
+    );
+
+    let progressRate = null;
+
+    if (isAllRequiredDocumentsUploaded) {
+      const progressResult = await pool.query(
+        `
+        UPDATE funding_drafts
+        SET
+          progress_rate = 100,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE draft_id = $1
+        RETURNING progress_rate
+        `,
+        [Number(draftId)]
+      );
+
+      progressRate = progressResult.rows[0]?.progress_rate || 100;
+    }
+
     return res.status(201).json({
       draftId: document.draft_id,
       documentId: document.document_id,
       documentType: document.document_type,
       fileName: document.file_name,
       fileUrl: document.file_url,
+      requiredDocuments: {
+        requiredTypes: requiredDocumentTypes,
+        uploadedTypes: uploadedRequiredTypes,
+        completed: isAllRequiredDocumentsUploaded,
+      },
+      progressRate,
       createdAt: document.created_at,
-      message: '필수 서류가 업로드되었습니다.',
+      message: isAllRequiredDocumentsUploaded
+        ? '필수 서류가 모두 업로드되어 프로젝트 작성이 100% 완료되었습니다.'
+        : '필수 서류가 업로드되었습니다.',
     });
   } catch (error) {
     console.error(error);
@@ -1120,7 +1618,7 @@ const uploadDocument = async (req, res) => {
 };
 
 //펀딩프로젝트 제출 (새로 추가!!)
-// 펀딩 프로젝트 제출
+// 펀딩 프로젝트 제출 + 실제 펀딩 게시글 생성
 const submitFundingDraft = async (req, res) => {
   const { draftId } = req.params;
 
@@ -1130,6 +1628,12 @@ const submitFundingDraft = async (req, res) => {
       message: '제출 요청값이 올바르지 않습니다.',
     });
   }
+
+  const requiredDocumentTypes = [
+    'MAIL_ORDER_BUSINESS',
+    'LIQUOR_SALES_APPROVAL',
+    'LIQUOR_LICENSE',
+  ];
 
   try {
     const draftResult = await pool.query(
@@ -1157,7 +1661,7 @@ const submitFundingDraft = async (req, res) => {
       });
     }
 
-    if (Number(draft.progress_rate) < 92) {
+    if (Number(draft.progress_rate) < 100) {
       return res.status(400).json({
         status: 400,
         message: '필수 정보를 모두 입력한 후 제출할 수 있습니다.',
@@ -1166,44 +1670,180 @@ const submitFundingDraft = async (req, res) => {
 
     const documentResult = await pool.query(
       `
-      SELECT COUNT(*)::int AS document_count
+      SELECT DISTINCT document_type
       FROM funding_documents
       WHERE draft_id = $1
+      AND document_type = ANY($2::text[])
       `,
-      [Number(draftId)]
+      [Number(draftId), requiredDocumentTypes]
     );
 
-    if (documentResult.rows[0].document_count === 0) {
+    const uploadedTypes = documentResult.rows.map((row) => row.document_type);
+
+    const hasAllRequiredDocuments = requiredDocumentTypes.every((type) =>
+      uploadedTypes.includes(type)
+    );
+
+    if (!hasAllRequiredDocuments) {
       return res.status(400).json({
         status: 400,
-        message: '필수 서류 업로드 후 제출할 수 있습니다.',
+        message: '필수 인증 서류 3개를 모두 업로드해야 제출할 수 있습니다.',
+        requiredDocuments: requiredDocumentTypes,
+        uploadedDocuments: uploadedTypes,
       });
     }
 
-    const submitResult = await pool.query(
-      `
-      UPDATE funding_drafts
-      SET
-        status = 'SUBMITTED',
-        progress_rate = 100,
-        submitted_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $1
-      RETURNING draft_id, status, progress_rate, submitted_at, updated_at
-      `,
-      [Number(draftId)]
-    );
+    const client = await pool.connect();
 
-    const submittedDraft = submitResult.rows[0];
+    try {
+      await client.query('BEGIN');
 
-    return res.status(200).json({
-      draftId: submittedDraft.draft_id,
-      status: submittedDraft.status,
-      progressRate: submittedDraft.progress_rate,
-      submittedAt: submittedDraft.submitted_at,
-      updatedAt: submittedDraft.updated_at,
-      message: '펀딩 프로젝트가 제출되었습니다.',
-    });
+      // TODO: JWT 연동 후 req.user.userId 사용
+      const breweryUserId = req.user?.userId || Number(draft.brewery_id) || 1;
+
+      /**
+       * 현재 funding_projects 테이블 기준으로 필요한 최소 필드만 생성
+       * 네 기존 목록/상세 API가 funding_projects + recipes를 JOIN하고 있어서
+       * 임시 recipe도 같이 생성해준다.
+       */
+      const recipeResult = await client.query(
+        `
+        INSERT INTO recipes (
+          user_id,
+          title,
+          content,
+          abv_range,
+          main_ingredient,
+          ai_sub_ingredient,
+          target_flavor,
+          concept,
+          summary,
+          author_type,
+          status,
+          is_fundable,
+          image_url,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8,
+          $9, 'BREWERY', 'PUBLISHED', TRUE, $10,
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        RETURNING recipe_id
+        `,
+        [
+          breweryUserId,
+          draft.title || '제목 없는 프로젝트',
+          draft.introduction || draft.summary || '',
+          `${draft.alcohol_percentage || 0}%`,
+          draft.main_ingredient || '미입력',
+          draft.sub_ingredients || '[]',
+          draft.flavor_notes || '[]',
+          draft.category || '막걸리',
+          draft.summary || '',
+          draft.thumbnail_url || null,
+        ]
+      );
+
+      const recipeId = recipeResult.rows[0].recipe_id;
+
+      const fundingResult = await client.query(
+        `
+        INSERT INTO funding_projects (
+          brewery_user_id,
+          recipe_id,
+          title,
+          description,
+          goal_amount,
+          current_amount,
+          start_date,
+          end_date,
+          price_per_bottle,
+          shipping_fee,
+          status,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, 0, $6, $7, $8, 3000,
+          'REVIEWING',
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP
+        )
+        RETURNING
+          funding_id,
+          title,
+          status,
+          goal_amount,
+          current_amount,
+          start_date,
+          end_date,
+          price_per_bottle,
+          shipping_fee,
+          created_at
+        `,
+        [
+          breweryUserId,
+          recipeId,
+          draft.title,
+          draft.summary || draft.introduction || '',
+          Number(draft.target_amount || 0),
+          draft.funding_start_date,
+          draft.funding_end_date,
+          Number(draft.price_per_bottle || 0),
+        ]
+      );
+
+      const funding = fundingResult.rows[0];
+
+      const submitResult = await client.query(
+        `
+        UPDATE funding_drafts
+        SET
+          status = 'SUBMITTED',
+          progress_rate = 100,
+          submitted_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE draft_id = $1
+        RETURNING draft_id, status, progress_rate, submitted_at, updated_at
+        `,
+        [Number(draftId)]
+      );
+
+      await client.query('COMMIT');
+
+      const submittedDraft = submitResult.rows[0];
+
+      return res.status(200).json({
+        draftId: submittedDraft.draft_id,
+        fundingId: funding.funding_id,
+        recipeId,
+        status: submittedDraft.status,
+        fundingStatus: funding.status,
+        progressRate: submittedDraft.progress_rate,
+        submittedAt: submittedDraft.submitted_at,
+        updatedAt: submittedDraft.updated_at,
+        funding: {
+          fundingId: funding.funding_id,
+          title: funding.title,
+          status: funding.status,
+          goalAmount: funding.goal_amount,
+          currentAmount: funding.current_amount,
+          startDate: funding.start_date,
+          endDate: funding.end_date,
+          pricePerBottle: funding.price_per_bottle,
+          shippingFee: funding.shipping_fee,
+          createdAt: funding.created_at,
+        },
+        message: '펀딩 프로젝트가 제출되었고 심사 중 게시글이 생성되었습니다.',
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     console.error(error);
 
@@ -1394,20 +2034,36 @@ const getFundingDraftPreview = async (req, res) => {
 
     const draft = draftResult.rows[0];
 
+    const parseJsonField = (value, fallback = []) => {
+      if (!value) return fallback;
+      if (typeof value === 'string') {
+        try {
+          return JSON.parse(value);
+        } catch (error) {
+          return fallback;
+        }
+      }
+      return value;
+    };
+
     return res.status(200).json({
       draftId: draft.draft_id,
       status: draft.status,
       progressRate: draft.progress_rate,
+
       basicInfo: {
         title: draft.title,
         shortTitle: draft.short_title,
         category: draft.category,
         mainIngredient: draft.main_ingredient,
-        subIngredients: draft.sub_ingredients,
+        subIngredients: parseJsonField(draft.sub_ingredients),
         alcoholPercentage: draft.alcohol_percentage,
         summary: draft.summary,
         thumbnailUrl: draft.thumbnail_url,
+        imageUrls: parseJsonField(draft.image_urls),
+        tags: parseJsonField(draft.tags),
       },
+
       schedule: {
         pricePerBottle: draft.price_per_bottle,
         totalQuantity: draft.total_quantity,
@@ -1417,42 +2073,60 @@ const getFundingDraftPreview = async (req, res) => {
         fundingEndDate: draft.funding_end_date,
         expectedDeliveryDate: draft.expected_delivery_date,
       },
+
       legalInfo: {
         productType: draft.product_type,
         volume: draft.volume,
-        rawMaterials: draft.raw_materials,
+        alcoholPercentage: draft.alcohol_percentage,
+        rawMaterials: parseJsonField(draft.raw_materials),
       },
+
       tasteProfile: {
         sweetness: draft.sweetness,
         acidity: draft.acidity,
         body: draft.body,
         carbonation: draft.carbonation,
         alcoholIntensity: draft.alcohol_intensity,
-        flavorNotes: draft.flavor_notes,
+        flavorNotes: parseJsonField(draft.flavor_notes),
       },
+
       plan: {
         introduction: draft.introduction,
         budgetPlan: draft.budget_plan,
         schedulePlan: draft.schedule_plan,
       },
+
       breweryInfo: {
-        breweryName: draft.brewery_name,
-        representativeName: draft.representative_name,
-        businessRegistrationNumber: draft.business_registration_number,
-        businessAddress: draft.business_address,
-        contactEmail: draft.contact_email,
+        creatorName: draft.creator_name,
+        profileImageUrl: draft.profile_image_url,
+        creatorIntroduction: draft.creator_introduction,
         contactPhone: draft.contact_phone,
+        phoneVerified: draft.phone_verified,
+        identityDocumentUrl: draft.identity_document_url,
         bankName: draft.bank_name,
         accountNumber: draft.account_number,
         accountHolder: draft.account_holder,
+        accountVerified: draft.account_verified,
+        businessType: draft.business_type,
+        businessName: draft.business_name,
+        businessRegistrationNumber: draft.business_registration_number,
+        representativeName: draft.representative_name,
+        businessAddress: draft.business_address,
+        businessCategory: draft.business_category,
+        businessItem: draft.business_item,
+        taxEmail: draft.tax_email,
+        businessRegistrationFileUrl: draft.business_registration_file_url,
       },
+
       notices: {
         refundPolicy: draft.refund_policy,
         exchangePolicy: draft.exchange_policy,
         adultVerificationNotice: draft.adult_verification_notice,
         riskNotice: draft.risk_notice,
       },
+
       documents: documentResult.rows,
+
       message: '프로젝트 미리보기 조회 성공',
     });
   } catch (error) {
@@ -2887,6 +3561,10 @@ module.exports = {
   saveTasteProfile,
   savePlan,
   saveBreweryInfo,
+  loadBreweryInfo, //프젝생성추가1 부분
+  uploadFundingDraftFile,
+  verifyPhoneForFundingDraft,
+  verifyAccountForFundingDraft,//추가4
   saveNotices,
   uploadDocument,
   submitFundingDraft, //프로젝트제출
