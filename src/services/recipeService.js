@@ -16,8 +16,8 @@ const createRecipe = async (recipeData, user) => {
 
   const result = await pool.query(
     `INSERT INTO recipes
-       (user_id, title, content, abv_range, main_ingredient, target_flavor, concept, summary, image_url, author_type)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       (user_id, title, content, abv_range, main_ingredient, ai_sub_ingredient, target_flavor, concept, summary, image_url, author_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING recipe_id, title, author_type, status, is_fundable, interest_count, image_url, created_at`,
     [
       user.id,
@@ -25,6 +25,7 @@ const createRecipe = async (recipeData, user) => {
       recipeData.content,
       recipeData.abv_range,
       recipeData.main_ingredient,
+      recipeData.sub_ingredient || null,
       recipeData.target_flavor,
       recipeData.concept,
       recipeData.summary,
@@ -205,8 +206,8 @@ const createBreweryRecipe = async (recipeData, user) => {
 
   const result = await pool.query(
     `INSERT INTO recipes
-       (user_id, title, content, abv_range, main_ingredient, target_flavor, concept, summary, image_url, author_type)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       (user_id, title, content, abv_range, main_ingredient, ai_sub_ingredient, target_flavor, concept, summary, image_url, author_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING recipe_id, title, author_type, status, is_fundable, interest_count, image_url, created_at`,
     [
       user.id,
@@ -214,6 +215,7 @@ const createBreweryRecipe = async (recipeData, user) => {
       recipeData.content,
       recipeData.abv_range,
       recipeData.main_ingredient,
+      recipeData.sub_ingredient || null,
       recipeData.target_flavor,
       recipeData.concept,
       recipeData.summary,
