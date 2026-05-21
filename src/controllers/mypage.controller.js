@@ -7,6 +7,12 @@ const {
   getMyPageSummary,
   getMySulbti,
   saveMySulbti,
+  getMyArchives,
+  getMyArchiveDetail,
+  createMyArchive,
+  updateMyArchive,
+  deleteMyArchive,
+  getArchiveTags,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -56,6 +62,22 @@ const normalizeRequiredString = (value) => {
   }
 
   return value.trim();
+};
+
+const sendArchiveErrorResponse = (res, error, fallbackMessage) => {
+  const status = getErrorStatus(error);
+
+  if (status === 400 || status === 404) {
+    return res.status(status).json({
+      status,
+      message: error.message,
+    });
+  }
+
+  return res.status(500).json({
+    status: 500,
+    message: fallbackMessage,
+  });
 };
 
 const getMyProfileController = async (req, res) => {
@@ -153,6 +175,159 @@ const saveMySulbtiController = async (req, res) => {
       status: 500,
       message: '술BTI 결과 저장 중 서버 오류가 발생했습니다.',
     });
+  }
+};
+
+const getMyArchivesController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const {
+      data,
+      page,
+      size,
+      totalElements,
+      totalPages,
+    } = await getMyArchives(userId, req.query);
+
+    return res.status(200).json({
+      status: 200,
+      message: '아카이브 목록 조회 성공',
+      data,
+      page,
+      size,
+      totalElements,
+      totalPages,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 목록 조회 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const getMyArchiveDetailController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMyArchiveDetail(userId, req.params.archiveId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '아카이브 상세 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 상세 조회 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const createMyArchiveController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await createMyArchive(userId, req.body);
+
+    return res.status(201).json({
+      status: 201,
+      message: '아카이브 작성 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 작성 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const updateMyArchiveController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await updateMyArchive(userId, req.params.archiveId, req.body);
+
+    return res.status(200).json({
+      status: 200,
+      message: '아카이브 수정 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 수정 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const deleteMyArchiveController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    await deleteMyArchive(userId, req.params.archiveId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '아카이브 삭제 성공',
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 삭제 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const getArchiveTagsController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getArchiveTags();
+
+    return res.status(200).json({
+      status: 200,
+      message: '아카이브 태그 목록 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 태그 목록 조회 중 서버 오류가 발생했습니다.',
+    );
   }
 };
 
@@ -280,6 +455,12 @@ module.exports = {
   getMyPageSummaryController,
   getMySulbtiController,
   saveMySulbtiController,
+  getMyArchivesController,
+  getMyArchiveDetailController,
+  createMyArchiveController,
+  updateMyArchiveController,
+  deleteMyArchiveController,
+  getArchiveTagsController,
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,

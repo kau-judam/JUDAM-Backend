@@ -351,6 +351,678 @@ const saveMySulbti = async (userId, payload) => {
   });
 };
 
+const ARCHIVE_TYPES = new Set(['NORMAL', 'FUNDING']);
+const ARCHIVE_QUERY_TYPES = {
+  all: null,
+  normal: 'NORMAL',
+  funding: 'FUNDING',
+};
+const ARCHIVE_TAG_CATEGORY_NAMES = {
+  TASTE: '맛',
+  AROMA: '향',
+  SITUATION: '상황',
+  MOOD: '감성',
+};
+
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
+
+const toNullableNumber = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return Number(value);
+};
+
+const mapTagResponse = (row) => ({
+  tagId: Number(row.tag_id),
+  category: row.category,
+  name: row.name,
+});
+
+const mapImageResponse = (row) => ({
+  imageId: Number(row.image_id),
+  imageUrl: row.image_url,
+  sortOrder: toNullableNumber(row.sort_order),
+});
+
+const mapArchiveResponse = (row, tags = [], images = []) => ({
+  archiveId: Number(row.archive_id),
+  archiveType: row.archive_type,
+  alcoholId: row.alcohol_id === null ? null : Number(row.alcohol_id),
+  fundingId: row.funding_id === null ? null : Number(row.funding_id),
+  orderId: row.order_id === null ? null : Number(row.order_id),
+  reviewId: row.review_id === null ? null : Number(row.review_id),
+  drinkName: row.drink_name,
+  category: row.category,
+  abv: toNullableNumber(row.abv),
+  rating: toNullableNumber(row.rating),
+  tastingNote: row.tasting_note,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  tags,
+  images,
+});
+
+const archiveSelectSql = `
+  SELECT
+    ua.archive_id,
+    ua.user_id,
+    ua.alcohol_id,
+    ua.archive_type,
+    ua.rating,
+    ua.custom_name,
+    ua.category,
+    ua.abv,
+    ua.tasting_note,
+    ua.funding_id,
+    ua.order_id,
+    ua.review_id,
+    ua.created_at,
+    ua.updated_at,
+    COALESCE(ua.custom_name, a.name) AS drink_name
+  FROM user_archives ua
+  LEFT JOIN alcohols a ON ua.alcohol_id = a.alcohol_id
+`;
+
+const parseNonNegativeInteger = (value, defaultValue, fieldName) => {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  const stringValue = String(value);
+
+  if (!/^\d+$/.test(stringValue)) {
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+  }
+
+  return Number(stringValue);
+};
+
+const parseArchiveListQuery = (query = {}) => {
+  const type = typeof query.type === 'string' && query.type.trim()
+    ? query.type.trim().toLowerCase()
+    : 'all';
+
+  if (!hasOwn(ARCHIVE_QUERY_TYPES, type)) {
+    throw createServiceError(400, '아카이브 타입이 올바르지 않습니다.');
+  }
+
+  const page = parseNonNegativeInteger(query.page, 0, 'page');
+  const size = parseNonNegativeInteger(query.size, 10, 'size');
+
+  if (size < 1) {
+    throw createServiceError(400, 'size 값이 올바르지 않습니다.');
+  }
+
+  return {
+    archiveType: ARCHIVE_QUERY_TYPES[type],
+    page,
+    size,
+    offset: page * size,
+  };
+};
+
+const parseArchiveId = (archiveId) => {
+  const stringValue = String(archiveId);
+
+  if (!/^\d+$/.test(stringValue) || Number(stringValue) < 1) {
+    throw createServiceError(400, '아카이브 ID가 올바르지 않습니다.');
+  }
+
+  return Number(stringValue);
+};
+
+const groupRowsByArchiveId = (rows, mapper) => {
+  const grouped = new Map();
+
+  rows.forEach((row) => {
+    const archiveId = String(row.archive_id);
+    const items = grouped.get(archiveId) || [];
+    items.push(mapper(row));
+    grouped.set(archiveId, items);
+  });
+
+  return grouped;
+};
+
+const getTagsByArchiveIds = async (clientOrPool, archiveIds) => {
+  if (archiveIds.length === 0) {
+    return new Map();
+  }
+
+  const { rows } = await clientOrPool.query(
+    `
+      SELECT
+        uat.archive_id,
+        t.tag_id,
+        t.category,
+        t.name
+      FROM user_archive_tags uat
+      JOIN archive_tags t ON uat.tag_id = t.tag_id
+      WHERE uat.archive_id = ANY($1::int[])
+      ORDER BY uat.archive_id, t.category, t.tag_id
+    `,
+    [archiveIds],
+  );
+
+  return groupRowsByArchiveId(rows, mapTagResponse);
+};
+
+const getImagesByArchiveIds = async (clientOrPool, archiveIds) => {
+  if (archiveIds.length === 0) {
+    return new Map();
+  }
+
+  const { rows } = await clientOrPool.query(
+    `
+      SELECT
+        image_id,
+        archive_id,
+        image_url,
+        sort_order
+      FROM user_archive_images
+      WHERE archive_id = ANY($1::int[])
+      ORDER BY archive_id, sort_order, image_id
+    `,
+    [archiveIds],
+  );
+
+  return groupRowsByArchiveId(rows, mapImageResponse);
+};
+
+const mapArchivesWithRelations = async (rows, clientOrPool = pool) => {
+  const archiveIds = rows.map((row) => Number(row.archive_id));
+  const [tagsByArchiveId, imagesByArchiveId] = await Promise.all([
+    getTagsByArchiveIds(clientOrPool, archiveIds),
+    getImagesByArchiveIds(clientOrPool, archiveIds),
+  ]);
+
+  return rows.map((row) => {
+    const archiveId = String(row.archive_id);
+
+    return mapArchiveResponse(
+      row,
+      tagsByArchiveId.get(archiveId) || [],
+      imagesByArchiveId.get(archiveId) || [],
+    );
+  });
+};
+
+const findMyArchiveRow = async (clientOrPool, userId, archiveId) => {
+  const { rows } = await clientOrPool.query(
+    `
+      ${archiveSelectSql}
+      WHERE ua.archive_id = $1
+        AND ua.user_id = $2
+        AND ua.deleted_at IS NULL
+      LIMIT 1
+    `,
+    [archiveId, userId],
+  );
+
+  return rows[0] || null;
+};
+
+const normalizeArchiveType = (archiveType, isPartial) => {
+  if (archiveType === undefined && isPartial) {
+    return undefined;
+  }
+
+  if (typeof archiveType !== 'string') {
+    throw createServiceError(400, '아카이브 유형은 NORMAL 또는 FUNDING만 가능합니다.');
+  }
+
+  const normalized = archiveType.trim().toUpperCase();
+
+  if (!ARCHIVE_TYPES.has(normalized)) {
+    throw createServiceError(400, '아카이브 유형은 NORMAL 또는 FUNDING만 가능합니다.');
+  }
+
+  return normalized;
+};
+
+const normalizeOptionalString = (value, fieldName) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+  }
+
+  const trimmed = value.trim();
+  return trimmed || null;
+};
+
+const normalizeOptionalNumber = (value, fieldName, min, max = null) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+  }
+
+  if (value < min || (max !== null && value > max)) {
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+  }
+
+  return value;
+};
+
+const normalizeOptionalId = (value, fieldName) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+  }
+
+  return value;
+};
+
+const validateArchivePayload = (payload = {}, isPartial = false) => {
+  const body = payload && typeof payload === 'object' ? payload : {};
+  const validated = {};
+  const archiveType = normalizeArchiveType(body.archiveType, isPartial);
+
+  if (archiveType !== undefined) {
+    validated.archiveType = archiveType;
+  }
+
+  const fieldNormalizers = {
+    alcoholId: () => normalizeOptionalId(body.alcoholId, 'alcoholId'),
+    customName: () => normalizeOptionalString(body.customName, 'customName'),
+    category: () => normalizeOptionalString(body.category, 'category'),
+    abv: () => normalizeOptionalNumber(body.abv, 'abv', 0),
+    rating: () => normalizeOptionalNumber(body.rating, 'rating', 0, 5),
+    tastingNote: () => normalizeOptionalString(body.tastingNote, 'tastingNote'),
+    fundingId: () => normalizeOptionalId(body.fundingId, 'fundingId'),
+    orderId: () => normalizeOptionalId(body.orderId, 'orderId'),
+    reviewId: () => normalizeOptionalId(body.reviewId, 'reviewId'),
+  };
+
+  Object.entries(fieldNormalizers).forEach(([fieldName, normalizer]) => {
+    if (hasOwn(body, fieldName)) {
+      validated[fieldName] = normalizer();
+    }
+  });
+
+  if (hasOwn(body, 'tagIds')) {
+    if (!Array.isArray(body.tagIds)) {
+      throw createServiceError(400, 'tagIds는 배열이어야 합니다.');
+    }
+
+    validated.tagIds = body.tagIds;
+  }
+
+  if (!isPartial) {
+    const customName = hasOwn(validated, 'customName') ? validated.customName : null;
+    const alcoholId = hasOwn(validated, 'alcoholId') ? validated.alcoholId : null;
+
+    if (!customName && alcoholId === null) {
+      throw createServiceError(400, 'customName과 alcoholId 중 하나는 필요합니다.');
+    }
+  }
+
+  return validated;
+};
+
+const validateTagIds = async (clientOrPool, tagIds) => {
+  if (tagIds === undefined) {
+    return undefined;
+  }
+
+  const uniqueTagIds = [...new Set(tagIds)];
+
+  if (
+    uniqueTagIds.some(
+      (tagId) => typeof tagId !== 'number' || !Number.isInteger(tagId) || tagId < 1,
+    )
+  ) {
+    throw createServiceError(400, '유효하지 않은 아카이브 태그입니다.');
+  }
+
+  if (uniqueTagIds.length === 0) {
+    return [];
+  }
+
+  const { rows } = await clientOrPool.query(
+    `
+      SELECT tag_id
+      FROM archive_tags
+      WHERE tag_id = ANY($1::int[])
+    `,
+    [uniqueTagIds],
+  );
+
+  if (rows.length !== uniqueTagIds.length) {
+    throw createServiceError(400, '유효하지 않은 아카이브 태그입니다.');
+  }
+
+  return uniqueTagIds;
+};
+
+const ensureArchiveHasDrinkName = (archiveData, currentArchive = null) => {
+  const customName = hasOwn(archiveData, 'customName')
+    ? archiveData.customName
+    : currentArchive?.custom_name || null;
+  const alcoholId = hasOwn(archiveData, 'alcoholId')
+    ? archiveData.alcoholId
+    : currentArchive?.alcohol_id || null;
+
+  if (!customName && alcoholId === null) {
+    throw createServiceError(400, 'customName과 alcoholId 중 하나는 필요합니다.');
+  }
+};
+
+const insertArchiveTags = async (client, archiveId, tagIds) => {
+  if (!tagIds || tagIds.length === 0) {
+    return;
+  }
+
+  await client.query(
+    `
+      INSERT INTO user_archive_tags (
+        archive_id,
+        tag_id,
+        created_at
+      )
+      SELECT $1, unnest($2::int[]), CURRENT_TIMESTAMP
+    `,
+    [archiveId, tagIds],
+  );
+};
+
+const getMyArchives = async (userId, query) => {
+  const {
+    archiveType,
+    page,
+    size,
+    offset,
+  } = parseArchiveListQuery(query);
+  const whereClauses = ['ua.user_id = $1', 'ua.deleted_at IS NULL'];
+  const filterValues = [userId];
+
+  if (archiveType) {
+    filterValues.push(archiveType);
+    whereClauses.push(`ua.archive_type = $${filterValues.length}`);
+  }
+
+  const whereSql = whereClauses.join(' AND ');
+  const [{ rows: countRows }, { rows: archiveRows }] = await Promise.all([
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM user_archives ua
+        WHERE ${whereSql}
+      `,
+      filterValues,
+    ),
+    pool.query(
+      `
+        ${archiveSelectSql}
+        WHERE ${whereSql}
+        ORDER BY ua.created_at DESC
+        LIMIT $${filterValues.length + 1}
+        OFFSET $${filterValues.length + 2}
+      `,
+      [...filterValues, size, offset],
+    ),
+  ]);
+
+  const totalElements = Number(countRows[0]?.count || 0);
+  const data = await mapArchivesWithRelations(archiveRows);
+
+  return {
+    data,
+    page,
+    size,
+    totalElements,
+    totalPages: totalElements === 0 ? 0 : Math.ceil(totalElements / size),
+  };
+};
+
+const getMyArchiveDetail = async (userId, archiveId) => {
+  const parsedArchiveId = parseArchiveId(archiveId);
+  const archiveRow = await findMyArchiveRow(pool, userId, parsedArchiveId);
+
+  if (!archiveRow) {
+    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+  }
+
+  const [archive] = await mapArchivesWithRelations([archiveRow]);
+  return archive;
+};
+
+const createMyArchive = async (userId, payload) => {
+  const archiveData = validateArchivePayload(payload, false);
+  ensureArchiveHasDrinkName(archiveData);
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const tagIds = await validateTagIds(client, archiveData.tagIds);
+    const { rows } = await client.query(
+      `
+        INSERT INTO user_archives (
+          user_id,
+          alcohol_id,
+          archive_type,
+          rating,
+          custom_name,
+          category,
+          abv,
+          tasting_note,
+          funding_id,
+          order_id,
+          review_id,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP
+        )
+        RETURNING archive_id
+      `,
+      [
+        userId,
+        archiveData.alcoholId ?? null,
+        archiveData.archiveType,
+        archiveData.rating ?? null,
+        archiveData.customName ?? null,
+        archiveData.category ?? null,
+        archiveData.abv ?? null,
+        archiveData.tastingNote ?? null,
+        archiveData.fundingId ?? null,
+        archiveData.orderId ?? null,
+        archiveData.reviewId ?? null,
+      ],
+    );
+
+    const archiveId = Number(rows[0].archive_id);
+    await insertArchiveTags(client, archiveId, tagIds);
+
+    const archiveRow = await findMyArchiveRow(client, userId, archiveId);
+    const [archive] = await mapArchivesWithRelations([archiveRow], client);
+
+    await client.query('COMMIT');
+    return archive;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const updateMyArchive = async (userId, archiveId, payload) => {
+  const parsedArchiveId = parseArchiveId(archiveId);
+  const archiveData = validateArchivePayload(payload, true);
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const currentArchive = await findMyArchiveRow(client, userId, parsedArchiveId);
+
+    if (!currentArchive) {
+      throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+    }
+
+    ensureArchiveHasDrinkName(archiveData, currentArchive);
+
+    const updateFields = [
+      ['archiveType', 'archive_type'],
+      ['alcoholId', 'alcohol_id'],
+      ['customName', 'custom_name'],
+      ['category', 'category'],
+      ['abv', 'abv'],
+      ['rating', 'rating'],
+      ['tastingNote', 'tasting_note'],
+      ['fundingId', 'funding_id'],
+      ['orderId', 'order_id'],
+      ['reviewId', 'review_id'],
+    ];
+    const setClauses = [];
+    const values = [];
+
+    updateFields.forEach(([fieldName, columnName]) => {
+      if (hasOwn(archiveData, fieldName)) {
+        values.push(archiveData[fieldName]);
+        setClauses.push(`${columnName} = $${values.length}`);
+      }
+    });
+
+    values.push(parsedArchiveId, userId);
+    await client.query(
+      `
+        UPDATE user_archives
+        SET
+          ${setClauses.length > 0 ? `${setClauses.join(', ')},` : ''}
+          updated_at = CURRENT_TIMESTAMP
+        WHERE archive_id = $${values.length - 1}
+          AND user_id = $${values.length}
+          AND deleted_at IS NULL
+      `,
+      values,
+    );
+
+    if (hasOwn(archiveData, 'tagIds')) {
+      const tagIds = await validateTagIds(client, archiveData.tagIds);
+
+      await client.query(
+        `
+          DELETE FROM user_archive_tags
+          WHERE archive_id = $1
+        `,
+        [parsedArchiveId],
+      );
+      await insertArchiveTags(client, parsedArchiveId, tagIds);
+    }
+
+    const archiveRow = await findMyArchiveRow(client, userId, parsedArchiveId);
+    const [archive] = await mapArchivesWithRelations([archiveRow], client);
+
+    await client.query('COMMIT');
+    return archive;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const deleteMyArchive = async (userId, archiveId) => {
+  const parsedArchiveId = parseArchiveId(archiveId);
+  const { rows } = await pool.query(
+    `
+      UPDATE user_archives
+      SET
+        deleted_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE archive_id = $1
+        AND user_id = $2
+        AND deleted_at IS NULL
+      RETURNING archive_id
+    `,
+    [parsedArchiveId, userId],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+  }
+};
+
+const getArchiveTags = async () => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        tag_id,
+        category,
+        name
+      FROM archive_tags
+      ORDER BY
+        CASE category
+          WHEN 'TASTE' THEN 1
+          WHEN 'AROMA' THEN 2
+          WHEN 'SITUATION' THEN 3
+          WHEN 'MOOD' THEN 4
+          ELSE 99
+        END,
+        tag_id
+    `,
+  );
+
+  const grouped = new Map();
+
+  rows.forEach((row) => {
+    const group = grouped.get(row.category) || {
+      category: row.category,
+      categoryName: ARCHIVE_TAG_CATEGORY_NAMES[row.category] || row.category,
+      tags: [],
+    };
+
+    group.tags.push({
+      tagId: Number(row.tag_id),
+      name: row.name,
+    });
+    grouped.set(row.category, group);
+  });
+
+  return [...grouped.values()];
+};
+
 module.exports = {
   getMyProfile,
   checkNickname,
@@ -363,4 +1035,13 @@ module.exports = {
   findSulbtiTypeByCode,
   mapSulbtiResponse,
   getEmptySulbtiResponse,
+  getMyArchives,
+  getMyArchiveDetail,
+  createMyArchive,
+  updateMyArchive,
+  deleteMyArchive,
+  getArchiveTags,
+  mapArchiveResponse,
+  validateArchivePayload,
+  validateTagIds,
 };
