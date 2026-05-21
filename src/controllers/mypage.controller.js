@@ -4,6 +4,8 @@ const {
   updateNickname,
   updatePhoneNumber,
   getMyPageSummary,
+  getMySulbti,
+  saveMySulbti,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -94,6 +96,61 @@ const getMyPageSummaryController = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '마이페이지 메인 요약 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const getMySulbtiController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMySulbti(userId);
+
+    return res.status(200).json({
+      status: 200,
+      message: data.hasResult ? '술BTI 결과 조회 성공' : '술BTI 결과가 없습니다.',
+      data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '술BTI 결과 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const saveMySulbtiController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await saveMySulbti(userId, req.body);
+
+    return res.status(201).json({
+      status: 201,
+      message: '술BTI 결과 저장 성공',
+      data,
+    });
+  } catch (error) {
+    const status = getErrorStatus(error);
+
+    if (status === 400) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '술BTI 결과 저장 중 서버 오류가 발생했습니다.',
     });
   }
 };
@@ -190,6 +247,8 @@ const updatePhoneNumberController = async (req, res) => {
 module.exports = {
   getMyProfileController,
   getMyPageSummaryController,
+  getMySulbtiController,
+  saveMySulbtiController,
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,
