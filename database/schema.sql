@@ -451,6 +451,7 @@ CREATE TABLE IF NOT EXISTS user_archives (
   category VARCHAR(50),
   abv DECIMAL(4,1),
   tasting_note TEXT,
+  record_date DATE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_archives_user
     FOREIGN KEY (user_id)
