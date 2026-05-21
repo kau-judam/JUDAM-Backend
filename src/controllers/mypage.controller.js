@@ -3,6 +3,7 @@ const {
   checkNickname,
   updateNickname,
   updatePhoneNumber,
+  getMyPageSummary,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -71,6 +72,29 @@ const getMyProfileController = async (req, res) => {
     });
   } catch (error) {
     return sendErrorResponse(res, error, '내 정보 조회 중 서버 오류가 발생했습니다.');
+  }
+};
+
+const getMyPageSummaryController = async (req, res) => {
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    return res.status(401).json(UNAUTHORIZED_RESPONSE);
+  }
+
+  try {
+    const data = await getMyPageSummary(userId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '마이페이지 메인 요약 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '마이페이지 메인 요약 조회 중 서버 오류가 발생했습니다.',
+    });
   }
 };
 
@@ -165,6 +189,7 @@ const updatePhoneNumberController = async (req, res) => {
 
 module.exports = {
   getMyProfileController,
+  getMyPageSummaryController,
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,
