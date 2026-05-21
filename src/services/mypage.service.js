@@ -3,6 +3,7 @@ const {
   updateUserProfile,
   isNicknameExists,
 } = require('./user.service');
+const { uploadFileToS3 } = require('./s3.service');
 const pool = require('../config/db');
 
 const createServiceError = (statusCode, message) => {
@@ -66,6 +67,20 @@ const updatePhoneNumber = async (userId, phoneNumber) => {
 
   return {
     phoneNumber: user.phone_number,
+  };
+};
+
+const updateProfileImage = async (userId, file) => {
+  const profileImageUrl = await uploadFileToS3(
+    file.buffer,
+    file.originalname,
+    file.mimetype,
+    userId,
+  );
+  const user = await updateUserProfile(userId, { profileImage: profileImageUrl });
+
+  return {
+    profileImageUrl: user.profile_image,
   };
 };
 
@@ -341,6 +356,7 @@ module.exports = {
   checkNickname,
   updateNickname,
   updatePhoneNumber,
+  updateProfileImage,
   getMyPageSummary,
   getMySulbti,
   saveMySulbti,
