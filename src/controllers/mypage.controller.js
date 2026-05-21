@@ -3,6 +3,7 @@ const {
   checkNickname,
   updateNickname,
   updatePhoneNumber,
+  updateProfileImage,
   getMyPageSummary,
   getMySulbti,
   saveMySulbti,
@@ -244,6 +245,36 @@ const updatePhoneNumberController = async (req, res) => {
   }
 };
 
+const updateProfileImageController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  if (!req.file) {
+    return res.status(400).json({
+      status: 400,
+      message: '프로필 이미지 파일을 첨부해주세요.',
+    });
+  }
+
+  try {
+    const data = await updateProfileImage(userId, req.file);
+
+    return res.status(200).json({
+      status: 200,
+      message: '프로필 이미지 수정 성공',
+      data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '프로필 이미지 수정 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 module.exports = {
   getMyProfileController,
   getMyPageSummaryController,
@@ -252,4 +283,5 @@ module.exports = {
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,
+  updateProfileImageController,
 };
