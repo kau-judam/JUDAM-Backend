@@ -3,6 +3,7 @@ const {
   updateUserProfile,
   isNicknameExists,
 } = require('./user.service');
+const pool = require('../config/db');
 
 const createServiceError = (statusCode, message) => {
   const error = new Error(message);
@@ -68,9 +69,92 @@ const updatePhoneNumber = async (userId, phoneNumber) => {
   };
 };
 
+const getParticipatedFundingCount = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT COUNT(DISTINCT funding_id) AS count
+      FROM orders
+      WHERE user_id = $1
+        AND order_status = 'PAID'
+        AND funding_id IS NOT NULL
+    `,
+    [userId],
+  );
+
+  return Number(rows[0]?.count || 0);
+};
+
+const getArchiveCount = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT COUNT(*) AS count
+      FROM user_archives
+      WHERE user_id = $1
+    `,
+    [userId],
+  );
+
+  return Number(rows[0]?.count || 0);
+};
+
+const getLatestSulbti = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        r.result_id,
+        r.created_at,
+        t.type_code,
+        t.type_name,
+        t.description
+      FROM sul_bti_results r
+      LEFT JOIN sul_bti_types t ON r.type_id = t.type_id
+      WHERE r.user_id = $1
+      ORDER BY r.created_at DESC
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  const latestResult = rows[0];
+
+  if (!latestResult) {
+    return {
+      hasResult: false,
+      type: null,
+      title: null,
+      summary: null,
+      tags: [],
+    };
+  }
+
+  return {
+    hasResult: true,
+    type: latestResult.type_code || null,
+    title: latestResult.type_name || null,
+    summary: latestResult.description || null,
+    tags: [],
+  };
+};
+
+const getMyPageSummary = async (userId) => {
+  const [participatedFundingCount, archiveCount, sulbti] = await Promise.all([
+    getParticipatedFundingCount(userId),
+    getArchiveCount(userId),
+    getLatestSulbti(userId),
+  ]);
+
+  return {
+    participatedFundingCount,
+    archiveCount,
+    badgeCount: 0,
+    sulbti,
+  };
+};
+
 module.exports = {
   getMyProfile,
   checkNickname,
   updateNickname,
   updatePhoneNumber,
+  getMyPageSummary,
 };

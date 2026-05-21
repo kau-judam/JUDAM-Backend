@@ -3,6 +3,7 @@ const authMiddleware = require('../middlewares/authMiddleware');
 
 const {
   getMyProfileController,
+  getMyPageSummaryController,
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,
@@ -10,6 +11,7 @@ const {
 
 const router = express.Router();
 
+router.get('/summary', authMiddleware, getMyPageSummaryController);
 router.get('/profile', authMiddleware, getMyProfileController);
 router.get('/profile/nickname/check', authMiddleware, checkNicknameController);
 router.patch('/profile/nickname', authMiddleware, updateNicknameController);
