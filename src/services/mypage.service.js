@@ -374,6 +374,22 @@ const toNullableNumber = (value) => {
   return Number(value);
 };
 
+const formatDateOnly = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  return String(value);
+};
+
 const mapTagResponse = (row) => ({
   tagId: Number(row.tag_id),
   category: row.category,
@@ -398,6 +414,7 @@ const mapArchiveResponse = (row, tags = [], images = []) => ({
   abv: toNullableNumber(row.abv),
   rating: toNullableNumber(row.rating),
   tastingNote: row.tasting_note,
+  recordDate: formatDateOnly(row.record_date),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   tags,
@@ -415,6 +432,7 @@ const archiveSelectSql = `
     ua.category,
     ua.abv,
     ua.tasting_note,
+    ua.record_date,
     ua.funding_id,
     ua.order_id,
     ua.review_id,
@@ -635,6 +653,28 @@ const normalizeOptionalId = (value, fieldName) => {
   return value;
 };
 
+const normalizeOptionalRecordDate = (value) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw createServiceError(400, '기록 날짜 형식이 올바르지 않습니다.');
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw createServiceError(400, '기록 날짜 형식이 올바르지 않습니다.');
+  }
+
+  return value;
+};
+
 const validateArchivePayload = (payload = {}, isPartial = false) => {
   const body = payload && typeof payload === 'object' ? payload : {};
   const validated = {};
@@ -651,6 +691,7 @@ const validateArchivePayload = (payload = {}, isPartial = false) => {
     abv: () => normalizeOptionalNumber(body.abv, 'abv', 0),
     rating: () => normalizeOptionalNumber(body.rating, 'rating', 0, 5),
     tastingNote: () => normalizeOptionalString(body.tastingNote, 'tastingNote'),
+    recordDate: () => normalizeOptionalRecordDate(body.recordDate),
     fundingId: () => normalizeOptionalId(body.fundingId, 'fundingId'),
     orderId: () => normalizeOptionalId(body.orderId, 'orderId'),
     reviewId: () => normalizeOptionalId(body.reviewId, 'reviewId'),
@@ -830,6 +871,7 @@ const createMyArchive = async (userId, payload) => {
           category,
           abv,
           tasting_note,
+          record_date,
           funding_id,
           order_id,
           review_id,
@@ -848,6 +890,7 @@ const createMyArchive = async (userId, payload) => {
           $9,
           $10,
           $11,
+          $12,
           CURRENT_TIMESTAMP,
           CURRENT_TIMESTAMP
         )
@@ -862,6 +905,7 @@ const createMyArchive = async (userId, payload) => {
         archiveData.category ?? null,
         archiveData.abv ?? null,
         archiveData.tastingNote ?? null,
+        archiveData.recordDate ?? null,
         archiveData.fundingId ?? null,
         archiveData.orderId ?? null,
         archiveData.reviewId ?? null,
@@ -909,6 +953,7 @@ const updateMyArchive = async (userId, archiveId, payload) => {
       ['abv', 'abv'],
       ['rating', 'rating'],
       ['tastingNote', 'tasting_note'],
+      ['recordDate', 'record_date'],
       ['fundingId', 'funding_id'],
       ['orderId', 'order_id'],
       ['reviewId', 'review_id'],
