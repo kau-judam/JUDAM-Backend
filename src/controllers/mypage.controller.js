@@ -2,9 +2,10 @@ const {
   getMyProfile,
   checkNickname,
   updateNickname,
-  updatePhoneNumber,
   updateProfileImage,
   changeMyPassword,
+  requestPhoneVerification,
+  updatePhoneNumberWithVerification,
   getMyPageSummary,
   getMySulbti,
   saveMySulbti,
@@ -400,6 +401,66 @@ const updatePhoneNumberController = async (req, res) => {
   }
 
   const phoneNumber = normalizeRequiredString(req.body?.phoneNumber);
+  const verificationCode = normalizeRequiredString(req.body?.verificationCode);
+
+  if (!phoneNumber) {
+    return res.status(400).json({
+      status: 400,
+      message: '전화번호를 입력해주세요.',
+    });
+  }
+
+  if (!verificationCode) {
+    return res.status(400).json({
+      status: 400,
+      message: '인증번호를 입력해주세요.',
+    });
+  }
+
+  try {
+    const data = await updatePhoneNumberWithVerification(
+      userId,
+      phoneNumber,
+      verificationCode,
+    );
+
+    return res.status(200).json({
+      status: 200,
+      message: '전화번호 수정 성공',
+      data,
+    });
+  } catch (error) {
+    const status = getErrorStatus(error);
+
+    if (status === 400 || status === 404 || status === 502) {
+      return res.status(status).json({
+        status,
+        message: error.message,
+      });
+    }
+
+    if (status === 500 && error.message === '전화번호 인증 서비스 설정이 누락되었습니다.') {
+      return res.status(500).json({
+        status: 500,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '전화번호 수정 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const requestPhoneVerificationController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  const phoneNumber = normalizeRequiredString(req.body?.phoneNumber);
 
   if (!phoneNumber) {
     return res.status(400).json({
@@ -409,15 +470,27 @@ const updatePhoneNumberController = async (req, res) => {
   }
 
   try {
-    const data = await updatePhoneNumber(userId, phoneNumber);
+    const data = await requestPhoneVerification(userId, phoneNumber);
 
     return res.status(200).json({
       status: 200,
-      message: '전화번호 수정 성공',
+      message: '전화번호 인증 요청이 생성되었습니다.',
       data,
     });
   } catch (error) {
-    return sendErrorResponse(res, error, '전화번호 수정 중 서버 오류가 발생했습니다.');
+    const status = getErrorStatus(error);
+
+    if (status === 400) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '전화번호 인증 요청 생성 중 서버 오류가 발생했습니다.',
+    });
   }
 };
 
@@ -517,6 +590,7 @@ module.exports = {
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,
+  requestPhoneVerificationController,
   updateProfileImageController,
   changeMyPasswordController,
 };
