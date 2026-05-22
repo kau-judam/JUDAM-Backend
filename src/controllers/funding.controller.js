@@ -1,30 +1,123 @@
 const pool = require('../config/db');
 
-// 펀딩 약관 동의
+const getBodyValue = (body, keys) => {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      return body[key];
+    }
+  }
+
+  return undefined;
+};
+
+const toRequiredBoolean = (value) =>
+  value === true || value === 'true' || value === 1 || value === '1';
+
+const toTrimmedString = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  return String(value).trim();
+};
+
+const parseJsonArrayField = (value, fallback = []) => {
+  if (!value) return fallback;
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : fallback;
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  return fallback;
+};
+
+const DOCUMENT_TYPE_ALIASES = {
+  idCard: 'ID_CARD',
+  id_card: 'ID_CARD',
+  ID_CARD: 'ID_CARD',
+  businessLicense: 'BUSINESS_LICENSE',
+  business_license: 'BUSINESS_LICENSE',
+  BUSINESS_LICENSE: 'BUSINESS_LICENSE',
+  BUSINESS_REGISTRATION: 'BUSINESS_LICENSE',
+  salesPermit: 'SALES_PERMIT',
+  sales_permit: 'SALES_PERMIT',
+  SALES_PERMIT: 'SALES_PERMIT',
+  MAIL_ORDER_BUSINESS: 'SALES_PERMIT',
+  LIQUOR_SALES_APPROVAL: 'SALES_PERMIT',
+  alcoholPermit: 'ALCOHOL_PERMIT',
+  alcohol_permit: 'ALCOHOL_PERMIT',
+  ALCOHOL_PERMIT: 'ALCOHOL_PERMIT',
+  manufacturingLicense: 'MANUFACTURING_LICENSE',
+  manufacturing_license: 'MANUFACTURING_LICENSE',
+  MANUFACTURING_LICENSE: 'MANUFACTURING_LICENSE',
+  LIQUOR_LICENSE: 'MANUFACTURING_LICENSE',
+  BANK_ACCOUNT_COPY: 'BANK_ACCOUNT_COPY',
+  ETC: 'ETC',
+};
+
+const REQUIRED_FUNDING_DOCUMENT_TYPES = [
+  'ID_CARD',
+  'BUSINESS_LICENSE',
+  'SALES_PERMIT',
+  'ALCOHOL_PERMIT',
+  'MANUFACTURING_LICENSE',
+];
+
+const normalizeFundingDocumentType = (documentType) =>
+  DOCUMENT_TYPE_ALIASES[documentType] || null;
+
 // 펀딩 약관 동의
 const saveAgreement = async (req, res) => {
-  const {
-    breweryId,
-    isAdultConfirmed,
-    isContactInfoAgreed,
-    isSettlementInfoAgreed,
-    isFeePolicyAgreed,
-    isResponsibilityAgreed,
-    isLicenseAgreed,
-    isIpPolicyAgreed,
-    allRequiredTermsAgreed,
-  } = req.body;
+  const body = req.body || {};
+  const breweryId = getBodyValue(body, ['breweryId', 'brewery_id']);
+  const isAdultConfirmed = toRequiredBoolean(
+    getBodyValue(body, ['isAdultConfirmed', 'is_adult_confirmed', 'age'])
+  );
+  const isContactInfoAgreed = toRequiredBoolean(
+    getBodyValue(body, ['isContactInfoAgreed', 'is_contact_info_agreed', 'contact'])
+  );
+  const isSettlementInfoAgreed = toRequiredBoolean(
+    getBodyValue(body, ['isSettlementInfoAgreed', 'is_settlement_info_agreed', 'settlement'])
+  );
+  const isFeePolicyAgreed = toRequiredBoolean(
+    getBodyValue(body, ['isFeePolicyAgreed', 'is_fee_policy_agreed', 'fee'])
+  );
+  const isResponsibilityAgreed = toRequiredBoolean(
+    getBodyValue(body, ['isResponsibilityAgreed', 'is_responsibility_agreed', 'responsibility'])
+  );
+  const isLicenseAgreed = toRequiredBoolean(
+    getBodyValue(body, ['isLicenseAgreed', 'is_license_agreed', 'license'])
+  );
+  const isIpPolicyAgreed = toRequiredBoolean(
+    getBodyValue(body, ['isIpPolicyAgreed', 'is_ip_policy_agreed', 'ip'])
+  );
+  const allSevenTermsAgreed =
+    isAdultConfirmed &&
+    isContactInfoAgreed &&
+    isSettlementInfoAgreed &&
+    isFeePolicyAgreed &&
+    isResponsibilityAgreed &&
+    isLicenseAgreed &&
+    isIpPolicyAgreed;
+  const allRequiredTermsAgreedValue = getBodyValue(body, [
+    'allRequiredTermsAgreed',
+    'all_required_terms_agreed',
+  ]);
+  const allRequiredTermsAgreed =
+    allRequiredTermsAgreedValue === undefined
+      ? allSevenTermsAgreed
+      : toRequiredBoolean(allRequiredTermsAgreedValue);
 
   if (
     !breweryId ||
-    isAdultConfirmed !== true ||
-    isContactInfoAgreed !== true ||
-    isSettlementInfoAgreed !== true ||
-    isFeePolicyAgreed !== true ||
-    isResponsibilityAgreed !== true ||
-    isLicenseAgreed !== true ||
-    isIpPolicyAgreed !== true ||
-    allRequiredTermsAgreed !== true
+    !allSevenTermsAgreed ||
+    !allRequiredTermsAgreed
   ) {
     return res.status(400).json({
       status: 400,
@@ -987,27 +1080,42 @@ const savePlan = async (req, res) => {
 // 창작자/정산/사업자 정보 저장
 const saveBreweryInfo = async (req, res) => {
   const { draftId } = req.params;
+  const body = req.body || {};
 
-  const {
-    breweryName,
-    representativeName,
-    businessRegistrationNumber,
-    businessAddress,
-    contactEmail,
-    contactPhone,
-    bankName,
-    accountNumber,
-    accountHolder,
-
-    breweryProfileImageUrl,
-    breweryBio,
-    businessType,
-    businessName,
-    businessCategory,
-    businessItem,
-    phoneVerified = false,
-    accountVerified = false,
-  } = req.body;
+  const breweryName = toTrimmedString(getBodyValue(body, ['breweryName', 'brewery_name']));
+  const representativeName = toTrimmedString(
+    getBodyValue(body, ['representativeName', 'representative_name'])
+  );
+  const businessRegistrationNumber = toTrimmedString(
+    getBodyValue(body, ['businessRegistrationNumber', 'business_registration_number'])
+  );
+  const businessAddress = toTrimmedString(
+    getBodyValue(body, ['businessAddress', 'business_address'])
+  );
+  const contactEmail = toTrimmedString(getBodyValue(body, ['contactEmail', 'contact_email']));
+  const contactPhone = toTrimmedString(getBodyValue(body, ['contactPhone', 'contact_phone']));
+  const bankName = toTrimmedString(getBodyValue(body, ['bankName', 'bank_name']));
+  const accountNumber = toTrimmedString(getBodyValue(body, ['accountNumber', 'account_number']));
+  const accountHolder = toTrimmedString(
+    getBodyValue(body, ['accountHolder', 'account_holder']) || representativeName
+  );
+  const breweryProfileImageUrl = getBodyValue(body, [
+    'breweryProfileImageUrl',
+    'brewery_profile_image_url',
+    'profileImageUrl',
+    'profile_image_url',
+  ]);
+  const breweryBio = getBodyValue(body, ['breweryBio', 'brewery_bio', 'creatorIntroduction']);
+  const businessType = getBodyValue(body, ['businessType', 'business_type']);
+  const businessName = getBodyValue(body, ['businessName', 'business_name']);
+  const businessCategory = getBodyValue(body, ['businessCategory', 'business_category']);
+  const businessItem = getBodyValue(body, ['businessItem', 'business_item']);
+  const phoneVerified = toRequiredBoolean(
+    getBodyValue(body, ['phoneVerified', 'phone_verified'])
+  );
+  const accountVerified = toRequiredBoolean(
+    getBodyValue(body, ['accountVerified', 'account_verified'])
+  );
 
   if (
     !draftId ||
@@ -1028,8 +1136,8 @@ const saveBreweryInfo = async (req, res) => {
     });
   }
 
-  const normalizedBusinessNumber = String(businessRegistrationNumber).replace(/-/g, '');
-  const normalizedPhone = String(contactPhone).replace(/-/g, '');
+  const normalizedBusinessNumber = businessRegistrationNumber.replace(/\D/g, '');
+  const normalizedPhone = contactPhone.replace(/\D/g, '');
 
   if (!/^\d{10}$/.test(normalizedBusinessNumber)) {
     return res.status(400).json({
@@ -1088,8 +1196,8 @@ const saveBreweryInfo = async (req, res) => {
         businessName || breweryName,
         businessCategory || null,
         businessItem || null,
-        Boolean(phoneVerified),
-        Boolean(accountVerified),
+        phoneVerified,
+        accountVerified,
         Number(draftId),
       ]
     );
@@ -1485,23 +1593,9 @@ const saveNotices = async (req, res) => {
 // 필수 서류 업로드
 const uploadDocument = async (req, res) => {
   const { draftId } = req.params;
-  const { documentType } = req.body;
+  const { documentType } = req.body || {};
   const file = req.file;
-
-  const allowedDocumentTypes = [
-    'BUSINESS_REGISTRATION',
-    'MAIL_ORDER_BUSINESS',
-    'LIQUOR_SALES_APPROVAL',
-    'LIQUOR_LICENSE',
-    'BANK_ACCOUNT_COPY',
-    'ETC',
-  ];
-
-  const requiredDocumentTypes = [
-    'MAIL_ORDER_BUSINESS',
-    'LIQUOR_SALES_APPROVAL',
-    'LIQUOR_LICENSE',
-  ];
+  const normalizedDocumentType = normalizeFundingDocumentType(documentType);
 
   if (!draftId || isNaN(Number(draftId)) || !documentType) {
     return res.status(400).json({
@@ -1510,7 +1604,7 @@ const uploadDocument = async (req, res) => {
     });
   }
 
-  if (!allowedDocumentTypes.includes(documentType)) {
+  if (!normalizedDocumentType) {
     return res.status(400).json({
       status: 400,
       message: '서류 업로드 요청값이 올바르지 않습니다.',
@@ -1542,22 +1636,28 @@ const uploadDocument = async (req, res) => {
         draft_id,
         document_type,
         file_name,
-        file_url
+        file_url,
+        mime_type,
+        file_size
       )
-      VALUES ($1, $2, $3, $4)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING
         document_id,
         draft_id,
         document_type,
         file_name,
         file_url,
+        mime_type,
+        file_size,
         created_at
       `,
       [
         Number(draftId),
-        documentType,
+        normalizedDocumentType,
         file.originalname,
         fileUrl,
+        file.mimetype,
+        file.size,
       ]
     );
 
@@ -1570,14 +1670,14 @@ const uploadDocument = async (req, res) => {
       WHERE draft_id = $1
       AND document_type = ANY($2::text[])
       `,
-      [Number(draftId), requiredDocumentTypes]
+      [Number(draftId), REQUIRED_FUNDING_DOCUMENT_TYPES]
     );
 
     const uploadedRequiredTypes = requiredDocumentResult.rows.map(
       (row) => row.document_type
     );
 
-    const isAllRequiredDocumentsUploaded = requiredDocumentTypes.every((type) =>
+    const isAllRequiredDocumentsUploaded = REQUIRED_FUNDING_DOCUMENT_TYPES.every((type) =>
       uploadedRequiredTypes.includes(type)
     );
 
@@ -1605,8 +1705,10 @@ const uploadDocument = async (req, res) => {
       documentType: document.document_type,
       fileName: document.file_name,
       fileUrl: document.file_url,
+      mimeType: document.mime_type,
+      fileSize: document.file_size,
       requiredDocuments: {
-        requiredTypes: requiredDocumentTypes,
+        requiredTypes: REQUIRED_FUNDING_DOCUMENT_TYPES,
         uploadedTypes: uploadedRequiredTypes,
         completed: isAllRequiredDocumentsUploaded,
       },
@@ -1638,12 +1740,6 @@ const submitFundingDraft = async (req, res) => {
       message: '제출 요청값이 올바르지 않습니다.',
     });
   }
-
-  const requiredDocumentTypes = [
-    'MAIL_ORDER_BUSINESS',
-    'LIQUOR_SALES_APPROVAL',
-    'LIQUOR_LICENSE',
-  ];
 
   try {
     const draftResult = await pool.query(
@@ -1685,20 +1781,20 @@ const submitFundingDraft = async (req, res) => {
       WHERE draft_id = $1
       AND document_type = ANY($2::text[])
       `,
-      [Number(draftId), requiredDocumentTypes]
+      [Number(draftId), REQUIRED_FUNDING_DOCUMENT_TYPES]
     );
 
     const uploadedTypes = documentResult.rows.map((row) => row.document_type);
 
-    const hasAllRequiredDocuments = requiredDocumentTypes.every((type) =>
+    const hasAllRequiredDocuments = REQUIRED_FUNDING_DOCUMENT_TYPES.every((type) =>
       uploadedTypes.includes(type)
     );
 
     if (!hasAllRequiredDocuments) {
       return res.status(400).json({
         status: 400,
-        message: '필수 인증 서류 3개를 모두 업로드해야 제출할 수 있습니다.',
-        requiredDocuments: requiredDocumentTypes,
+        message: '필수 인증 서류를 모두 업로드해야 제출할 수 있습니다.',
+        requiredDocuments: REQUIRED_FUNDING_DOCUMENT_TYPES,
         uploadedDocuments: uploadedTypes,
       });
     }
@@ -2034,6 +2130,8 @@ const getFundingDraftPreview = async (req, res) => {
         document_type,
         file_name,
         file_url,
+        mime_type,
+        file_size,
         created_at
       FROM funding_documents
       WHERE draft_id = $1
@@ -2535,7 +2633,7 @@ const getFundingDetail = async (req, res) => {
         name,
         price,
         description,
-        volumn,
+        volume,
         alcohol,
         stock,
         remaining_stock,
@@ -2671,7 +2769,6 @@ const getBreweryLogs = async (req, res) => {
         breweryLogId: Number(log.log_id),
         logId: Number(log.log_id),
         fundingId: Number(log.funding_id),
-        step: log.step,
         stage: log.step,
         title: log.title,
         content: log.content,
@@ -2781,7 +2878,7 @@ const createBreweryLog = async (req, res) => {
       breweryLogId: Number(log.log_id),
       logId: Number(log.log_id),
       fundingId: Number(log.funding_id),
-      step:log.step,
+      stage:log.step,
       title: log.title,
       content: log.content,
       imageUrls:
@@ -2900,7 +2997,7 @@ const updateBreweryLog = async (req, res) => {
       breweryLogId: Number(log.log_id),
       logId: Number(log.log_id),
       fundingId: Number(log.funding_id),
-      step: log.step,
+      stage: log.step,
       title: log.title,
       content: log.content,
       imageUrls:
@@ -2998,7 +3095,7 @@ const deleteBreweryLog = async (req, res) => {
   }
 };
 //qna 목록 조회
-const getFundingQuestions = (req, res) => {
+const getFundingQuestions = async (req, res) => {
   const { fundingId } = req.params;
   const { page = 0, size = 10, answered } = req.query;
 
@@ -3013,8 +3110,8 @@ const getFundingQuestions = (req, res) => {
   const sizeNumber = Number(size);
 
   if (
-    Number.isNaN(pageNumber) ||
-    Number.isNaN(sizeNumber) ||
+    !Number.isInteger(pageNumber) ||
+    !Number.isInteger(sizeNumber) ||
     pageNumber < 0 ||
     sizeNumber <= 0
   ) {
@@ -3024,132 +3121,223 @@ const getFundingQuestions = (req, res) => {
     });
   }
 
-  if (
-    answered !== undefined &&
-    answered !== 'true' &&
-    answered !== 'false'
-  ) {
+  if (answered !== undefined && answered !== 'true' && answered !== 'false') {
     return res.status(400).json({
       status: 400,
       message: '잘못된 요청 파라미터입니다.',
     });
   }
 
-  const answeredValue =
-    answered === undefined ? true : answered === 'true';
+  try {
+    const values = [Number(fundingId)];
+    const conditions = ['fq.funding_id = $1'];
 
-  return res.status(200).json({
-    content: [
-      {
-        questionId: 1,
-        writerNickname: '술좋아하는재원',
-        title: '배송은 언제 시작되나요?',
-        content: '펀딩 종료 후 배송 예정일이 궁금합니다.',
-        answered: answeredValue,
-        createdAt: '2026-05-01T13:20:00',
-      },
-    ],
-    page: pageNumber,
-    size: sizeNumber,
-    totalElements: 12,
-    totalPages: 2,
-  });
+    if (answered !== undefined) {
+      values.push(answered === 'true');
+      conditions.push(`fq.answered = $${values.length}`);
+    }
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS total_count
+      FROM funding_questions fq
+      ${whereClause}
+      `,
+      values
+    );
+
+    values.push(sizeNumber, pageNumber * sizeNumber);
+
+    const result = await pool.query(
+      `
+      SELECT
+        fq.question_id,
+        fq.funding_id,
+        fq.user_id,
+        u.nickname AS writer_nickname,
+        fq.title,
+        fq.content,
+        fq.is_private,
+        fq.answered,
+        fq.created_at,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'replyId', fqr.reply_id,
+              'content', fqr.content,
+              'createdAt', fqr.created_at
+            )
+          ) FILTER (WHERE fqr.reply_id IS NOT NULL),
+          '[]'
+        ) AS replies
+      FROM funding_questions fq
+      LEFT JOIN users u ON u.user_id = fq.user_id
+      LEFT JOIN funding_question_replies fqr
+        ON fqr.question_id = fq.question_id
+      ${whereClause}
+      GROUP BY fq.question_id, u.nickname
+      ORDER BY fq.created_at DESC
+      LIMIT $${values.length - 1}
+      OFFSET $${values.length}
+      `,
+      values
+    );
+
+    const totalElements = countResult.rows[0].total_count;
+
+    return res.status(200).json({
+      content: result.rows.map((question) => ({
+        questionId: question.question_id,
+        fundingId: question.funding_id,
+        writerId: question.user_id,
+        writerNickname: question.writer_nickname,
+        title: question.title,
+        content: question.content,
+        isPrivate: question.is_private,
+        answered: question.answered,
+        replies: question.replies,
+        createdAt: question.created_at,
+      })),
+      page: pageNumber,
+      size: sizeNumber,
+      totalElements,
+      totalPages: Math.ceil(totalElements / sizeNumber),
+      message: 'Q&A 목록 조회 성공',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: 'Q&A 목록 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //qna 질문등록
-const createFundingQuestion = (req, res) => {
-  const { fundingId } = req.params;
-  const { title, content, isPrivate = false } = req.body;
+const createFundingQuestion = async (req, res) => {
+  try {
+    const { fundingId } = req.params;
 
-  if (!fundingId || isNaN(Number(fundingId))) {
-    return res.status(404).json({
-      status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    const {
+      title,
+      content,
+      isPrivate = false
+    } = req.body;
+
+    const userId = 1;
+
+    const result = await pool.query(
+      `
+      INSERT INTO funding_questions (
+        funding_id,
+        user_id,
+        title,
+        content,
+        is_private
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+      `,
+      [
+        fundingId,
+        userId,
+        title,
+        content,
+        isPrivate
+      ]
+    );
+
+    const question = result.rows[0];
+
+    return res.status(201).json({
+      questionId: question.question_id,
+      fundingId: question.funding_id,
+      userId: question.user_id,
+      title: question.title,
+      content: question.content,
+      isPrivate: question.is_private,
+      answered: question.answered,
+      createdAt: question.created_at,
+      message: "Q&A 질문이 등록되었습니다."
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Q&A 질문 등록 실패"
     });
   }
-
-  if (
-    !title ||
-    !content ||
-    typeof title !== 'string' ||
-    typeof content !== 'string' ||
-    title.trim() === '' ||
-    content.trim() === ''
-  ) {
-    return res.status(400).json({
-      status: 400,
-      message: '질문 입력값이 올바르지 않습니다.',
-    });
-  }
-
-  if (typeof isPrivate !== 'boolean') {
-    return res.status(400).json({
-      status: 400,
-      message: '질문 입력값이 올바르지 않습니다.',
-    });
-  }
-
-  return res.status(201).json({
-    fundingId: Number(fundingId),
-    questionId: 15,
-    message: '질문이 등록되었습니다.',
-  });
 };
 
 //qna 답글 등록
-const createFundingReply = (req, res) => {
+const createFundingReply = async (req, res) => {
   const { fundingId, questionId } = req.params;
   const { content } = req.body;
 
-  // fundingId, questionId 검증
-  if (
-    !fundingId ||
-    isNaN(Number(fundingId)) ||
-    !questionId ||
-    isNaN(Number(questionId))
-  ) {
-    return res.status(404).json({
-      status: 404,
-      message: '질문 또는 프로젝트를 찾을 수 없습니다.',
-    });
+  if (!fundingId || isNaN(Number(fundingId)) || !questionId || isNaN(Number(questionId))) {
+    return res.status(404).json({ status: 404, message: '질문 또는 프로젝트를 찾을 수 없습니다.' });
   }
 
-  // content 검증
-  if (
-    !content ||
-    typeof content !== 'string' ||
-    content.trim() === ''
-  ) {
-    return res.status(400).json({
-      status: 400,
-      message: '답변 입력값이 올바르지 않습니다.',
-    });
+  if (!content || typeof content !== 'string' || content.trim() === '') {
+    return res.status(400).json({ status: 400, message: '답변 입력값이 올바르지 않습니다.' });
   }
 
-  // (mock) 이미 답변이 있는 경우 처리 예시
-  const alreadyAnswered = false;
+  try {
+    const userId = req.user?.userId || 1;
+    const replyResult = await pool.query(
+      `
+      INSERT INTO funding_question_replies (
+        question_id,
+        funding_id,
+        user_id,
+        content
+      )
+      VALUES ($1, $2, $3, $4)
+      RETURNING reply_id, question_id, funding_id, user_id, content, created_at
+      `,
+      [Number(questionId), Number(fundingId), userId, content.trim()]
+    );
 
-  if (alreadyAnswered) {
-    return res.status(409).json({
-      status: 409,
-      message: '이미 답변이 등록된 질문입니다.',
+    await pool.query(
+      `
+      UPDATE funding_questions
+      SET answered = TRUE, updated_at = CURRENT_TIMESTAMP
+      WHERE question_id = $1 AND funding_id = $2
+      `,
+      [Number(questionId), Number(fundingId)]
+    );
+
+    const reply = replyResult.rows[0];
+
+    return res.status(201).json({
+      fundingId: Number(reply.funding_id),
+      questionId: Number(reply.question_id),
+      userId: Number(reply.user_id),
+      replyId: Number(reply.reply_id),
+      content: reply.content,
+      createdAt: reply.created_at,
+      message: '답변이 등록되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: 500,
+      message: '답변 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
     });
   }
-
-  return res.status(201).json({
-    fundingId: Number(fundingId),
-    questionId: Number(questionId),
-    replyId: 3,
-    message: '답변이 등록되었습니다.',
-  });
 };
 
-//후기목록조회
-const getFundingReviews = (req, res) => {
+// 후기 목록 조회
+const getFundingReviews = async (req, res) => {
   const { fundingId } = req.params;
   const { page = 0, size = 10, sort = 'LATEST' } = req.query;
 
-  // fundingId 검증
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
@@ -3160,10 +3348,9 @@ const getFundingReviews = (req, res) => {
   const pageNumber = Number(page);
   const sizeNumber = Number(size);
 
-  // page, size 검증
   if (
-    Number.isNaN(pageNumber) ||
-    Number.isNaN(sizeNumber) ||
+    !Number.isInteger(pageNumber) ||
+    !Number.isInteger(sizeNumber) ||
     pageNumber < 0 ||
     sizeNumber <= 0
   ) {
@@ -3174,7 +3361,6 @@ const getFundingReviews = (req, res) => {
   }
 
   const allowedSorts = ['LATEST', 'RATING'];
-
   if (!allowedSorts.includes(sort)) {
     return res.status(400).json({
       status: 400,
@@ -3182,22 +3368,74 @@ const getFundingReviews = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    content: [
-      {
-        reviewId: 1,
-        writerNickname: '막걸리러버',
-        rating: 4.5,
-        content: '향이 정말 좋고 부드러워서 만족스러웠습니다!',
-        imageUrls: ['https://example.com/review1.jpg'],
-        createdAt: '2026-06-10T12:30:00',
-      },
-    ],
-    page: pageNumber,
-    size: sizeNumber,
-    totalElements: 20,
-    totalPages: 2,
-  });
+  const orderBy =
+    sort === 'RATING'
+      ? 'ORDER BY fr.rating DESC, fr.created_at DESC'
+      : 'ORDER BY fr.created_at DESC';
+
+  try {
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS total_count
+      FROM funding_reviews
+      WHERE funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    const result = await pool.query(
+      `
+      SELECT
+        fr.review_id,
+        fr.funding_id,
+        fr.user_id,
+        u.nickname AS writer_nickname,
+        fr.rating,
+        fr.title,
+        fr.content,
+        fr.image_urls,
+        fr.created_at
+      FROM funding_reviews fr
+      LEFT JOIN users u ON u.user_id = fr.user_id
+      WHERE fr.funding_id = $1
+      ${orderBy}
+      LIMIT $2 OFFSET $3
+      `,
+      [Number(fundingId), sizeNumber, pageNumber * sizeNumber]
+    );
+
+    const totalElements = countResult.rows[0].total_count;
+
+    return res.status(200).json({
+      content: result.rows.map((review) => ({
+        reviewId: Number(review.review_id),
+        fundingId: Number(review.funding_id),
+        writerId: Number(review.user_id),
+        writerNickname: review.writer_nickname,
+        rating: Number(review.rating),
+        title: review.title,
+        content: review.content,
+        imageUrls:
+          typeof review.image_urls === 'string'
+            ? JSON.parse(review.image_urls)
+            : review.image_urls || [],
+        createdAt: review.created_at,
+      })),
+      page: pageNumber,
+      size: sizeNumber,
+      totalElements,
+      totalPages: Math.ceil(totalElements / sizeNumber),
+      message: '후기 목록 조회 성공',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '후기 목록 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //후원옵션조회
@@ -3611,9 +3849,10 @@ const getFundingReports = (req, res) => {
 };
 
 //추가부분8: 후기작성
-const createFundingReview = (req, res) => {
+// 후기 작성
+const createFundingReview = async (req, res) => {
   const { fundingId } = req.params;
-  const { rating, content } = req.body;
+  const { rating, title, content, imageUrls } = req.body;
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
@@ -3622,30 +3861,86 @@ const createFundingReview = (req, res) => {
     });
   }
 
-  if (
-    !rating ||
-    isNaN(Number(rating)) ||
-    Number(rating) < 0 ||
-    Number(rating) > 5 ||
-    !content
-  ) {
+  if (!rating || isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5) {
     return res.status(400).json({
       status: 400,
-      message: '후기 입력값이 올바르지 않습니다.',
+      message: '별점은 1점부터 5점까지 입력 가능합니다.',
     });
   }
 
-  const imageUrls = req.files
-    ? req.files.map((file) => `/uploads/reviews/${file.filename}`)
-    : [];
+  if (!title || title.trim() === '' || !content || content.trim() === '') {
+    return res.status(400).json({
+      status: 400,
+      message: '후기 제목과 내용을 입력해주세요.',
+    });
+  }
 
-  return res.status(201).json({
-    reviewId: 31,
-    fundingId: Number(fundingId),
-    rating: Number(rating),
-    imageUrls,
-    message: '후기가 등록되었습니다.',
-  });
+  if (imageUrls && !Array.isArray(imageUrls)) {
+    return res.status(400).json({
+      status: 400,
+      message: '후기 이미지 목록 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const userId = req.user?.userId || 1;
+
+    const result = await pool.query(
+      `
+      INSERT INTO funding_reviews (
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING
+        review_id,
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls,
+        created_at
+      `,
+      [
+        Number(fundingId),
+        userId,
+        Number(rating),
+        title.trim(),
+        content.trim(),
+        JSON.stringify(imageUrls || []),
+      ]
+    );
+
+    const review = result.rows[0];
+
+    return res.status(201).json({
+      reviewId: Number(review.review_id),
+      fundingId: Number(review.funding_id),
+      userId: Number(review.user_id),
+      rating: Number(review.rating),
+      title: review.title,
+      content: review.content,
+      imageUrls:
+        typeof review.image_urls === 'string'
+          ? JSON.parse(review.image_urls)
+          : review.image_urls,
+      createdAt: review.created_at,
+      message: '후기가 등록되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '후기 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //추가부분9: 펀딩 찜 등록

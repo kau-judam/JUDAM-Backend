@@ -1,8 +1,7 @@
-console.log('DB_HOST:', process.env.DB_HOST);
-console.log('DB_PORT:', process.env.DB_PORT);
-console.log('DB_NAME:', process.env.DB_NAME);
+const { Pool, types } = require('pg');
 
-const { Pool } = require('pg');
+// Keep DATE columns as YYYY-MM-DD strings instead of converting them to JS Date.
+types.setTypeParser(1082, (val) => val);
 
 const pool = new Pool({
   host: process.env.DB_HOST,
