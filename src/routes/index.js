@@ -1,0 +1,35 @@
+const authRoutes = require('./auth.routes');
+const legacyAuthRoutes = require('./authRoutes');
+const userRoutes = require('./userRoutes');
+const recipeRoutes = require('./recipeRoutes');
+const fundingRoutes = require('./fundingRoutes');
+const aiRoutes = require('./ai.routes');
+const orderRoutes = require('./orderRoutes');
+const breweryRoutes = require('./brewery.routes');
+const adminRoutes = require('./adminRoutes');
+const paymentRoutes = require('./payment.routes');
+const sqsRoutes = require('./sqsRoutes');
+const aiRecipeRoutes = require('./aiRecipe.routes');
+const aiSurveyRoutes = require('./aiSurvey.routes');
+const mypageRoutes = require('./mypage.routes');
+const postRoutes = require('./postRoutes');
+
+const mountRoutes = (app) => {
+  app.use('/api/auth', authRoutes);
+  app.use('/auth', legacyAuthRoutes);
+  app.use('/api/users', userRoutes);
+  app.use('/api/recipes', recipeRoutes);
+  app.use('/api/fundings', fundingRoutes);
+  app.use('/api/orders', orderRoutes);
+  app.use('/api/ai', aiRoutes);
+  app.use('/api/sqs', sqsRoutes);
+  app.use('/api/breweries', breweryRoutes);
+  app.use('/api/admin', adminRoutes);
+  app.use('/api/payments', paymentRoutes);
+  app.use('/api/recipe', aiRecipeRoutes);
+  app.use('/api/survey', aiSurveyRoutes);
+  app.use('/api/mypage', mypageRoutes);
+  app.use('/api/posts', postRoutes);
+};
+
+module.exports = mountRoutes;
