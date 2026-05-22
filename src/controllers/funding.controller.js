@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 // 펀딩 약관 동의
-const saveAgreement = (req, res) => {
+const saveAgreement = async (req, res) => {
   const {
     breweryId,
     isAdultConfirmed,
@@ -9,19 +9,21 @@ const saveAgreement = (req, res) => {
     isSettlementInfoAgreed,
     isFeePolicyAgreed,
     isResponsibilityAgreed,
-    isLiquorLicenseConfirmed,
-    isRecipeLicenseAgreed,
+    isLicenseAgreed,
+    isIpPolicyAgreed,
+    allRequiredTermsAgreed,
   } = req.body;
 
   if (
     !breweryId ||
-    !isAdultConfirmed ||
-    !isContactInfoAgreed ||
-    !isSettlementInfoAgreed ||
-    !isFeePolicyAgreed ||
-    !isResponsibilityAgreed ||
-    !isLiquorLicenseConfirmed ||
-    !isRecipeLicenseAgreed
+    isAdultConfirmed !== true ||
+    isContactInfoAgreed !== true ||
+    isSettlementInfoAgreed !== true ||
+    isFeePolicyAgreed !== true ||
+    isResponsibilityAgreed !== true ||
+    isLicenseAgreed !== true ||
+    isIpPolicyAgreed !== true ||
+    allRequiredTermsAgreed !== true
   ) {
     return res.status(400).json({
       status: 400,
@@ -29,22 +31,58 @@ const saveAgreement = (req, res) => {
     });
   }
 
-  const agreementId = 1;
+  try {
+    const result = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        is_adult_confirmed = $1,
+        is_contact_info_agreed = $2,
+        is_settlement_info_agreed = $3,
+        is_fee_policy_agreed = $4,
+        is_responsibility_agreed = $5,
+        is_license_agreed = $6,
+        is_ip_policy_agreed = $7,
+        all_required_terms_agreed = $8,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE brewery_id = $9
+      RETURNING draft_id, brewery_id
+      `,
+      [
+        isAdultConfirmed,
+        isContactInfoAgreed,
+        isSettlementInfoAgreed,
+        isFeePolicyAgreed,
+        isResponsibilityAgreed,
+        isLicenseAgreed,
+        isIpPolicyAgreed,
+        allRequiredTermsAgreed,
+        Number(breweryId),
+      ]
+    );
 
-  return res.status(200).json({
-    agreementId,
-    breweryId,
-    agreements: {
-      isAdultConfirmed,
-      isContactInfoAgreed,
-      isSettlementInfoAgreed,
-      isFeePolicyAgreed,
-      isResponsibilityAgreed,
-      isLiquorLicenseConfirmed,
-      isRecipeLicenseAgreed,
-    },
-    message: '펀딩 약관 동의가 저장되었습니다.',
-  });
+    return res.status(200).json({
+      agreementId: result.rows[0]?.draft_id || 1,
+      breweryId: Number(breweryId),
+      agreements: {
+        isAdultConfirmed,
+        isContactInfoAgreed,
+        isSettlementInfoAgreed,
+        isFeePolicyAgreed,
+        isResponsibilityAgreed,
+        isLicenseAgreed,
+        isIpPolicyAgreed,
+        allRequiredTermsAgreed,
+      },
+      message: '펀딩 약관 동의가 저장되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '펀딩 약관 동의 저장 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 // 펀딩 프로젝트 임시저장 생성(수정 버전)
@@ -945,44 +983,38 @@ const saveBreweryInfo = async (req, res) => {
   const { draftId } = req.params;
 
   const {
-    creatorName,
-    profileImageUrl,
-    creatorIntroduction,
+    breweryName,
+    representativeName,
+    businessRegistrationNumber,
+    businessAddress,
+    contactEmail,
     contactPhone,
-    phoneVerified,
-    identityDocumentUrl,
     bankName,
     accountNumber,
     accountHolder,
+
+    breweryProfileImageUrl,
+    breweryBio,
     businessType,
     businessName,
-    businessRegistrationNumber,
-    representativeName,
-    businessAddress,
     businessCategory,
     businessItem,
-    taxEmail,
-    businessRegistrationFileUrl,
+    phoneVerified = false,
+    accountVerified = false,
   } = req.body;
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
-    !creatorName ||
+    !breweryName ||
+    !representativeName ||
+    !businessRegistrationNumber ||
+    !businessAddress ||
+    !contactEmail ||
     !contactPhone ||
-    phoneVerified !== true ||
     !bankName ||
     !accountNumber ||
-    !accountHolder ||
-    !businessType ||
-    !businessName ||
-    !businessRegistrationNumber ||
-    !representativeName ||
-    !businessAddress ||
-    !businessCategory ||
-    !businessItem ||
-    !taxEmail ||
-    !businessRegistrationFileUrl
+    !accountHolder
   ) {
     return res.status(400).json({
       status: 400,
@@ -990,12 +1022,20 @@ const saveBreweryInfo = async (req, res) => {
     });
   }
 
-  const businessNumberRegex = /^\d{3}-\d{2}-\d{5}$/;
+  const normalizedBusinessNumber = String(businessRegistrationNumber).replace(/-/g, '');
+  const normalizedPhone = String(contactPhone).replace(/-/g, '');
 
-  if (!businessNumberRegex.test(businessRegistrationNumber)) {
+  if (!/^\d{10}$/.test(normalizedBusinessNumber)) {
     return res.status(400).json({
       status: 400,
       message: '사업자등록번호 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (!/^01\d{8,9}$/.test(normalizedPhone)) {
+    return res.status(400).json({
+      status: 400,
+      message: '전화번호 형식이 올바르지 않습니다.',
     });
   }
 
@@ -1004,69 +1044,46 @@ const saveBreweryInfo = async (req, res) => {
       `
       UPDATE funding_drafts
       SET
-        creator_name = $1,
-        profile_image_url = $2,
-        creator_introduction = $3,
-        contact_phone = $4,
-        phone_verified = $5,
-        identity_document_url = $6,
+        brewery_name = $1,
+        representative_name = $2,
+        business_registration_number = $3,
+        business_address = $4,
+        contact_email = $5,
+        contact_phone = $6,
         bank_name = $7,
         account_number = $8,
         account_holder = $9,
-        business_type = $10,
-        business_name = $11,
-        business_registration_number = $12,
-        representative_name = $13,
-        business_address = $14,
-        business_category = $15,
-        business_item = $16,
-        tax_email = $17,
-        business_registration_file_url = $18,
-        progress_rate = 85,
+        profile_image_url = $10,
+        creator_introduction = $11,
+        business_type = $12,
+        business_name = $13,
+        business_category = $14,
+        business_item = $15,
+        phone_verified = $16,
+        account_verified = $17,
+        progress_rate = GREATEST(progress_rate, 85),
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $19
-      RETURNING
-        draft_id,
-        creator_name,
-        profile_image_url,
-        creator_introduction,
-        contact_phone,
-        phone_verified,
-        identity_document_url,
-        bank_name,
-        account_number,
-        account_holder,
-        business_type,
-        business_name,
-        business_registration_number,
-        representative_name,
-        business_address,
-        business_category,
-        business_item,
-        tax_email,
-        business_registration_file_url,
-        progress_rate,
-        updated_at
+      WHERE draft_id = $18
+      RETURNING *
       `,
       [
-        creatorName,
-        profileImageUrl || null,
-        creatorIntroduction || null,
+        breweryName,
+        representativeName,
+        businessRegistrationNumber,
+        businessAddress,
+        contactEmail,
         contactPhone,
-        Boolean(phoneVerified),
-        identityDocumentUrl || null,
         bankName,
         accountNumber,
         accountHolder,
-        businessType,
-        businessName,
-        businessRegistrationNumber,
-        representativeName,
-        businessAddress,
-        businessCategory,
-        businessItem,
-        taxEmail,
-        businessRegistrationFileUrl,
+        breweryProfileImageUrl || null,
+        breweryBio || null,
+        businessType || null,
+        businessName || breweryName,
+        businessCategory || null,
+        businessItem || null,
+        Boolean(phoneVerified),
+        Boolean(accountVerified),
         Number(draftId),
       ]
     );
@@ -1083,33 +1100,20 @@ const saveBreweryInfo = async (req, res) => {
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'BREWERY_INFO',
-      breweryInfo: {
-        creatorName: draft.creator_name,
-        profileImageUrl: draft.profile_image_url,
-        creatorIntroduction: draft.creator_introduction,
-        contactPhone: draft.contact_phone,
-        phoneVerified: draft.phone_verified,
-        identityDocumentUrl: draft.identity_document_url,
-        bankName: draft.bank_name,
-        accountNumber: draft.account_number,
-        accountHolder: draft.account_holder,
-        businessType: draft.business_type,
-        businessName: draft.business_name,
-        businessRegistrationNumber: draft.business_registration_number,
-        representativeName: draft.representative_name,
-        businessAddress: draft.business_address,
-        businessCategory: draft.business_category,
-        businessItem: draft.business_item,
-        taxEmail: draft.tax_email,
-        businessRegistrationFileUrl: draft.business_registration_file_url,
-      },
+      breweryName: draft.brewery_name,
+      representativeName: draft.representative_name,
+      businessRegistrationNumber: draft.business_registration_number,
+      businessAddress: draft.business_address,
+      contactEmail: draft.contact_email,
+      contactPhone: draft.contact_phone,
+      bankName: draft.bank_name,
+      accountNumber: draft.account_number,
+      accountHolder: draft.account_holder,
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '창작자/정산/사업자 정보가 저장되었습니다.',
     });
   } catch (error) {
-    console.error(error);
-
     return res.status(500).json({
       status: 500,
       message: '창작자/정산/사업자 정보 저장 중 서버 오류가 발생했습니다.',
