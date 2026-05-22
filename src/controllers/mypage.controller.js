@@ -15,6 +15,8 @@ const {
   updateMyArchive,
   deleteMyArchive,
   getArchiveTags,
+  uploadArchiveImages,
+  deleteArchiveImage,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -309,6 +311,53 @@ const deleteMyArchiveController = async (req, res) => {
   }
 };
 
+const uploadArchiveImagesController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await uploadArchiveImages(userId, req.params.archiveId, req.files);
+
+    return res.status(201).json({
+      status: 201,
+      message: '아카이브 이미지 업로드 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 이미지 업로드 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const deleteArchiveImageController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    await deleteArchiveImage(userId, req.params.archiveId, req.params.imageId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '아카이브 이미지 삭제 성공',
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 이미지 삭제 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
 const getArchiveTagsController = async (req, res) => {
   const userId = getAuthenticatedUserId(req, res);
 
@@ -586,6 +635,8 @@ module.exports = {
   createMyArchiveController,
   updateMyArchiveController,
   deleteMyArchiveController,
+  uploadArchiveImagesController,
+  deleteArchiveImageController,
   getArchiveTagsController,
   checkNicknameController,
   updateNicknameController,

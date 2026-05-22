@@ -597,6 +597,12 @@ const mapImageResponse = (row) => ({
   sortOrder: toNullableNumber(row.sort_order),
 });
 
+const mapArchiveImageResponse = (row) => ({
+  imageId: Number(row.image_id),
+  imageUrl: row.image_url,
+  sortOrder: toNullableNumber(row.sort_order),
+});
+
 const mapArchiveResponse = (row, tags = [], images = []) => ({
   archiveId: Number(row.archive_id),
   archiveType: row.archive_type,
@@ -681,6 +687,16 @@ const parseArchiveId = (archiveId) => {
 
   if (!/^\d+$/.test(stringValue) || Number(stringValue) < 1) {
     throw createServiceError(400, '아카이브 ID가 올바르지 않습니다.');
+  }
+
+  return Number(stringValue);
+};
+
+const parseArchiveImageId = (imageId) => {
+  const stringValue = String(imageId);
+
+  if (!/^\d+$/.test(stringValue) || Number(stringValue) < 1) {
+    throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
   }
 
   return Number(stringValue);
@@ -1263,6 +1279,120 @@ const getArchiveTags = async () => {
   return [...grouped.values()];
 };
 
+const findMyArchiveForImage = async (userId, archiveId, clientOrPool = pool) => {
+  const parsedArchiveId = parseArchiveId(archiveId);
+  const { rows } = await clientOrPool.query(
+    `
+      SELECT archive_id
+      FROM user_archives
+      WHERE archive_id = $1
+        AND user_id = $2
+        AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [parsedArchiveId, userId],
+  );
+
+  return rows[0] || null;
+};
+
+const uploadArchiveImages = async (userId, archiveId, files) => {
+  const parsedArchiveId = parseArchiveId(archiveId);
+
+  if (!Array.isArray(files) || files.length === 0) {
+    throw createServiceError(400, '업로드할 이미지를 첨부해주세요.');
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const archive = await findMyArchiveForImage(userId, parsedArchiveId, client);
+
+    if (!archive) {
+      throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+    }
+
+    const { rows: countRows } = await client.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM user_archive_images
+        WHERE archive_id = $1
+      `,
+      [parsedArchiveId],
+    );
+    const existingImageCount = Number(countRows[0]?.count || 0);
+
+    if (existingImageCount + files.length > 3) {
+      throw createServiceError(400, '아카이브 이미지는 최대 3장까지 업로드할 수 있습니다.');
+    }
+
+    const uploadedImages = [];
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const imageUrl = await uploadFileToS3(
+        file.buffer,
+        file.originalname,
+        file.mimetype,
+        userId,
+      );
+      const sortOrder = existingImageCount + index;
+      const { rows } = await client.query(
+        `
+          INSERT INTO user_archive_images (
+            archive_id,
+            image_url,
+            sort_order,
+            created_at
+          )
+          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+          RETURNING
+            image_id,
+            image_url,
+            sort_order
+        `,
+        [parsedArchiveId, imageUrl, sortOrder],
+      );
+
+      uploadedImages.push(mapArchiveImageResponse(rows[0]));
+    }
+
+    await client.query('COMMIT');
+    return uploadedImages;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const deleteArchiveImage = async (userId, archiveId, imageId) => {
+  const parsedArchiveId = parseArchiveId(archiveId);
+  const parsedImageId = parseArchiveImageId(imageId);
+  const archive = await findMyArchiveForImage(userId, parsedArchiveId);
+
+  if (!archive) {
+    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+  }
+
+  const { rows } = await pool.query(
+    `
+      DELETE FROM user_archive_images
+      WHERE image_id = $1
+        AND archive_id = $2
+      RETURNING image_id
+    `,
+    [parsedImageId, parsedArchiveId],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(404, '아카이브 이미지를 찾을 수 없습니다.');
+  }
+};
+
 module.exports = {
   getMyProfile,
   checkNickname,
@@ -1286,6 +1416,10 @@ module.exports = {
   updateMyArchive,
   deleteMyArchive,
   getArchiveTags,
+  uploadArchiveImages,
+  deleteArchiveImage,
+  findMyArchiveForImage,
+  mapArchiveImageResponse,
   mapArchiveResponse,
   validateArchivePayload,
   validateTagIds,
