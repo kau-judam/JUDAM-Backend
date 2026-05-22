@@ -17,6 +17,11 @@ const {
   refreshAccessToken: refreshAccessTokenService,
   revokeRefreshToken,
 } = require('../services/token.service');
+const {
+  requestAuthPhoneVerification,
+  confirmAuthPhoneVerification,
+  verifyAuthPhoneVerificationToken,
+} = require('../services/auth-phone.service');
 
 const sendError = (res, status, message, error) => {
   return res.status(status).json({
@@ -168,9 +173,10 @@ const signup = async (req, res) => {
   const email = normalizeString(req.body?.email).toLowerCase();
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   const nickname = normalizeString(req.body?.nickname);
-  const phoneNumber = req.body?.phoneNumber === undefined || req.body?.phoneNumber === null
+  let phoneNumber = req.body?.phoneNumber === undefined || req.body?.phoneNumber === null
     ? null
     : normalizeString(req.body.phoneNumber);
+  const phoneVerificationToken = normalizeString(req.body?.phoneVerificationToken);
   const termsAgreed = req.body?.termsAgreed === true;
   const privacyAgreed = req.body?.privacyAgreed === true;
   const marketingAgreed = req.body?.marketingAgreed === true;
@@ -220,7 +226,24 @@ const signup = async (req, res) => {
     });
   }
 
+  if (phoneNumber === '') {
+    phoneNumber = null;
+  }
+
   try {
+    if (phoneNumber) {
+      const phoneVerification = await verifyAuthPhoneVerificationToken(phoneNumber, phoneVerificationToken);
+
+      if (!phoneVerification.isValid) {
+        return res.status(400).json({
+          status: 400,
+          message: '전화번호 인증이 필요합니다.',
+        });
+      }
+
+      phoneNumber = phoneVerification.phoneNumber;
+    }
+
     const existingUser = await findUserByEmail(email);
 
     if (existingUser) {
@@ -279,6 +302,13 @@ const signup = async (req, res) => {
       return res.status(409).json({
         status: 409,
         message: '이미 사용 중인 이메일입니다.',
+      });
+    }
+
+    if (error.statusCode === 400) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
       });
     }
 
@@ -343,6 +373,66 @@ const login = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '로그인 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const requestAuthPhoneVerificationController = async (req, res) => {
+  const phoneNumber = req.body?.phoneNumber;
+
+  if (phoneNumber === undefined || phoneNumber === null || normalizeString(phoneNumber) === '') {
+    return res.status(400).json({
+      status: 400,
+      message: '전화번호를 입력해주세요.',
+    });
+  }
+
+  try {
+    const data = await requestAuthPhoneVerification(phoneNumber);
+
+    return res.status(200).json({
+      status: 200,
+      message: '전화번호 인증 요청이 생성되었습니다.',
+      data,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      status: error.statusCode || 500,
+      message: error.message || '전화번호 인증 요청 생성 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const confirmAuthPhoneVerificationController = async (req, res) => {
+  const phoneNumber = req.body?.phoneNumber;
+  const verificationCode = normalizeString(req.body?.verificationCode);
+
+  if (phoneNumber === undefined || phoneNumber === null || normalizeString(phoneNumber) === '') {
+    return res.status(400).json({
+      status: 400,
+      message: '전화번호를 입력해주세요.',
+    });
+  }
+
+  if (!verificationCode) {
+    return res.status(400).json({
+      status: 400,
+      message: '인증번호를 입력해주세요.',
+    });
+  }
+
+  try {
+    const data = await confirmAuthPhoneVerification(phoneNumber, verificationCode);
+
+    return res.status(200).json({
+      status: 200,
+      message: '전화번호 인증 성공',
+      data,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      status: error.statusCode || 500,
+      message: error.message || '전화번호 인증 확인 중 서버 오류가 발생했습니다.',
     });
   }
 };
@@ -752,6 +842,8 @@ module.exports = {
   checkNickname,
   signup,
   login,
+  requestAuthPhoneVerificationController,
+  confirmAuthPhoneVerificationController,
   requestPasswordReset,
   verifyPasswordReset,
   resetPassword,

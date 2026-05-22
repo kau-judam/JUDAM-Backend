@@ -4,6 +4,8 @@ const {
   checkNickname,
   signup,
   login,
+  requestAuthPhoneVerificationController,
+  confirmAuthPhoneVerificationController,
   requestPasswordReset,
   verifyPasswordReset,
   resetPassword,
@@ -21,6 +23,8 @@ router.get('/email/check', checkEmail);
 router.get('/nickname/check', checkNickname);
 router.post('/signup', signup);
 router.post('/login', login);
+router.post('/phone/verification', requestAuthPhoneVerificationController);
+router.post('/phone/verification/confirm', confirmAuthPhoneVerificationController);
 router.post('/password/reset/request', requestPasswordReset);
 router.post('/password/reset/verify', verifyPasswordReset);
 router.patch('/password/reset', resetPassword);
