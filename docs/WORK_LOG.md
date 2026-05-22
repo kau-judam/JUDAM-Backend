@@ -263,17 +263,60 @@
 - `brewery_logs` owner가 `judam_admin`이라 `video_url`, `updated_at`, `brewery_logs(funding_id)` index는 이번 계정으로 적용하지 못했습니다.
 - `brewery_logs` owner/admin 권한으로 별도 적용이 필요합니다.
 
+### Funding Creation Manage/Community Follow-up
+
+완료:
+
+- SSM 포트포워딩을 다시 열고 `judam` DB 접속을 재확인했습니다.
+- `database/20260522_funding_followup.sql`을 추가하고 `judam` DB에 적용했습니다.
+- `funding_drafts.funding_id`를 추가해 제출된 draft와 생성된 funding을 연결했습니다.
+- 후기용 DB 필드 `mood`, `pairing`, `tags`, `record_visibility`, `updated_at`을 추가했습니다.
+- 프론트 후기 폼에는 제목이 없으므로 `funding_reviews.title`의 `NOT NULL` 제약을 제거했습니다.
+- 파일 업로드에서 S3 권한/설정이 없을 때 placeholder나 실패 대신 data URL fallback을 저장하도록 했습니다.
+- 프로젝트 이미지 응답에서 대표 이미지 중복이 생기지 않도록 `thumbnailUrl`, `imageUrls`, `allImageUrls`를 정리했습니다.
+- draft preview/detail에 프로젝트 계획, 영상 URL, 예산, 일정, 양조장/정산/사업자 정보, 안내사항, 문서 목록이 돌아오도록 보강했습니다.
+- 관리자 승인 시 `draft.funding_id`가 있으면 새 funding을 또 만들지 않고 기존 funding을 `ONGOING`으로 갱신하도록 수정했습니다.
+- 펀딩 통계 API `GET /api/fundings/stats`를 추가했습니다.
+- Q&A 좋아요/취소 API를 라우트에 연결했습니다.
+- 후기 수정 API `PATCH /api/fundings/:fundingId/reviews/:reviewId`를 추가했습니다.
+- 공유/신고/후기/양조일지/Q&A 주요 흐름을 DB-backed로 검증했습니다.
+
+검증:
+
+- 실제 `judam` DB와 로컬 서버 `PORT=3100` 기준으로 통합 테스트를 완료했습니다.
+- 테스트 흐름:
+  - 7개 약관 동의
+  - 기본정보/일정/법적고시/맛지표/프로젝트 계획/양조장 정보/파일/안내사항/5종 문서 저장
+  - 양조장 정보 불러오기
+  - draft preview
+  - 최종 제출
+  - 관리자 승인
+  - 공개 상세 조회
+  - 펀딩 찜
+  - 펀딩 통계 및 정렬 조회
+  - 양조일지 이미지 업로드와 댓글 2개 저장
+  - Q&A 답변 2개 저장과 좋아요/취소
+  - 공유 링크와 신고 저장
+  - 제목 없는 후기 작성과 후기 수정
+- 통합 테스트 결과 `draftId=20`, `fundingId=13`, `recipeId=65` 생성 후 모두 삭제했습니다.
+- 테스트 데이터 잔여 row 0건을 확인했습니다.
+
+아직 외부 연동이 필요한 항목:
+
+- 휴대폰 본인 인증은 실제 SMS 발송/검증 제공사 연동이 필요합니다.
+- 1원 계좌 인증은 오픈뱅킹/펌뱅킹/계좌 인증 제공사 연동과 계약이 필요합니다.
+- 주소 검색은 보통 프론트에서 주소 검색 API를 붙이고, 백엔드는 선택된 주소/우편번호를 저장하는 구조가 필요합니다.
+- 술BTI 추천순의 실제 매칭 %는 현재 백엔드에 점수 테이블/AI 결과가 없어 `matchRate`를 실제 계산하지 못합니다.
+
 ## Backlog
 
 - 전체 펀딩 API 통합 테스트 작성 또는 Postman/curl 시나리오 정리
 - `brewery_logs` owner/admin 권한으로 누락 컬럼/index 적용
-- `submitFundingDraft`와 관리자 승인 중 어느 단계에서 공개 `funding_projects`를 생성할지 정책 확정
-- `recipeId = 3` 하드코딩 제거
-- funding documents 실제 S3 업로드 연결
-- share/report/inquiry mock 응답 DB-backed로 전환
+- old draft fallback의 `recipeId = 3` 하드코딩 제거
+- S3 bucket/IAM 권한 정리와 운영 업로드 정책 확정
+- inquiry mock 응답 DB-backed로 전환
 - Toss checkout URL 생성 로직 완성
 - Toss confirm 에러 응답 JSON 핸들러 추가
-- Q&A 좋아요 API 추가
-- 후기 수정/삭제/좋아요/댓글 API 검토
+- 후기 삭제/좋아요/댓글 API 검토
 - `req.user?.userId || 1` 테스트 fallback 제거 및 인증 미들웨어 적용
 - `database/schema.sql`과 마이그레이션 파일의 기준 정리

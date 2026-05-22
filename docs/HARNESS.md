@@ -39,5 +39,8 @@ Expected response:
 - Shared pool: `src/config/db.js`
 - Legacy compatibility path: `src/db.js`
 - Schema: `database/schema.sql`
+- Funding migration: `database/20260522_funding_project_flow.sql`
+- Funding follow-up migration: `database/20260522_funding_followup.sql`
+- DB operation notes: `docs/DATABASE.md`
 
 New code should import the database pool from `src/config/db.js`. Existing code that imports `src/db.js` continues to work because it re-exports the shared pool.
