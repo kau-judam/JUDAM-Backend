@@ -7,6 +7,7 @@ const {
   requestPhoneVerification,
   updatePhoneNumberWithVerification,
   getMyPageSummary,
+  getMyBadges,
   getMySulbti,
   saveMySulbti,
   getMyArchives,
@@ -125,6 +126,29 @@ const getMyPageSummaryController = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '마이페이지 메인 요약 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const getMyBadgesController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMyBadges(userId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '마이페이지 뱃지 목록 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '마이페이지 뱃지 목록 조회 중 서버 오류가 발생했습니다.',
     });
   }
 };
@@ -702,6 +726,7 @@ const changeMyPasswordController = async (req, res) => {
 module.exports = {
   getMyProfileController,
   getMyPageSummaryController,
+  getMyBadgesController,
   getMySulbtiController,
   saveMySulbtiController,
   getMyArchivesController,

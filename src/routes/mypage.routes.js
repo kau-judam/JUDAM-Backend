@@ -5,6 +5,7 @@ const authMiddleware = require('../middlewares/authMiddleware');
 const {
   getMyProfileController,
   getMyPageSummaryController,
+  getMyBadgesController,
   getMySulbtiController,
   saveMySulbtiController,
   checkNicknameController,
@@ -29,6 +30,7 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/summary', authMiddleware, getMyPageSummaryController);
+router.get('/badges', authMiddleware, getMyBadgesController);
 router.get('/sulbti', authMiddleware, getMySulbtiController);
 router.post('/sulbti', authMiddleware, saveMySulbtiController);
 router.get('/archives/tags', authMiddleware, getArchiveTagsController);

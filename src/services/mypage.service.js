@@ -307,6 +307,177 @@ const getArchiveCount = async (userId) => {
   return Number(rows[0]?.count || 0);
 };
 
+const BADGES = [
+  {
+    badgeId: 'welcome',
+    name: '반가워요!',
+    displayOrder: 1,
+  },
+  {
+    badgeId: 'communicate',
+    name: '주담과 소통하기',
+    displayOrder: 2,
+  },
+  {
+    badgeId: 'funding-beginner',
+    name: '펀딩 입문자',
+    displayOrder: 3,
+  },
+  {
+    badgeId: 'funding-intermediate',
+    name: '펀딩 중급자',
+    displayOrder: 4,
+  },
+  {
+    badgeId: 'funding-expert',
+    name: '펀딩 숙련가',
+    displayOrder: 5,
+  },
+  {
+    badgeId: 'co-creator',
+    name: '공동 제작자',
+    displayOrder: 6,
+  },
+];
+
+const evaluateBadgeConditions = async (userId) => {
+  const [
+    userRowsResult,
+    postCountResult,
+    fundingSupportCountResult,
+    coCreatorCountResult,
+  ] = await Promise.all([
+    pool.query(
+      `
+        SELECT user_id
+        FROM users
+        WHERE user_id = $1
+          AND deleted_at IS NULL
+        LIMIT 1
+      `,
+      [userId],
+    ),
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM posts
+        WHERE user_id = $1
+      `,
+      [userId],
+    ),
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM orders
+        WHERE user_id = $1
+          AND order_status = 'PAID'
+          AND funding_id IS NOT NULL
+      `,
+      [userId],
+    ),
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM recipes
+        WHERE user_id = $1
+          AND (
+            is_fundable = true
+            OR status IN ('ADOPTED', 'SELECTED', 'FUNDED')
+          )
+      `,
+      [userId],
+    ),
+  ]);
+
+  const userExists = userRowsResult.rows.length > 0;
+  const postCount = Number(postCountResult.rows[0]?.count || 0);
+  const fundingSupportCount = Number(fundingSupportCountResult.rows[0]?.count || 0);
+  const coCreatorCount = Number(coCreatorCountResult.rows[0]?.count || 0);
+  const earnedBadgeIds = [];
+
+  if (userExists) {
+    earnedBadgeIds.push('welcome');
+  }
+
+  if (postCount >= 1) {
+    earnedBadgeIds.push('communicate');
+  }
+
+  if (fundingSupportCount >= 1) {
+    earnedBadgeIds.push('funding-beginner');
+  }
+
+  if (fundingSupportCount >= 5) {
+    earnedBadgeIds.push('funding-intermediate');
+  }
+
+  if (fundingSupportCount >= 10) {
+    earnedBadgeIds.push('funding-expert');
+  }
+
+  if (coCreatorCount >= 1) {
+    earnedBadgeIds.push('co-creator');
+  }
+
+  return earnedBadgeIds;
+};
+
+const grantEarnedBadges = async (userId, earnedBadgeIds) => {
+  if (!earnedBadgeIds || earnedBadgeIds.length === 0) {
+    return;
+  }
+
+  await pool.query(
+    `
+      INSERT INTO user_badges (
+        user_id,
+        badge_id,
+        earned_at
+      )
+      SELECT $1, unnest($2::text[]), CURRENT_TIMESTAMP
+      ON CONFLICT (user_id, badge_id) DO NOTHING
+    `,
+    [userId, earnedBadgeIds],
+  );
+};
+
+const getUserBadgeRows = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        badge_id,
+        earned_at
+      FROM user_badges
+      WHERE user_id = $1
+    `,
+    [userId],
+  );
+
+  return rows;
+};
+
+const getMyBadges = async (userId) => {
+  const earnedBadgeIds = await evaluateBadgeConditions(userId);
+  await grantEarnedBadges(userId, earnedBadgeIds);
+
+  const badgeRows = await getUserBadgeRows(userId);
+  const earnedAtByBadgeId = new Map(
+    badgeRows.map((row) => [row.badge_id, row.earned_at]),
+  );
+
+  return {
+    badges: BADGES.map((badge) => {
+      const earnedAt = earnedAtByBadgeId.get(badge.badgeId) || null;
+
+      return {
+        ...badge,
+        earned: Boolean(earnedAt),
+        earnedAt,
+      };
+    }),
+  };
+};
+
 const getLatestSulbti = async (userId) => {
   const { rows } = await pool.query(
     `
@@ -1768,6 +1939,10 @@ module.exports = {
   generatePhoneVerificationCode,
   checkOctomoMessageExists,
   getMyPageSummary,
+  getMyBadges,
+  evaluateBadgeConditions,
+  grantEarnedBadges,
+  getUserBadgeRows,
   getMySulbti,
   saveMySulbti,
   findSulbtiTypeByCode,
