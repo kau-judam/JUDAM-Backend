@@ -2607,8 +2607,9 @@ const getFundingIntro = (req, res) => {
 };
 
 //양조일지 조회
-const getBreweryLogs = (req, res) => {
+const getBreweryLogs = async (req, res) => {
   const { fundingId } = req.params;
+  const userId = req.user?.userId || 1;
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
@@ -2617,19 +2618,374 @@ const getBreweryLogs = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    fundingId: Number(fundingId),
-    logs: [
-      {
-        logId: 1,
-        step: '원재료 수급',
-        title: '못난이 사과 수급 완료',
-        content: '지역 농가에서 못난이 사과 100kg을 수급했습니다.',
-        imageUrls: ['https://example.com/log1.jpg'],
-        createdAt: '2026-05-03T14:30:00',
-      },
-    ],
-  });
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        bl.log_id,
+        bl.funding_id,
+        bl.step,
+        bl.title,
+        bl.content,
+        bl.image_urls,
+        bl.created_at,
+        COALESCE(lc.like_count, 0) AS like_count,
+        EXISTS (
+          SELECT 1
+          FROM brewery_log_likes bll
+          WHERE bll.brewery_log_id = bl.log_id
+          AND bll.user_id = $2
+        ) AS liked,
+        COALESCE(cc.comment_count, 0) AS comment_count
+      FROM brewery_logs bl
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS like_count
+        FROM brewery_log_likes
+        WHERE brewery_log_id = bl.log_id
+      ) lc ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS comment_count
+        FROM brewery_log_comments
+        WHERE brewery_log_id = bl.log_id
+        AND parent_comment_id IS NULL
+      ) cc ON TRUE
+      WHERE bl.funding_id = $1
+      ORDER BY bl.step ASC, bl.created_at DESC
+      `,
+      [Number(fundingId), userId]
+    );
+
+    return res.status(200).json({
+      fundingId: Number(fundingId),
+      logs: result.rows.map((log) => ({
+        breweryLogId: Number(log.log_id),
+        logId: Number(log.log_id),
+        fundingId: Number(log.funding_id),
+        step: log.step,
+        stage: log.step,
+        title: log.title,
+        content: log.content,
+        imageUrls:
+          typeof log.image_urls === 'string'
+            ? JSON.parse(log.image_urls)
+            : log.image_urls,
+        likeCount: Number(log.like_count || 0),
+        liked: log.liked,
+        commentCount: Number(log.comment_count || 0),
+        createdAt: log.created_at,
+      })),
+            message: '양조일지 조회 성공',
+          });
+        } catch (error) {
+          console.error(error);
+
+          return res.status(500).json({
+            status: 500,
+            message: '양조일지 조회 중 서버 오류가 발생했습니다.',
+            error: error.message,
+          });
+        }
+      };
+// 양조일지 등록
+const createBreweryLog = async (req, res) => {
+  const { fundingId } = req.params;
+  const { stage, title, content, imageUrls } = req.body;
+  const files = req.files || [];
+  const userId = req.user?.userId || 1;
+
+  const allowedStages = [
+    'INGREDIENT',
+    'PROCESSING',
+    'FERMENTATION',
+    'FILTERING',
+    'BOTTLING'
+  ];
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  if (!stage || !title || !content) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조일지 제목과 내용을 입력해야 합니다.',
+    });
+  }
+
+  if (!allowedStages.includes(stage)) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조 진행 단계가 올바르지 않습니다.',
+    });
+  }
+
+  const uploadedImageUrls = files.map(
+    (file) => `https://s3.amazonaws.com/judam/${file.originalname}`
+  );
+
+  const bodyImageUrls = Array.isArray(imageUrls) ? imageUrls : [];
+  const normalizedImageUrls = [...bodyImageUrls, ...uploadedImageUrls];
+
+  if (normalizedImageUrls.length > 5) {
+    return res.status(400).json({
+      status: 400,
+      message: '이미지는 최대 5개까지 등록할 수 있습니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      INSERT INTO brewery_logs (
+        funding_id,
+        step,
+        title,
+        content,
+        image_urls
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING
+        log_id,
+        funding_id,
+        step,
+        title,
+        content,
+        image_urls,
+        created_at
+      `,
+      [
+        Number(fundingId),
+        stage,
+        title,
+        content,
+        JSON.stringify(normalizedImageUrls),
+      ]
+    );
+
+    const log = result.rows[0];
+
+    return res.status(201).json({
+      breweryLogId: Number(log.log_id),
+      logId: Number(log.log_id),
+      fundingId: Number(log.funding_id),
+      step:log.step,
+      title: log.title,
+      content: log.content,
+      imageUrls:
+        typeof log.image_urls === 'string'
+          ? JSON.parse(log.image_urls)
+          : log.image_urls,
+      likeCount: 0,
+      liked: false,
+      commentCount: 0,
+      createdAt: log.created_at,
+      message: '양조일지가 등록되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '양조일지 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+// 양조일지 수정
+const updateBreweryLog = async (req, res) => {
+  const { fundingId, breweryLogId } = req.params;
+  const { stage, title, content, imageUrls } = req.body;
+
+  const allowedStages = [
+    'INGREDIENT',
+    'PROCESSING',
+    'FERMENTATION',
+    'FILTERING',
+    'BOTTLING'
+  ];
+
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !breweryLogId ||
+    isNaN(Number(breweryLogId))
+  ) {
+    return res.status(404).json({
+      status: 404,
+      message: '양조일지를 찾을 수 없습니다.',
+    });
+  }
+
+  if (!stage && !title && !content && !imageUrls) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조일지 수정값이 올바르지 않습니다.',
+    });
+  }
+
+  if (stage && !allowedStages.includes(stage)) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조 진행 단계가 올바르지 않습니다.',
+    });
+  }
+
+  if (imageUrls && !Array.isArray(imageUrls)) {
+    return res.status(400).json({
+      status: 400,
+      message: '이미지 목록 입력값이 올바르지 않습니다.',
+    });
+  }
+
+  if (imageUrls && imageUrls.length > 5) {
+    return res.status(400).json({
+      status: 400,
+      message: '이미지는 최대 5개까지 등록할 수 있습니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE brewery_logs
+      SET
+        step = COALESCE($1, step),
+        title = COALESCE($2, title),
+        content = COALESCE($3, content),
+        image_urls = COALESCE($4, image_urls)
+      WHERE funding_id = $5
+      AND log_id = $6
+      RETURNING
+        log_id,
+        funding_id,
+        step,
+        title,
+        content,
+        image_urls,
+        created_at
+      `,
+      [
+        stage || null,
+        title || null,
+        content || null,
+        imageUrls ? JSON.stringify(imageUrls) : null,
+        Number(fundingId),
+        Number(breweryLogId),
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '양조일지를 찾을 수 없습니다.',
+      });
+    }
+
+    const log = result.rows[0];
+
+    return res.status(200).json({
+      breweryLogId: Number(log.log_id),
+      logId: Number(log.log_id),
+      fundingId: Number(log.funding_id),
+      step: log.step,
+      title: log.title,
+      content: log.content,
+      imageUrls:
+        typeof log.image_urls === 'string'
+          ? JSON.parse(log.image_urls)
+          : log.image_urls,
+      createdAt: log.created_at,
+      message: '양조일지가 수정되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '양조일지 수정 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+// 양조일지 삭제
+const deleteBreweryLog = async (req, res) => {
+  const { fundingId, breweryLogId } = req.params;
+
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !breweryLogId ||
+    isNaN(Number(breweryLogId))
+  ) {
+    return res.status(404).json({
+      status: 404,
+      message: '양조일지를 찾을 수 없습니다.',
+    });
+  }
+
+  try {
+    await pool.query(
+      `
+      DELETE FROM brewery_log_comment_likes
+      WHERE comment_id IN (
+        SELECT comment_id
+        FROM brewery_log_comments
+        WHERE brewery_log_id = $1
+      )
+      `,
+      [Number(breweryLogId)]
+    );
+
+    await pool.query(
+      `
+      DELETE FROM brewery_log_comments
+      WHERE brewery_log_id = $1
+      `,
+      [Number(breweryLogId)]
+    );
+
+    await pool.query(
+      `
+      DELETE FROM brewery_log_likes
+      WHERE brewery_log_id = $1
+      `,
+      [Number(breweryLogId)]
+    );
+
+    const result = await pool.query(
+      `
+      DELETE FROM brewery_logs
+      WHERE funding_id = $1
+      AND log_id = $2
+      RETURNING log_id, funding_id
+      `,
+      [Number(fundingId), Number(breweryLogId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '양조일지를 찾을 수 없습니다.',
+      });
+    }
+
+    return res.status(200).json({
+      breweryLogId: Number(result.rows[0].log_id),
+      fundingId: Number(result.rows[0].funding_id),
+      message: '양조일지가 삭제되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '양조일지 삭제 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 //qna 목록 조회
 const getFundingQuestions = (req, res) => {
@@ -3148,155 +3504,6 @@ const createFundingInquiry = (req, res) => {
   });
 };
 
-//추가부분1: 양조일지 등록
-const createBreweryLog = (req, res) => {
-  const { fundingId } = req.params;
-  const { stage, title, content } = req.body;
-  const files = req.files || [];
-
-  const allowedStages = [
-    'INGREDIENT',
-    'FERMENTATION',
-    'AGING',
-    'BOTTLING',
-    'SHIPPING',
-  ];
-
-  if (!fundingId || isNaN(Number(fundingId))) {
-    return res.status(404).json({
-      status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
-    });
-  }
-
-  if (!stage || !title || !content) {
-    return res.status(400).json({
-      status: 400,
-      message: '양조일지 제목과 내용을 입력해야 합니다.',
-    });
-  }
-
-  if (!allowedStages.includes(stage)) {
-    return res.status(400).json({
-      status: 400,
-      message: '양조 진행 단계가 올바르지 않습니다.',
-    });
-  }
-
-  const imageUrls = files.map(
-    (file) => `https://s3.amazonaws.com/judam/${file.originalname}`
-  );
-
-  return res.status(201).json({
-    breweryLogId: 1,
-    fundingId: Number(fundingId),
-    stage,
-    title,
-    imageUrls,
-    message: '양조일지가 등록되었습니다.',
-  });
-};
-
-//추가부분2: 양조일지 수정
-const updateBreweryLog = (req, res) => {
-  const { fundingId, breweryLogId } = req.params;
-  const { stage, title, content, deleteImageUrls } = req.body;
-  const files = req.files || [];
-
-  const allowedStages = [
-    'INGREDIENT',
-    'FERMENTATION',
-    'AGING',
-    'BOTTLING',
-    'SHIPPING',
-  ];
-
-  // fundingId, breweryLogId 검증
-  if (
-    !fundingId ||
-    isNaN(Number(fundingId)) ||
-    !breweryLogId ||
-    isNaN(Number(breweryLogId))
-  ) {
-    return res.status(404).json({
-      status: 404,
-      message: '양조일지를 찾을 수 없습니다.',
-    });
-  }
-
-  // 아무 수정값도 없는 경우
-  if (!stage && !title && !content && files.length === 0 && !deleteImageUrls) {
-    return res.status(400).json({
-      status: 400,
-      message: '양조일지 수정값이 올바르지 않습니다.',
-    });
-  }
-
-  // stage Enum 검증
-  if (stage && !allowedStages.includes(stage)) {
-    return res.status(400).json({
-      status: 400,
-      message: '양조 진행 단계가 올바르지 않습니다.',
-    });
-  }
-
-  // 새로 업로드된 이미지 URL mock 처리
-  const uploadedImageUrls = files.map(
-    (file) => `https://s3.amazonaws.com/judam/${file.originalname}`
-  );
-
-  // 기존 이미지 mock
-  const existingImageUrls = [
-    'https://s3.amazonaws.com/judam/existing-log1.png',
-    'https://s3.amazonaws.com/judam/existing-log2.png',
-  ];
-
-  // 삭제할 이미지 URL 처리
-  const deleteTargets = Array.isArray(deleteImageUrls)
-    ? deleteImageUrls
-    : deleteImageUrls
-      ? [deleteImageUrls]
-      : [];
-
-  const remainingImageUrls = existingImageUrls.filter(
-    (url) => !deleteTargets.includes(url)
-  );
-
-  const imageUrls = [...remainingImageUrls, ...uploadedImageUrls];
-
-  return res.status(200).json({
-    breweryLogId: Number(breweryLogId),
-    fundingId: Number(fundingId),
-    stage: stage || 'AGING',
-    title: title || '숙성 단계에 들어갔습니다.',
-    imageUrls,
-    message: '양조일지가 수정되었습니다.',
-  });
-};
-
-//추가3: 양조일지 삭제
-const deleteBreweryLog = (req, res) => {
-  const { fundingId, breweryLogId } = req.params;
-
-  // fundingId, breweryLogId 검증
-  if (
-    !fundingId ||
-    isNaN(Number(fundingId)) ||
-    !breweryLogId ||
-    isNaN(Number(breweryLogId))
-  ) {
-    return res.status(404).json({
-      status: 404,
-      message: '양조일지를 찾을 수 없습니다.',
-    });
-  }
-
-  return res.status(200).json({
-    breweryLogId: Number(breweryLogId),
-    fundingId: Number(fundingId),
-    message: '양조일지가 삭제되었습니다.',
-  });
-};
 
 //추가4: 펀딩 공유 링크 조회
 const getFundingShareLink = (req, res) => {
@@ -3549,7 +3756,532 @@ const unlikeFundingProject = async (req, res) => {
     });
   }
 };
+// 양조일지 좋아요 등록
+const likeBreweryLog = async (req, res) => {
+  const { fundingId, breweryLogId } = req.params;
+  const userId = req.user?.userId || 1;
 
+  if (!fundingId || isNaN(Number(fundingId)) || !breweryLogId || isNaN(Number(breweryLogId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청입니다.',
+    });
+  }
+
+  try {
+    const logResult = await pool.query(
+      `
+      SELECT log_id
+      FROM brewery_logs
+      WHERE funding_id = $1
+      AND log_id = $2
+      `,
+      [Number(fundingId), Number(breweryLogId)]
+    );
+
+    if (logResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '양조일지를 찾을 수 없습니다.',
+      });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO brewery_log_likes (
+        brewery_log_id,
+        user_id
+      )
+      VALUES ($1, $2)
+      ON CONFLICT (brewery_log_id, user_id) DO NOTHING
+      `,
+      [Number(breweryLogId), userId]
+    );
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS like_count
+      FROM brewery_log_likes
+      WHERE brewery_log_id = $1
+      `,
+      [Number(breweryLogId)]
+    );
+
+    return res.status(201).json({
+      fundingId: Number(fundingId),
+      breweryLogId: Number(breweryLogId),
+      liked: true,
+      likeCount: countResult.rows[0].like_count,
+      message: '양조일지 좋아요를 등록했습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '양조일지 좋아요 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+// 양조일지 좋아요 취소
+const unlikeBreweryLog = async (req, res) => {
+  const { fundingId, breweryLogId } = req.params;
+  const userId = req.user?.userId || 1;
+
+  if (!fundingId || isNaN(Number(fundingId)) || !breweryLogId || isNaN(Number(breweryLogId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청입니다.',
+    });
+  }
+
+  try {
+    await pool.query(
+      `
+      DELETE FROM brewery_log_likes
+      WHERE brewery_log_id = $1
+      AND user_id = $2
+      `,
+      [Number(breweryLogId), userId]
+    );
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS like_count
+      FROM brewery_log_likes
+      WHERE brewery_log_id = $1
+      `,
+      [Number(breweryLogId)]
+    );
+
+    return res.status(200).json({
+      fundingId: Number(fundingId),
+      breweryLogId: Number(breweryLogId),
+      liked: false,
+      likeCount: countResult.rows[0].like_count,
+      message: '양조일지 좋아요를 취소했습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '양조일지 좋아요 취소 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+// 양조일지 댓글 등록
+const createBreweryLogComment = async (req, res) => {
+  const { fundingId, breweryLogId } = req.params;
+  const { content } = req.body;
+
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !breweryLogId ||
+    isNaN(Number(breweryLogId))
+  ) {
+    return res.status(404).json({
+      status: 404,
+      message: '양조일지를 찾을 수 없습니다.',
+    });
+  }
+
+  if (
+    !content ||
+    typeof content !== 'string' ||
+    content.trim() === ''
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '댓글 내용을 입력해야 합니다.',
+    });
+  }
+
+  // TODO: JWT 연동 후 req.user.userId 사용
+  const userId = req.user?.userId || 1;
+
+  try {
+    // 양조일지 존재 확인
+    const breweryLogResult = await pool.query(
+      `
+      SELECT log_id
+      FROM brewery_logs
+      WHERE log_id = $1
+      AND funding_id = $2
+      `,
+      [Number(breweryLogId), Number(fundingId)]
+    );
+
+    if (breweryLogResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '양조일지를 찾을 수 없습니다.',
+      });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO brewery_log_comments (
+        brewery_log_id,
+        user_id,
+        content
+      )
+      VALUES ($1, $2, $3)
+      RETURNING
+        comment_id,
+        brewery_log_id,
+        user_id,
+        content,
+        created_at
+      `,
+      [
+        Number(breweryLogId),
+        userId,
+        content.trim(),
+      ]
+    );
+
+    const comment = result.rows[0];
+
+    return res.status(201).json({
+      commentId: comment.comment_id,
+      breweryLogId: comment.brewery_log_id,
+      userId: comment.user_id,
+      content: comment.content,
+      createdAt: comment.created_at,
+      message: '양조일지 댓글이 등록되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '양조일지 댓글 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+// 양조일지 답글 등록
+const createBreweryLogReply = async (req, res) => {
+  const { fundingId, breweryLogId, commentId } = req.params;
+  const { content } = req.body;
+
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !breweryLogId ||
+    isNaN(Number(breweryLogId)) ||
+    !commentId ||
+    isNaN(Number(commentId))
+  ) {
+    return res.status(404).json({
+      status: 404,
+      message: '댓글을 찾을 수 없습니다.',
+    });
+  }
+
+  if (
+    !content ||
+    typeof content !== 'string' ||
+    content.trim() === ''
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '답글 내용을 입력해야 합니다.',
+    });
+  }
+
+  // TODO: JWT 연동 후 req.user.userId 사용
+  const userId = req.user?.userId || 1;
+
+  try {
+    // 부모 댓글 조회
+    const parentCommentResult = await pool.query(
+      `
+      SELECT
+        comment_id,
+        parent_comment_id
+      FROM brewery_log_comments
+      WHERE comment_id = $1
+      AND brewery_log_id = $2
+      `,
+      [Number(commentId), Number(breweryLogId)]
+    );
+
+    if (parentCommentResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '부모 댓글을 찾을 수 없습니다.',
+      });
+    }
+
+    const parentComment = parentCommentResult.rows[0];
+
+    // 답글의 답글 방지
+    if (parentComment.parent_comment_id !== null) {
+      return res.status(400).json({
+        status: 400,
+        message: '답글에는 추가 답글을 작성할 수 없습니다.',
+      });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO brewery_log_comments (
+        brewery_log_id,
+        user_id,
+        parent_comment_id,
+        content
+      )
+      VALUES ($1, $2, $3, $4)
+      RETURNING
+        comment_id,
+        brewery_log_id,
+        user_id,
+        parent_comment_id,
+        content,
+        created_at
+      `,
+      [
+        Number(breweryLogId),
+        userId,
+        Number(commentId),
+        content.trim(),
+      ]
+    );
+
+    const reply = result.rows[0];
+
+    return res.status(201).json({
+      replyId: reply.comment_id,
+      parentCommentId: reply.parent_comment_id,
+      breweryLogId: reply.brewery_log_id,
+      userId: reply.user_id,
+      content: reply.content,
+      createdAt: reply.created_at,
+      message: '답글이 등록되었습니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '답글 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+// 양조일지 댓글 목록 조회
+const getBreweryLogComments = async (req, res) => {
+  const { fundingId, breweryLogId } = req.params;
+  const userId = req.user?.userId || 1;
+
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !breweryLogId ||
+    isNaN(Number(breweryLogId))
+  ) {
+    return res.status(404).json({
+      status: 404,
+      message: '양조일지를 찾을 수 없습니다.',
+    });
+  }
+
+  try {
+    const commentResult = await pool.query(
+      `
+      SELECT
+        c.comment_id,
+        c.brewery_log_id,
+        c.user_id,
+        c.parent_comment_id,
+        c.content,
+        c.created_at,
+        c.updated_at,
+        COALESCE(lc.like_count, 0) AS like_count,
+        EXISTS (
+          SELECT 1
+          FROM brewery_log_comment_likes bcl
+          WHERE bcl.comment_id = c.comment_id
+          AND bcl.user_id = $2
+        ) AS liked
+      FROM brewery_log_comments c
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS like_count
+        FROM brewery_log_comment_likes
+        WHERE comment_id = c.comment_id
+      ) lc ON TRUE
+      WHERE c.brewery_log_id = $1
+      ORDER BY c.created_at ASC
+      `,
+      [Number(breweryLogId), userId]
+    );
+
+    const comments = commentResult.rows.filter(
+      (comment) => comment.parent_comment_id === null
+    );
+
+    const replies = commentResult.rows.filter(
+      (comment) => comment.parent_comment_id !== null
+    );
+
+    const content = comments.map((comment) => ({
+      commentId: Number(comment.comment_id),
+      breweryLogId: Number(comment.brewery_log_id),
+      userId: Number(comment.user_id),
+      content: comment.content,
+      likeCount: Number(comment.like_count || 0),
+      liked: comment.liked,
+      createdAt: comment.created_at,
+      updatedAt: comment.updated_at,
+      replies: replies
+        .filter((reply) => Number(reply.parent_comment_id) === Number(comment.comment_id))
+        .map((reply) => ({
+          replyId: Number(reply.comment_id),
+          commentId: Number(reply.comment_id),
+          parentCommentId: Number(reply.parent_comment_id),
+          breweryLogId: Number(reply.brewery_log_id),
+          userId: Number(reply.user_id),
+          content: reply.content,
+          likeCount: Number(reply.like_count || 0),
+          liked: reply.liked,
+          createdAt: reply.created_at,
+          updatedAt: reply.updated_at,
+        })),
+    }));
+
+    return res.status(200).json({
+      fundingId: Number(fundingId),
+      breweryLogId: Number(breweryLogId),
+      comments: content,
+      commentCount: content.length,
+      message: '양조일지 댓글 목록 조회 성공',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '양조일지 댓글 목록 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+// 양조일지 댓글/답글 좋아요 등록
+const likeBreweryLogComment = async (req, res) => {
+  const { commentId } = req.params;
+  const userId = req.user?.userId || 1;
+
+  if (!commentId || isNaN(Number(commentId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 댓글 ID입니다.',
+    });
+  }
+
+  try {
+    const commentResult = await pool.query(
+      `
+      SELECT comment_id
+      FROM brewery_log_comments
+      WHERE comment_id = $1
+      `,
+      [Number(commentId)]
+    );
+
+    if (commentResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '댓글을 찾을 수 없습니다.',
+      });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO brewery_log_comment_likes (
+        comment_id,
+        user_id
+      )
+      VALUES ($1, $2)
+      ON CONFLICT (comment_id, user_id) DO NOTHING
+      `,
+      [Number(commentId), userId]
+    );
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS like_count
+      FROM brewery_log_comment_likes
+      WHERE comment_id = $1
+      `,
+      [Number(commentId)]
+    );
+
+    return res.status(201).json({
+      commentId: Number(commentId),
+      liked: true,
+      likeCount: countResult.rows[0].like_count,
+      message: '댓글 좋아요를 등록했습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '댓글 좋아요 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+// 양조일지 댓글/답글 좋아요 취소
+const unlikeBreweryLogComment = async (req, res) => {
+  const { commentId } = req.params;
+  const userId = req.user?.userId || 1;
+
+  if (!commentId || isNaN(Number(commentId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 댓글 ID입니다.',
+    });
+  }
+
+  try {
+    await pool.query(
+      `
+      DELETE FROM brewery_log_comment_likes
+      WHERE comment_id = $1
+      AND user_id = $2
+      `,
+      [Number(commentId), userId]
+    );
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS like_count
+      FROM brewery_log_comment_likes
+      WHERE comment_id = $1
+      `,
+      [Number(commentId)]
+    );
+
+    return res.status(200).json({
+      commentId: Number(commentId),
+      liked: false,
+      likeCount: countResult.rows[0].like_count,
+      message: '댓글 좋아요를 취소했습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '댓글 좋아요 취소 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
 
 module.exports = {
   saveAgreement,
@@ -3595,4 +4327,11 @@ module.exports = {
   createFundingReview,
   likeFundingProject,
   unlikeFundingProject,
+  likeBreweryLog,
+  unlikeBreweryLog,
+  createBreweryLogComment,
+  createBreweryLogReply,
+  getBreweryLogComments,
+  likeBreweryLogComment,
+  unlikeBreweryLogComment,
 };
