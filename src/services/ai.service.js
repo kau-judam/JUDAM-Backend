@@ -27,14 +27,34 @@ const createAiServiceError = (statusCode, message) => {
 
 const getAiErrorMessage = (data) => {
   if (!data) {
-    return null;
+    return 'AI 서버 요청에 실패했습니다.';
   }
 
   if (typeof data === 'string') {
     return data;
   }
 
-  return data.message || data.detail || null;
+  const detail = data.detail || data.message;
+
+  if (typeof detail === 'string') {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    const firstMessage = detail[0]?.msg;
+
+    if (firstMessage) {
+      return firstMessage;
+    }
+
+    return JSON.stringify(detail);
+  }
+
+  if (detail && typeof detail === 'object') {
+    return JSON.stringify(detail);
+  }
+
+  return 'AI 서버 요청에 실패했습니다.';
 };
 
 const requestAiChat = async ({ message, userId, history }) => {
