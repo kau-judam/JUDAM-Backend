@@ -1,5 +1,12 @@
+const bcrypt = require('bcrypt');
 const { getKakaoToken, getKakaoUserInfo } = require('../services/kakao.service');
-const { findOrCreateKakaoUser } = require('../services/user.service');
+const {
+  findOrCreateKakaoUser,
+  findUserByEmail,
+  createLocalUser,
+  updateLocalUserLastLogin,
+  isNicknameExists,
+} = require('../services/user.service');
 const {
   generateAccessToken,
   issueRefreshToken,
@@ -13,6 +20,36 @@ const sendError = (res, status, message, error) => {
     error,
   });
 };
+
+const PASSWORD_SALT_ROUNDS = 10;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeString = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value.trim();
+};
+
+const mapSignupUserResponse = (user) => ({
+  userId: String(user.user_id),
+  email: user.email,
+  nickname: user.nickname,
+  phoneNumber: user.phone_number,
+  provider: user.provider,
+  role: user.role,
+});
+
+const mapLoginUserResponse = (user) => ({
+  userId: String(user.user_id),
+  email: user.email,
+  nickname: user.nickname,
+  phoneNumber: user.phone_number,
+  provider: user.provider,
+  role: user.role,
+  profileImage: user.profile_image,
+});
 
 const buildKakaoProfile = (kakaoUserInfo) => {
   const kakaoAccount = kakaoUserInfo.kakao_account || {};
@@ -37,6 +74,158 @@ const buildKakaoAuthUrl = (redirectUri) => {
   kakaoAuthUrl.searchParams.set('redirect_uri', redirectUri);
 
   return kakaoAuthUrl.toString();
+};
+
+const signup = async (req, res) => {
+  const email = normalizeString(req.body?.email).toLowerCase();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const nickname = normalizeString(req.body?.nickname);
+  const phoneNumber = req.body?.phoneNumber === undefined || req.body?.phoneNumber === null
+    ? null
+    : normalizeString(req.body.phoneNumber);
+
+  if (!email || !password || !nickname) {
+    return res.status(400).json({
+      status: 400,
+      message: 'email, password, nickname은 필수입니다.',
+    });
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (password.length < 8) {
+    return res.status(400).json({
+      status: 400,
+      message: '비밀번호는 8자 이상이어야 합니다.',
+    });
+  }
+
+  try {
+    const existingUser = await findUserByEmail(email);
+
+    if (existingUser) {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 사용 중인 이메일입니다.',
+      });
+    }
+
+    const duplicatedNickname = await isNicknameExists(nickname);
+
+    if (duplicatedNickname) {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 사용 중인 닉네임입니다.',
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
+    const user = await createLocalUser({
+      email,
+      passwordHash,
+      nickname,
+      phoneNumber,
+    });
+
+    return res.status(201).json({
+      status: 201,
+      message: '회원가입 성공',
+      data: mapSignupUserResponse(user),
+    });
+  } catch (error) {
+    if (error.code === '23505') {
+      const existingUser = await findUserByEmail(email);
+
+      if (existingUser) {
+        return res.status(409).json({
+          status: 409,
+          message: '이미 사용 중인 이메일입니다.',
+        });
+      }
+
+      const duplicatedNickname = await isNicknameExists(nickname);
+
+      if (duplicatedNickname) {
+        return res.status(409).json({
+          status: 409,
+          message: '이미 사용 중인 닉네임입니다.',
+        });
+      }
+
+      return res.status(409).json({
+        status: 409,
+        message: '이미 사용 중인 이메일입니다.',
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '회원가입 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const login = async (req, res) => {
+  const email = normalizeString(req.body?.email).toLowerCase();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+  if (!email || !password) {
+    return res.status(400).json({
+      status: 400,
+      message: 'email, password는 필수입니다.',
+    });
+  }
+
+  try {
+    const user = await findUserByEmail(email);
+
+    if (!user) {
+      return res.status(401).json({
+        status: 401,
+        message: '이메일 또는 비밀번호가 올바르지 않습니다.',
+      });
+    }
+
+    if (user.provider !== 'local') {
+      return res.status(400).json({
+        status: 400,
+        message: '소셜 로그인으로 가입된 계정입니다.',
+      });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password || '');
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        status: 401,
+        message: '이메일 또는 비밀번호가 올바르지 않습니다.',
+      });
+    }
+
+    const loggedInUser = await updateLocalUserLastLogin(user.user_id);
+    const accessToken = generateAccessToken(loggedInUser);
+    const refreshToken = await issueRefreshToken(loggedInUser.user_id);
+
+    return res.status(200).json({
+      status: 200,
+      message: '로그인 성공',
+      data: {
+        accessToken,
+        refreshToken,
+        user: mapLoginUserResponse(loggedInUser),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '로그인 중 서버 오류가 발생했습니다.',
+    });
+  }
 };
 
 const kakaoLoginUrl = (req, res) => {
@@ -242,6 +431,8 @@ const logout = async (req, res) => {
 };
 
 module.exports = {
+  signup,
+  login,
   kakaoLoginUrl,
   kakaoLogin,
   kakaoCallback,
