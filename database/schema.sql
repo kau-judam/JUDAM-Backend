@@ -50,6 +50,22 @@ ON password_reset_verifications(email);
 CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_expires_at
 ON password_reset_verifications(expires_at);
 
+CREATE TABLE IF NOT EXISTS auth_phone_verifications (
+  verification_id BIGSERIAL PRIMARY KEY,
+  phone_number VARCHAR(30) NOT NULL,
+  code VARCHAR(30) NOT NULL,
+  verification_token VARCHAR(255),
+  expires_at TIMESTAMP NOT NULL,
+  verified_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_phone_verifications_phone
+ON auth_phone_verifications(phone_number);
+
+CREATE INDEX IF NOT EXISTS idx_auth_phone_verifications_token
+ON auth_phone_verifications(verification_token);
+
 CREATE TABLE IF NOT EXISTS user_badges (
   user_id BIGINT NOT NULL,
   badge_id VARCHAR(50) NOT NULL,
