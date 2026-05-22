@@ -1,4 +1,4 @@
-const { getCommentsByPostId } = require('../services/postCommentService');
+const { getCommentsByPostId, createComment } = require('../services/postCommentService');
 
 // 댓글 목록 조회 핸들러 (GET /api/posts/:postId/comments)
 // - 로그인 선택 (optionalAuthMiddleware — 비로그인 시 is_liked, is_mine = false)
@@ -23,4 +23,33 @@ const getCommentList = async (req, res) => {
   }
 };
 
-module.exports = { getCommentList };
+// 댓글 작성 핸들러 (POST /api/posts/:postId/comments)
+// - 로그인 필수 (authMiddleware)
+// - 댓글 작성 성공 시 posts.comment_count + 1 (서비스 트랜잭션)
+const postComment = async (req, res) => {
+  const postId = parseInt(req.params.postId, 10);
+  if (!Number.isInteger(postId) || postId <= 0) {
+    return res.status(404).json({ status: 404, message: '해당 게시글을 찾을 수 없습니다.' });
+  }
+
+  const { content } = req.body || {};
+  if (!content || content.trim() === '') {
+    return res.status(400).json({ status: 400, message: '댓글 내용을 입력해 주세요.' });
+  }
+
+  try {
+    const comment = await createComment(postId, content.trim(), req.user);
+    return res.status(201).json({
+      status: 201,
+      message: '댓글이 작성되었습니다.',
+      comment,
+    });
+  } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(404).json({ status: 404, message: error.message });
+    }
+    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+module.exports = { getCommentList, postComment };

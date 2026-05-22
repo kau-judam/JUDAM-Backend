@@ -66,4 +66,50 @@ const getCommentsByPostId = async (postId, page, size, userId) => {
   return { comments, totalElements, totalPages, currentPage: page };
 };
 
-module.exports = { getCommentsByPostId };
+// 게시글 댓글 작성 (POST /api/posts/:postId/comments)
+// - 트랜잭션: post_comments INSERT + posts.comment_count + 1
+const createComment = async (postId, content, user) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    await assertPostExists(client, postId);
+
+    const insertResult = await client.query(
+      `INSERT INTO post_comments (post_id, user_id, content)
+       VALUES ($1, $2, $3)
+       RETURNING comment_id, content, like_count, created_at`,
+      [postId, user.id, content]
+    );
+
+    await client.query(
+      'UPDATE posts SET comment_count = comment_count + 1 WHERE post_id = $1',
+      [postId]
+    );
+
+    const nicknameResult = await client.query(
+      'SELECT nickname FROM users WHERE user_id = $1',
+      [user.id]
+    );
+
+    await client.query('COMMIT');
+
+    const c = insertResult.rows[0];
+    return {
+      comment_id: Number(c.comment_id),
+      post_id:    postId,
+      user_id:    Number(user.id),
+      nickname:   nicknameResult.rows[0]?.nickname || `user_${user.id}`,
+      content:    c.content,
+      like_count: Number(c.like_count),
+      created_at: c.created_at,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getCommentsByPostId, createComment };
