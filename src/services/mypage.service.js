@@ -1214,6 +1214,58 @@ const parseArchiveFormCustomTags = (customTags) => {
   return normalizeCustomTags(stringValue.split(','));
 };
 
+const normalizeArchiveDeleteImageIds = (deleteImageIds) => {
+  if (deleteImageIds === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(deleteImageIds)) {
+    return [...new Set(
+      deleteImageIds.flatMap((imageId) => normalizeArchiveDeleteImageIds(imageId) || []),
+    )];
+  }
+
+  if (deleteImageIds === null) {
+    return [];
+  }
+
+  const stringValue = String(deleteImageIds).trim();
+
+  if (!stringValue) {
+    return [];
+  }
+
+  let parsedValues;
+
+  if (stringValue.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(stringValue);
+
+      if (!Array.isArray(parsed)) {
+        throw new Error('deleteImageIds must be an array');
+      }
+
+      parsedValues = parsed;
+    } catch (error) {
+      throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
+    }
+  } else {
+    parsedValues = stringValue.split(',');
+  }
+
+  const imageIds = parsedValues.map((imageId) => Number(String(imageId).trim()));
+
+  if (
+    imageIds.some(
+      (imageId) => !Number.isInteger(imageId) || imageId < 1,
+    )
+  ) {
+    throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
+  }
+
+  return [...new Set(imageIds)];
+};
+
 const normalizeArchiveFormValue = (fieldName, value) => {
   if (value === undefined) {
     return undefined;
@@ -1732,6 +1784,7 @@ module.exports = {
   findMyArchiveForImage,
   mapArchiveImageResponse,
   normalizeArchiveFormPayload,
+  normalizeArchiveDeleteImageIds,
   mapArchiveResponse,
   validateArchivePayload,
   validateTagIds,

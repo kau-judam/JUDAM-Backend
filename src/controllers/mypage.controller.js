@@ -18,6 +18,7 @@ const {
   uploadArchiveImages,
   deleteArchiveImage,
   normalizeArchiveFormPayload,
+  normalizeArchiveDeleteImageIds,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -305,6 +306,47 @@ const updateMyArchiveController = async (req, res) => {
 
   try {
     const data = await updateMyArchive(userId, req.params.archiveId, req.body);
+
+    return res.status(200).json({
+      status: 200,
+      message: '아카이브 수정 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 수정 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const updateMyArchiveWithImagesController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const payload = normalizeArchiveFormPayload(req.body);
+    const deleteImageIds = normalizeArchiveDeleteImageIds(req.body?.deleteImageIds);
+
+    if (Object.keys(payload).length > 0) {
+      await updateMyArchive(userId, req.params.archiveId, payload);
+    }
+
+    if (Array.isArray(deleteImageIds) && deleteImageIds.length > 0) {
+      for (const imageId of deleteImageIds) {
+        await deleteArchiveImage(userId, req.params.archiveId, imageId);
+      }
+    }
+
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      await uploadArchiveImages(userId, req.params.archiveId, req.files);
+    }
+
+    const data = await getMyArchiveDetail(userId, req.params.archiveId);
 
     return res.status(200).json({
       status: 200,
@@ -667,6 +709,7 @@ module.exports = {
   createMyArchiveController,
   createMyArchiveWithImagesController,
   updateMyArchiveController,
+  updateMyArchiveWithImagesController,
   deleteMyArchiveController,
   uploadArchiveImagesController,
   deleteArchiveImageController,
