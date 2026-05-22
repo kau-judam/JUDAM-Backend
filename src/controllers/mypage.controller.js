@@ -4,6 +4,7 @@ const {
   updateNickname,
   updatePhoneNumber,
   updateProfileImage,
+  changeMyPassword,
   getMyPageSummary,
   getMySulbti,
   saveMySulbti,
@@ -450,6 +451,58 @@ const updateProfileImageController = async (req, res) => {
   }
 };
 
+const changeMyPasswordController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  const currentPassword = typeof req.body?.currentPassword === 'string'
+    ? req.body.currentPassword
+    : '';
+  const newPassword = typeof req.body?.newPassword === 'string'
+    ? req.body.newPassword
+    : '';
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({
+      status: 400,
+      message: '현재 비밀번호와 새 비밀번호를 입력해주세요.',
+    });
+  }
+
+  if (newPassword.length < 8) {
+    return res.status(400).json({
+      status: 400,
+      message: '새 비밀번호는 8자 이상이어야 합니다.',
+    });
+  }
+
+  try {
+    await changeMyPassword(userId, currentPassword, newPassword);
+
+    return res.status(200).json({
+      status: 200,
+      message: '비밀번호 변경 성공',
+    });
+  } catch (error) {
+    const status = getErrorStatus(error);
+
+    if (status === 400 || status === 401 || status === 404) {
+      return res.status(status).json({
+        status,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '비밀번호 변경 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 module.exports = {
   getMyProfileController,
   getMyPageSummaryController,
@@ -465,4 +518,5 @@ module.exports = {
   updateNicknameController,
   updatePhoneNumberController,
   updateProfileImageController,
+  changeMyPasswordController,
 };

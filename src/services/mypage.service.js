@@ -1,3 +1,4 @@
+const bcrypt = require('bcrypt');
 const {
   findUserById,
   updateUserProfile,
@@ -11,6 +12,8 @@ const createServiceError = (statusCode, message) => {
   error.statusCode = statusCode;
   return error;
 };
+
+const PASSWORD_SALT_ROUNDS = 10;
 
 const mapProfileResponse = (user) => ({
   userId: String(user.user_id),
@@ -82,6 +85,51 @@ const updateProfileImage = async (userId, file) => {
   return {
     profileImageUrl: user.profile_image,
   };
+};
+
+const changeMyPassword = async (userId, currentPassword, newPassword) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        user_id,
+        password,
+        provider
+      FROM users
+      WHERE user_id = $1
+        AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [userId],
+  );
+  const user = rows[0];
+
+  if (!user) {
+    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+  }
+
+  if (user.provider !== 'local') {
+    throw createServiceError(400, '소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다.');
+  }
+
+  const isPasswordValid = await bcrypt.compare(currentPassword, user.password || '');
+
+  if (!isPasswordValid) {
+    throw createServiceError(401, '현재 비밀번호가 올바르지 않습니다.');
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
+
+  await pool.query(
+    `
+      UPDATE users
+      SET
+        password = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $2
+        AND deleted_at IS NULL
+    `,
+    [passwordHash, userId],
+  );
 };
 
 const getParticipatedFundingCount = async (userId) => {
@@ -1074,6 +1122,7 @@ module.exports = {
   updateNickname,
   updatePhoneNumber,
   updateProfileImage,
+  changeMyPassword,
   getMyPageSummary,
   getMySulbti,
   saveMySulbti,

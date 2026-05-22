@@ -11,6 +11,7 @@ const {
   updateNicknameController,
   updatePhoneNumberController,
   updateProfileImageController,
+  changeMyPasswordController,
   getMyArchivesController,
   getMyArchiveDetailController,
   createMyArchiveController,
@@ -36,5 +37,6 @@ router.get('/profile/nickname/check', authMiddleware, checkNicknameController);
 router.patch('/profile/nickname', authMiddleware, updateNicknameController);
 router.patch('/profile/phone', authMiddleware, updatePhoneNumberController);
 router.patch('/profile/image', authMiddleware, upload.single('image'), updateProfileImageController);
+router.patch('/profile/password', authMiddleware, changeMyPasswordController);
 
 module.exports = router;
