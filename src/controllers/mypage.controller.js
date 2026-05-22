@@ -17,6 +17,7 @@ const {
   getArchiveTags,
   uploadArchiveImages,
   deleteArchiveImage,
+  normalizeArchiveFormPayload,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -249,6 +250,37 @@ const createMyArchiveController = async (req, res) => {
 
   try {
     const data = await createMyArchive(userId, req.body);
+
+    return res.status(201).json({
+      status: 201,
+      message: '아카이브 작성 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 작성 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const createMyArchiveWithImagesController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const payload = normalizeArchiveFormPayload(req.body);
+    const archive = await createMyArchive(userId, payload);
+
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      await uploadArchiveImages(userId, archive.archiveId, req.files);
+    }
+
+    const data = await getMyArchiveDetail(userId, archive.archiveId);
 
     return res.status(201).json({
       status: 201,
@@ -633,6 +665,7 @@ module.exports = {
   getMyArchivesController,
   getMyArchiveDetailController,
   createMyArchiveController,
+  createMyArchiveWithImagesController,
   updateMyArchiveController,
   deleteMyArchiveController,
   uploadArchiveImagesController,
