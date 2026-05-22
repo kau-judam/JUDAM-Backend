@@ -10,6 +10,9 @@ const {
   putPost,
   deletePostHandler,
 } = require('../controllers/postController');
+const {
+  getCommentList,
+} = require('../controllers/postCommentController');
 
 // 게시글 작성 — 로그인 필수, 이미지 파일 수신(multer, 최대 5개)
 router.post('/', authMiddleware, upload.array('images'), postPost);
@@ -25,5 +28,8 @@ router.put('/:postId', authMiddleware, upload.array('images'), putPost);
 
 // 게시글 삭제 — 로그인 필수, 작성자 본인만 가능
 router.delete('/:postId', authMiddleware, deletePostHandler);
+
+// 댓글 목록 조회 — 로그인 선택 (is_liked, is_mine 반영)
+router.get('/:postId/comments', optionalAuthMiddleware, getCommentList);
 
 module.exports = router;

@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS post_comments (
   user_id BIGINT NOT NULL,
   content TEXT NOT NULL,
   like_count INT NOT NULL DEFAULT 0,
+  parent_comment_id BIGINT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP,
   CONSTRAINT fk_post_comments_post
@@ -59,6 +60,10 @@ CREATE TABLE IF NOT EXISTS post_comments (
   CONSTRAINT fk_post_comments_user
     FOREIGN KEY (user_id)
     REFERENCES users(user_id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_post_comments_parent
+    FOREIGN KEY (parent_comment_id)
+    REFERENCES post_comments(comment_id)
     ON DELETE CASCADE
 );
 
