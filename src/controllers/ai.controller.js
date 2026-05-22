@@ -32,7 +32,7 @@ const postAiChat = async (req, res) => {
     ? req.body.message.trim()
     : '';
   const history = req.body?.history ?? [];
-  const userId = req.body?.user_id;
+  const userId = req.body?.user_id || 'anonymous';
 
   if (!message) {
     return res.status(400).json({
