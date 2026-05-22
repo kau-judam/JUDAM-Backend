@@ -1000,6 +1000,100 @@ const insertArchiveTags = async (client, archiveId, tagIds) => {
   );
 };
 
+const parseArchiveFormTagIds = (tagIds) => {
+  if (tagIds === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(tagIds)) {
+    return tagIds.flatMap((tagId) => parseArchiveFormTagIds(tagId) || []);
+  }
+
+  if (tagIds === null) {
+    return [];
+  }
+
+  const stringValue = String(tagIds).trim();
+
+  if (!stringValue) {
+    return [];
+  }
+
+  if (stringValue.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(stringValue);
+
+      if (!Array.isArray(parsed)) {
+        throw new Error('tagIds must be an array');
+      }
+
+      return parsed.map((tagId) => Number(tagId));
+    } catch (error) {
+      throw createServiceError(400, 'tagIds는 배열 형식이어야 합니다.');
+    }
+  }
+
+  return stringValue.split(',').map((tagId) => Number(tagId.trim()));
+};
+
+const normalizeArchiveFormValue = (fieldName, value) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const stringValue = String(value).trim();
+
+  if (!stringValue) {
+    return null;
+  }
+
+  if (
+    fieldName === 'alcoholId'
+    || fieldName === 'abv'
+    || fieldName === 'rating'
+    || fieldName === 'fundingId'
+    || fieldName === 'orderId'
+    || fieldName === 'reviewId'
+  ) {
+    return Number(stringValue);
+  }
+
+  return stringValue;
+};
+
+const normalizeArchiveFormPayload = (body = {}) => {
+  const payload = {};
+  const formFields = [
+    'archiveType',
+    'alcoholId',
+    'customName',
+    'category',
+    'abv',
+    'rating',
+    'tastingNote',
+    'recordDate',
+    'fundingId',
+    'orderId',
+    'reviewId',
+  ];
+
+  formFields.forEach((fieldName) => {
+    if (hasOwn(body, fieldName)) {
+      payload[fieldName] = normalizeArchiveFormValue(fieldName, body[fieldName]);
+    }
+  });
+
+  if (hasOwn(body, 'tagIds')) {
+    payload.tagIds = parseArchiveFormTagIds(body.tagIds);
+  }
+
+  return payload;
+};
+
 const getMyArchives = async (userId, query) => {
   const {
     archiveType,
@@ -1420,6 +1514,7 @@ module.exports = {
   deleteArchiveImage,
   findMyArchiveForImage,
   mapArchiveImageResponse,
+  normalizeArchiveFormPayload,
   mapArchiveResponse,
   validateArchivePayload,
   validateTagIds,
