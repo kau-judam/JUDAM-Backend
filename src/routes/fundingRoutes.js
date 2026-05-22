@@ -52,6 +52,13 @@ const {
   createFundingReview,
   likeFundingProject,
   unlikeFundingProject,
+  likeBreweryLog,
+  unlikeBreweryLog,
+  createBreweryLogComment,
+  createBreweryLogReply,
+  getBreweryLogComments,
+  likeBreweryLogComment,
+  unlikeBreweryLogComment,
 } = require('../controllers/funding.controller');
 
 router.post('/agreements', saveAgreement);
@@ -112,6 +119,21 @@ router.post('/:fundingId/likes', likeFundingProject);
 router.delete('/:fundingId/likes', unlikeFundingProject);
 
 router.patch('/:fundingId', updateFundingProject);
+
+// 양조일지 좋아요 등록
+router.post('/:fundingId/brewery-logs/:breweryLogId/likes', likeBreweryLog);
+// 양조일지 좋아요 취소
+router.delete('/:fundingId/brewery-logs/:breweryLogId/likes', unlikeBreweryLog);
+// 양조일지 댓글 등록
+router.post('/:fundingId/brewery-logs/:breweryLogId/comments', createBreweryLogComment);
+// 양조일지 답글 등록
+router.post('/:fundingId/brewery-logs/:breweryLogId/comments/:commentId/replies', createBreweryLogReply);
+// 양조일지 댓글 목록 조회
+router.get('/:fundingId/brewery-logs/:breweryLogId/comments', getBreweryLogComments);
+//양조일지 댓글/답글 좋아요 등록,취소
+router.post('/:fundingId/brewery-logs/:breweryLogId/comments/:commentId/likes', likeBreweryLogComment);
+
+router.delete('/:fundingId/brewery-logs/:breweryLogId/comments/:commentId/likes',unlikeBreweryLogComment);
 
 router.get('/:fundingId', getFundingDetail); // 모든 상세/기타 라우트들은 이거 위에 있어야 함
 
