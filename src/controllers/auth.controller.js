@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { getKakaoToken, getKakaoUserInfo } = require('../services/kakao.service');
 const {
@@ -6,6 +7,9 @@ const {
   createLocalUser,
   updateLocalUserLastLogin,
   isNicknameExists,
+  createPasswordResetVerification,
+  verifyPasswordResetVerification,
+  resetPasswordWithVerification,
 } = require('../services/user.service');
 const {
   generateAccessToken,
@@ -26,6 +30,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NICKNAME_PATTERN = /^[가-힣A-Za-z0-9]{2,12}$/u;
 const PASSWORD_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
 const ALLOWED_SIGNUP_ROLES = new Set(['USER', 'BREWERY_PENDING']);
+const PASSWORD_RESET_EXPIRES_IN_MINUTES = 5;
 
 const normalizeString = (value) => {
   if (typeof value !== 'string') {
@@ -78,6 +83,12 @@ const buildKakaoAuthUrl = (redirectUri) => {
   kakaoAuthUrl.searchParams.set('redirect_uri', redirectUri);
 
   return kakaoAuthUrl.toString();
+};
+
+const generatePasswordResetCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+
+const sendPasswordResetEmail = async () => {
+  // MVP에서는 이메일 발송 대신 응답에 인증번호를 포함한다.
 };
 
 const checkEmail = async (req, res) => {
@@ -336,6 +347,194 @@ const login = async (req, res) => {
   }
 };
 
+const requestPasswordReset = async (req, res) => {
+  const email = normalizeString(req.body?.email).toLowerCase();
+
+  if (!email) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일을 입력해주세요.',
+    });
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const user = await findUserByEmail(email);
+
+    if (!user) {
+      return res.status(404).json({
+        status: 404,
+        message: '해당 이메일로 가입된 계정을 찾을 수 없습니다.',
+      });
+    }
+
+    if (user.provider !== 'local') {
+      return res.status(400).json({
+        status: 400,
+        message: '소셜 로그인 계정은 비밀번호를 재설정할 수 없습니다.',
+      });
+    }
+
+    const verificationCode = generatePasswordResetCode();
+    await createPasswordResetVerification(email, verificationCode);
+    await sendPasswordResetEmail(email, verificationCode);
+
+    return res.status(200).json({
+      status: 200,
+      message: '비밀번호 재설정 인증번호가 발급되었습니다.',
+      data: {
+        email,
+        verificationCode,
+        expiresInMinutes: PASSWORD_RESET_EXPIRES_IN_MINUTES,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '비밀번호 재설정 인증번호 발급 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const verifyPasswordReset = async (req, res) => {
+  const email = normalizeString(req.body?.email).toLowerCase();
+  const verificationCode = normalizeString(req.body?.verificationCode);
+
+  if (!email) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일을 입력해주세요.',
+    });
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (!verificationCode) {
+    return res.status(400).json({
+      status: 400,
+      message: '인증번호가 올바르지 않거나 만료되었습니다.',
+    });
+  }
+
+  try {
+    const verification = await verifyPasswordResetVerification(email, verificationCode);
+
+    if (!verification) {
+      return res.status(400).json({
+        status: 400,
+        message: '인증번호가 올바르지 않거나 만료되었습니다.',
+      });
+    }
+
+    return res.status(200).json({
+      status: 200,
+      message: '인증번호 확인 성공',
+      data: {
+        email,
+        verified: true,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '인증번호 확인 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  const email = normalizeString(req.body?.email).toLowerCase();
+  const verificationCode = normalizeString(req.body?.verificationCode);
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  const newPasswordConfirm = typeof req.body?.newPasswordConfirm === 'string'
+    ? req.body.newPasswordConfirm
+    : '';
+
+  if (!email) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일을 입력해주세요.',
+    });
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (!verificationCode) {
+    return res.status(400).json({
+      status: 400,
+      message: '인증번호 확인이 필요합니다.',
+    });
+  }
+
+  if (newPassword !== newPasswordConfirm) {
+    return res.status(400).json({
+      status: 400,
+      message: '새 비밀번호와 비밀번호 확인이 일치하지 않습니다.',
+    });
+  }
+
+  if (!PASSWORD_PATTERN.test(newPassword)) {
+    return res.status(400).json({
+      status: 400,
+      message: '비밀번호는 8자 이상이며 영문 대문자, 영문 소문자, 숫자를 모두 포함해야 합니다.',
+    });
+  }
+
+  try {
+    const user = await findUserByEmail(email);
+
+    if (!user) {
+      return res.status(404).json({
+        status: 404,
+        message: '해당 이메일로 가입된 계정을 찾을 수 없습니다.',
+      });
+    }
+
+    if (user.provider !== 'local') {
+      return res.status(400).json({
+        status: 400,
+        message: '소셜 로그인 계정은 비밀번호를 재설정할 수 없습니다.',
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
+    await resetPasswordWithVerification(email, verificationCode, passwordHash);
+
+    return res.status(200).json({
+      status: 200,
+      message: '비밀번호 재설정 성공',
+    });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '비밀번호 재설정 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 const kakaoLoginUrl = (req, res) => {
   const frontendRedirectUri = getFrontendRedirectUri();
 
@@ -553,6 +752,9 @@ module.exports = {
   checkNickname,
   signup,
   login,
+  requestPasswordReset,
+  verifyPasswordReset,
+  resetPassword,
   kakaoLoginUrl,
   kakaoLogin,
   kakaoCallback,
