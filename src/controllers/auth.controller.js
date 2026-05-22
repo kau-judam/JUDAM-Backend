@@ -23,6 +23,9 @@ const sendError = (res, status, message, error) => {
 
 const PASSWORD_SALT_ROUNDS = 10;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const NICKNAME_PATTERN = /^[가-힣A-Za-z0-9]{2,12}$/u;
+const PASSWORD_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+const ALLOWED_SIGNUP_ROLES = new Set(['USER', 'BREWERY_PENDING']);
 
 const normalizeString = (value) => {
   if (typeof value !== 'string') {
@@ -39,6 +42,7 @@ const mapSignupUserResponse = (user) => ({
   phoneNumber: user.phone_number,
   provider: user.provider,
   role: user.role,
+  marketingAgreed: Boolean(user.marketing_agreed),
 });
 
 const mapLoginUserResponse = (user) => ({
@@ -76,6 +80,79 @@ const buildKakaoAuthUrl = (redirectUri) => {
   return kakaoAuthUrl.toString();
 };
 
+const checkEmail = async (req, res) => {
+  const email = normalizeString(req.query?.email).toLowerCase();
+
+  if (!email) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일을 입력해주세요.',
+    });
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const existingUser = await findUserByEmail(email);
+    const isAvailable = !existingUser;
+
+    return res.status(200).json({
+      status: 200,
+      message: isAvailable ? '사용 가능한 이메일입니다.' : '이미 사용 중인 이메일입니다.',
+      data: {
+        email,
+        isAvailable,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '이메일 중복 확인 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const checkNickname = async (req, res) => {
+  const nickname = normalizeString(req.query?.nickname);
+
+  if (!nickname) {
+    return res.status(400).json({
+      status: 400,
+      message: '닉네임을 입력해주세요.',
+    });
+  }
+
+  if (!NICKNAME_PATTERN.test(nickname)) {
+    return res.status(400).json({
+      status: 400,
+      message: '닉네임은 2자 이상 12자 이하의 한글, 영문, 숫자만 사용할 수 있습니다.',
+    });
+  }
+
+  try {
+    const isAvailable = !(await isNicknameExists(nickname));
+
+    return res.status(200).json({
+      status: 200,
+      message: isAvailable ? '사용 가능한 닉네임입니다.' : '이미 사용 중인 닉네임입니다.',
+      data: {
+        nickname,
+        isAvailable,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '닉네임 중복 확인 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 const signup = async (req, res) => {
   const email = normalizeString(req.body?.email).toLowerCase();
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
@@ -83,6 +160,12 @@ const signup = async (req, res) => {
   const phoneNumber = req.body?.phoneNumber === undefined || req.body?.phoneNumber === null
     ? null
     : normalizeString(req.body.phoneNumber);
+  const termsAgreed = req.body?.termsAgreed === true;
+  const privacyAgreed = req.body?.privacyAgreed === true;
+  const marketingAgreed = req.body?.marketingAgreed === true;
+  const role = req.body?.role === undefined || req.body?.role === null || req.body?.role === ''
+    ? 'USER'
+    : normalizeString(req.body.role).toUpperCase();
 
   if (!email || !password || !nickname) {
     return res.status(400).json({
@@ -98,10 +181,31 @@ const signup = async (req, res) => {
     });
   }
 
-  if (password.length < 8) {
+  if (!PASSWORD_PATTERN.test(password)) {
     return res.status(400).json({
       status: 400,
-      message: '비밀번호는 8자 이상이어야 합니다.',
+      message: '비밀번호는 8자 이상이며 영문 대문자, 영문 소문자, 숫자를 모두 포함해야 합니다.',
+    });
+  }
+
+  if (!NICKNAME_PATTERN.test(nickname)) {
+    return res.status(400).json({
+      status: 400,
+      message: '닉네임은 2자 이상 12자 이하의 한글, 영문, 숫자만 사용할 수 있습니다.',
+    });
+  }
+
+  if (!termsAgreed || !privacyAgreed) {
+    return res.status(400).json({
+      status: 400,
+      message: '필수 약관에 동의해주세요.',
+    });
+  }
+
+  if (!ALLOWED_SIGNUP_ROLES.has(role)) {
+    return res.status(400).json({
+      status: 400,
+      message: '유효하지 않은 사용자 유형입니다.',
     });
   }
 
@@ -130,6 +234,10 @@ const signup = async (req, res) => {
       passwordHash,
       nickname,
       phoneNumber,
+      role,
+      termsAgreed,
+      privacyAgreed,
+      marketingAgreed,
     });
 
     return res.status(201).json({
@@ -386,31 +494,42 @@ const kakaoLoginByCode = async (req, res) => {
 }
 
 const refreshAccessToken = async (req, res) => {
-  const { refreshToken } = req.body;
+  const { refreshToken } = req.body || {};
 
   if (!refreshToken) {
-    return sendError(res, 400, 'refreshToken is required', 'refreshToken is missing');
+    return res.status(401).json({
+      status: 401,
+      message: '유효하지 않거나 만료된 리프레시 토큰입니다.',
+    });
   }
 
   try {
     const accessToken = await refreshAccessTokenService(refreshToken);
 
     return res.status(200).json({
-      message: 'access token refreshed',
-      accessToken,
+      status: 200,
+      message: '토큰 재발급 성공',
+      data: {
+        accessToken,
+      },
     });
   } catch (error) {
-    return sendError(
-      res,
-      error.statusCode || 500,
-      error.message || 'access token refresh failed',
-      error.detail || error.message,
-    );
+    if (error.statusCode === 401) {
+      return res.status(401).json({
+        status: 401,
+        message: '유효하지 않거나 만료된 리프레시 토큰입니다.',
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '토큰 재발급 중 서버 오류가 발생했습니다.',
+    });
   }
 };
 
 const logout = async (req, res) => {
-  const { refreshToken } = req.body;
+  const { refreshToken } = req.body || {};
 
   try {
     if (refreshToken) {
@@ -418,19 +537,20 @@ const logout = async (req, res) => {
     }
 
     return res.status(200).json({
-      message: 'logout success',
+      status: 200,
+      message: '로그아웃 성공',
     });
   } catch (error) {
-    return sendError(
-      res,
-      error.statusCode || 500,
-      error.message || 'logout failed',
-      error.detail || error.message,
-    );
+    return res.status(500).json({
+      status: 500,
+      message: '로그아웃 중 서버 오류가 발생했습니다.',
+    });
   }
 };
 
 module.exports = {
+  checkEmail,
+  checkNickname,
   signup,
   login,
   kakaoLoginUrl,
