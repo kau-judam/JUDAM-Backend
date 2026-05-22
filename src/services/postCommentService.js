@@ -112,4 +112,85 @@ const createComment = async (postId, content, user) => {
   }
 };
 
-module.exports = { getCommentsByPostId, createComment };
+// 게시글 댓글 수정 (PUT /api/posts/:postId/comments/:commentId)
+// - postId/commentId 모두 일치하는 댓글만 식별 (다른 게시글 소속이거나 post 자체가 없으면 404)
+// - 작성자 본인만 가능 (JWT user_id == post_comments.user_id)
+// - updated_at은 CURRENT_TIMESTAMP로 갱신
+const updateComment = async (postId, commentId, userId, content) => {
+  const ownerResult = await pool.query(
+    'SELECT user_id FROM post_comments WHERE comment_id = $1 AND post_id = $2',
+    [commentId, postId]
+  );
+
+  if (ownerResult.rowCount === 0) {
+    const error = new Error('해당 댓글을 찾을 수 없습니다.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (Number(ownerResult.rows[0].user_id) !== Number(userId)) {
+    const error = new Error('본인이 작성한 댓글만 수정할 수 있습니다.');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const updateResult = await pool.query(
+    `UPDATE post_comments
+     SET content = $1, updated_at = CURRENT_TIMESTAMP
+     WHERE comment_id = $2
+     RETURNING comment_id, content, updated_at`,
+    [content, commentId]
+  );
+
+  const c = updateResult.rows[0];
+  return {
+    comment_id: Number(c.comment_id),
+    content:    c.content,
+    updated_at: c.updated_at,
+  };
+};
+
+// 게시글 댓글 삭제 (DELETE /api/posts/:postId/comments/:commentId)
+// - postId/commentId 모두 일치하는 댓글만 식별
+// - 작성자 본인만 가능
+// - 트랜잭션: post_comments DELETE + posts.comment_count GREATEST(-1, 0)
+// - post_comment_likes는 FK ON DELETE CASCADE로 자동 정리
+const deleteComment = async (postId, commentId, userId) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const ownerResult = await client.query(
+      'SELECT user_id FROM post_comments WHERE comment_id = $1 AND post_id = $2',
+      [commentId, postId]
+    );
+
+    if (ownerResult.rowCount === 0) {
+      const error = new Error('해당 댓글을 찾을 수 없습니다.');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (Number(ownerResult.rows[0].user_id) !== Number(userId)) {
+      const error = new Error('본인이 작성한 댓글만 삭제할 수 있습니다.');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    await client.query('DELETE FROM post_comments WHERE comment_id = $1', [commentId]);
+
+    await client.query(
+      'UPDATE posts SET comment_count = GREATEST(comment_count - 1, 0) WHERE post_id = $1',
+      [postId]
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getCommentsByPostId, createComment, updateComment, deleteComment };

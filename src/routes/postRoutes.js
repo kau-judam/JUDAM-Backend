@@ -13,6 +13,8 @@ const {
 const {
   getCommentList,
   postComment,
+  putCommentHandler,
+  deleteCommentHandler,
 } = require('../controllers/postCommentController');
 
 // 게시글 작성 — 로그인 필수, 이미지 파일 수신(multer, 최대 5개)
@@ -35,5 +37,11 @@ router.get('/:postId/comments', optionalAuthMiddleware, getCommentList);
 
 // 댓글 작성 — 로그인 필수
 router.post('/:postId/comments', authMiddleware, postComment);
+
+// 댓글 수정 — 로그인 필수, 작성자 본인만
+router.put('/:postId/comments/:commentId', authMiddleware, putCommentHandler);
+
+// 댓글 삭제 — 로그인 필수, 작성자 본인만
+router.delete('/:postId/comments/:commentId', authMiddleware, deleteCommentHandler);
 
 module.exports = router;
