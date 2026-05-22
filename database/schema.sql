@@ -35,6 +35,21 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS password_reset_verifications (
+  verification_id BIGSERIAL PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  code VARCHAR(10) NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  verified_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_email
+ON password_reset_verifications(email);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_expires_at
+ON password_reset_verifications(expires_at);
+
 CREATE TABLE IF NOT EXISTS user_badges (
   user_id BIGINT NOT NULL,
   badge_id VARCHAR(50) NOT NULL,

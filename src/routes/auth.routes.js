@@ -4,6 +4,9 @@ const {
   checkNickname,
   signup,
   login,
+  requestPasswordReset,
+  verifyPasswordReset,
+  resetPassword,
   kakaoLoginUrl,
   kakaoLogin,
   kakaoCallback,
@@ -18,6 +21,9 @@ router.get('/email/check', checkEmail);
 router.get('/nickname/check', checkNickname);
 router.post('/signup', signup);
 router.post('/login', login);
+router.post('/password/reset/request', requestPasswordReset);
+router.post('/password/reset/verify', verifyPasswordReset);
+router.patch('/password/reset', resetPassword);
 router.get('/kakao/url', kakaoLoginUrl);
 router.get('/kakao', kakaoLogin);
 router.get('/kakao/callback', kakaoCallback);
