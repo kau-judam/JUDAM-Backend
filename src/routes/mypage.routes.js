@@ -19,6 +19,8 @@ const {
   updateMyArchiveController,
   deleteMyArchiveController,
   getArchiveTagsController,
+  uploadArchiveImagesController,
+  deleteArchiveImageController,
 } = require('../controllers/mypage.controller');
 
 const router = express.Router();
@@ -29,6 +31,8 @@ router.get('/sulbti', authMiddleware, getMySulbtiController);
 router.post('/sulbti', authMiddleware, saveMySulbtiController);
 router.get('/archives/tags', authMiddleware, getArchiveTagsController);
 router.get('/archives', authMiddleware, getMyArchivesController);
+router.post('/archives/:archiveId/images', authMiddleware, upload.array('images', 3), uploadArchiveImagesController);
+router.delete('/archives/:archiveId/images/:imageId', authMiddleware, deleteArchiveImageController);
 router.get('/archives/:archiveId', authMiddleware, getMyArchiveDetailController);
 router.post('/archives', authMiddleware, createMyArchiveController);
 router.patch('/archives/:archiveId', authMiddleware, updateMyArchiveController);
