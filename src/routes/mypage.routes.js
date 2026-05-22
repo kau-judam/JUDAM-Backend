@@ -18,6 +18,7 @@ const {
   createMyArchiveController,
   createMyArchiveWithImagesController,
   updateMyArchiveController,
+  updateMyArchiveWithImagesController,
   deleteMyArchiveController,
   getArchiveTagsController,
   uploadArchiveImagesController,
@@ -33,6 +34,7 @@ router.post('/sulbti', authMiddleware, saveMySulbtiController);
 router.get('/archives/tags', authMiddleware, getArchiveTagsController);
 router.get('/archives', authMiddleware, getMyArchivesController);
 router.post('/archives/with-images', authMiddleware, upload.array('images', 3), createMyArchiveWithImagesController);
+router.patch('/archives/:archiveId/with-images', authMiddleware, upload.array('images', 3), updateMyArchiveWithImagesController);
 router.post('/archives/:archiveId/images', authMiddleware, upload.array('images', 3), uploadArchiveImagesController);
 router.delete('/archives/:archiveId/images/:imageId', authMiddleware, deleteArchiveImageController);
 router.get('/archives/:archiveId', authMiddleware, getMyArchiveDetailController);
