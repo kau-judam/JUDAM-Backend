@@ -1,5 +1,7 @@
 const express = require('express');
 const {
+  checkEmail,
+  checkNickname,
   signup,
   login,
   kakaoLoginUrl,
@@ -12,6 +14,8 @@ const {
 
 const router = express.Router();
 
+router.get('/email/check', checkEmail);
+router.get('/nickname/check', checkNickname);
 router.post('/signup', signup);
 router.post('/login', login);
 router.get('/kakao/url', kakaoLoginUrl);

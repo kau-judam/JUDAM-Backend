@@ -82,6 +82,10 @@ const createLocalUser = async ({
   passwordHash,
   nickname,
   phoneNumber,
+  role = 'USER',
+  termsAgreed = false,
+  privacyAgreed = false,
+  marketingAgreed = false,
 }) => {
   const { rows } = await pool.query(
     `
@@ -90,12 +94,35 @@ const createLocalUser = async ({
         password,
         nickname,
         phone_number,
+        role,
         provider,
         kakao_id,
         profile_image,
+        terms_agreed,
+        privacy_agreed,
+        marketing_agreed,
+        terms_agreed_at,
+        privacy_agreed_at,
+        marketing_agreed_at,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, 'local', NULL, NULL, CURRENT_TIMESTAMP)
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        'local',
+        NULL,
+        NULL,
+        $6,
+        $7,
+        $8,
+        CASE WHEN $6 THEN CURRENT_TIMESTAMP ELSE NULL END,
+        CASE WHEN $7 THEN CURRENT_TIMESTAMP ELSE NULL END,
+        CASE WHEN $8 THEN CURRENT_TIMESTAMP ELSE NULL END,
+        CURRENT_TIMESTAMP
+      )
       RETURNING
         user_id,
         email,
@@ -104,9 +131,10 @@ const createLocalUser = async ({
         role,
         provider,
         profile_image,
+        marketing_agreed,
         last_login_at
     `,
-    [email, passwordHash, nickname, phoneNumber],
+    [email, passwordHash, nickname, phoneNumber, role, termsAgreed, privacyAgreed, marketingAgreed],
   );
 
   return rows[0];
