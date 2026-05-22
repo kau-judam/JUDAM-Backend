@@ -137,6 +137,14 @@ const checkOctomoMessageExists = async (phoneNumber, verificationCode) => {
 
     return response.data?.exists === true;
   } catch (error) {
+    console.error('Octomo API request failed', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      data: error.response?.data,
+      url: OCTOMO_API_URL,
+    });
+
     throw createServiceError(502, '전화번호 인증 서비스와 통신할 수 없습니다.');
   }
 };
