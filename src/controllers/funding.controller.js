@@ -2698,9 +2698,7 @@ const createBreweryLog = async (req, res) => {
     'PROCESSING',
     'FERMENTATION',
     'FILTERING',
-    'BOTTLING',
-    'AGING',
-    'SHIPPING',
+    'BOTTLING'
   ];
 
   if (!fundingId || isNaN(Number(fundingId))) {
@@ -2806,9 +2804,7 @@ const updateBreweryLog = async (req, res) => {
     'PROCESSING',
     'FERMENTATION',
     'FILTERING',
-    'BOTTLING',
-    'AGING',
-    'SHIPPING',
+    'BOTTLING'
   ];
 
   if (
