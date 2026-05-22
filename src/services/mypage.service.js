@@ -559,6 +559,59 @@ const ARCHIVE_TAG_CATEGORY_NAMES = {
   MOOD: '감성',
 };
 
+const FIXED_ARCHIVE_TAG_GROUPS = [
+  {
+    category: 'TASTE',
+    categoryName: '맛·향',
+    tags: [
+      '달콤한',
+      '깔끔한',
+      '묵직한',
+      '산미있는',
+      '쓴맛',
+      '고소한',
+      '부드러운',
+      '탄산있는',
+      '구수한',
+      '과일향',
+    ],
+  },
+  {
+    category: 'SITUATION',
+    categoryName: '상황',
+    tags: [
+      '혼술',
+      '친구모임',
+      '데이트',
+      '특별한날',
+      '식사중',
+      '야외',
+      '집들이',
+      '기념일',
+    ],
+  },
+  {
+    category: 'MOOD',
+    categoryName: '감성',
+    tags: [
+      '행복한',
+      '설레는',
+      '그리운',
+      '편안한',
+      '들뜬',
+      '차분한',
+    ],
+  },
+];
+const FIXED_ARCHIVE_TAG_ROWS = FIXED_ARCHIVE_TAG_GROUPS.flatMap((group, groupIndex) => (
+  group.tags.map((name, tagIndex) => ({
+    category: group.category,
+    name,
+    categoryOrder: groupIndex + 1,
+    tagOrder: tagIndex + 1,
+  }))
+));
+
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
 
 const toNullableNumber = (value) => {
@@ -922,6 +975,10 @@ const validateArchivePayload = (payload = {}, isPartial = false) => {
     validated.tagIds = body.tagIds;
   }
 
+  if (hasOwn(body, 'customTags')) {
+    validated.customTags = normalizeCustomTags(body.customTags);
+  }
+
   if (!isPartial) {
     const customName = hasOwn(validated, 'customName') ? validated.customName : null;
     const alcoholId = hasOwn(validated, 'alcoholId') ? validated.alcoholId : null;
@@ -967,6 +1024,83 @@ const validateTagIds = async (clientOrPool, tagIds) => {
   }
 
   return uniqueTagIds;
+};
+
+const normalizeCustomTags = (customTags) => {
+  if (customTags === undefined) {
+    return undefined;
+  }
+
+  if (customTags === null) {
+    return [];
+  }
+
+  if (!Array.isArray(customTags)) {
+    throw createServiceError(400, 'customTags는 배열이어야 합니다.');
+  }
+
+  return [...new Set(
+    customTags
+      .map((tagName) => (typeof tagName === 'string' ? tagName.trim() : ''))
+      .filter(Boolean),
+  )];
+};
+
+const findOrCreateCustomTagIds = async (clientOrPool, customTags) => {
+  if (customTags === undefined) {
+    return undefined;
+  }
+
+  if (customTags.length === 0) {
+    return [];
+  }
+
+  const { rows: existingRows } = await clientOrPool.query(
+    `
+      SELECT tag_id, name
+      FROM archive_tags
+      WHERE category = 'CUSTOM'
+        AND name = ANY($1::text[])
+    `,
+    [customTags],
+  );
+  const tagIdByName = new Map(
+    existingRows.map((row) => [row.name, Number(row.tag_id)]),
+  );
+
+  for (const tagName of customTags) {
+    if (!tagIdByName.has(tagName)) {
+      const { rows } = await clientOrPool.query(
+        `
+          INSERT INTO archive_tags (
+            category,
+            name,
+            created_at
+          )
+          VALUES ('CUSTOM', $1, CURRENT_TIMESTAMP)
+          RETURNING tag_id
+        `,
+        [tagName],
+      );
+      tagIdByName.set(tagName, Number(rows[0].tag_id));
+    }
+  }
+
+  return customTags.map((tagName) => tagIdByName.get(tagName));
+};
+
+const resolveArchiveTagIds = async (clientOrPool, tagIds, customTags) => {
+  const validatedTagIds = await validateTagIds(clientOrPool, tagIds);
+  const customTagIds = await findOrCreateCustomTagIds(clientOrPool, customTags);
+
+  if (validatedTagIds === undefined && customTagIds === undefined) {
+    return undefined;
+  }
+
+  return [...new Set([
+    ...(validatedTagIds || []),
+    ...(customTagIds || []),
+  ])];
 };
 
 const ensureArchiveHasDrinkName = (archiveData, currentArchive = null) => {
@@ -1036,6 +1170,44 @@ const parseArchiveFormTagIds = (tagIds) => {
   return stringValue.split(',').map((tagId) => Number(tagId.trim()));
 };
 
+const parseArchiveFormCustomTags = (customTags) => {
+  if (customTags === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(customTags)) {
+    return normalizeCustomTags(
+      customTags.flatMap((tagName) => parseArchiveFormCustomTags(tagName) || []),
+    );
+  }
+
+  if (customTags === null) {
+    return [];
+  }
+
+  const stringValue = String(customTags).trim();
+
+  if (!stringValue) {
+    return [];
+  }
+
+  if (stringValue.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(stringValue);
+
+      if (!Array.isArray(parsed)) {
+        throw new Error('customTags must be an array');
+      }
+
+      return normalizeCustomTags(parsed);
+    } catch (error) {
+      throw createServiceError(400, 'customTags는 배열 형식이어야 합니다.');
+    }
+  }
+
+  return normalizeCustomTags(stringValue.split(','));
+};
+
 const normalizeArchiveFormValue = (fieldName, value) => {
   if (value === undefined) {
     return undefined;
@@ -1089,6 +1261,10 @@ const normalizeArchiveFormPayload = (body = {}) => {
 
   if (hasOwn(body, 'tagIds')) {
     payload.tagIds = parseArchiveFormTagIds(body.tagIds);
+  }
+
+  if (hasOwn(body, 'customTags')) {
+    payload.customTags = parseArchiveFormCustomTags(body.customTags);
   }
 
   return payload;
@@ -1164,7 +1340,11 @@ const createMyArchive = async (userId, payload) => {
   try {
     await client.query('BEGIN');
 
-    const tagIds = await validateTagIds(client, archiveData.tagIds);
+    const tagIds = await resolveArchiveTagIds(
+      client,
+      archiveData.tagIds,
+      archiveData.customTags,
+    );
     const { rows } = await client.query(
       `
         INSERT INTO user_archives (
@@ -1287,8 +1467,12 @@ const updateMyArchive = async (userId, archiveId, payload) => {
       values,
     );
 
-    if (hasOwn(archiveData, 'tagIds')) {
-      const tagIds = await validateTagIds(client, archiveData.tagIds);
+    if (hasOwn(archiveData, 'tagIds') || hasOwn(archiveData, 'customTags')) {
+      const tagIds = await resolveArchiveTagIds(
+        client,
+        archiveData.tagIds,
+        archiveData.customTags,
+      );
 
       await client.query(
         `
@@ -1335,39 +1519,56 @@ const deleteMyArchive = async (userId, archiveId) => {
 };
 
 const getArchiveTags = async () => {
+  const valuesSql = FIXED_ARCHIVE_TAG_ROWS
+    .map((_, index) => {
+      const offset = index * 4;
+      return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`;
+    })
+    .join(', ');
+  const values = FIXED_ARCHIVE_TAG_ROWS.flatMap((tag) => [
+    tag.category,
+    tag.name,
+    tag.categoryOrder,
+    tag.tagOrder,
+  ]);
   const { rows } = await pool.query(
     `
+      WITH fixed_tags(category, name, category_order, tag_order) AS (
+        VALUES ${valuesSql}
+      )
       SELECT
-        tag_id,
-        category,
-        name
-      FROM archive_tags
-      ORDER BY
-        CASE category
-          WHEN 'TASTE' THEN 1
-          WHEN 'AROMA' THEN 2
-          WHEN 'SITUATION' THEN 3
-          WHEN 'MOOD' THEN 4
-          ELSE 99
-        END,
-        tag_id
+        t.tag_id,
+        t.category,
+        t.name,
+        f.category_order,
+        f.tag_order
+      FROM fixed_tags f
+      JOIN archive_tags t
+        ON t.category = f.category
+       AND t.name = f.name
+      ORDER BY f.category_order, f.tag_order
     `,
+    values,
   );
 
-  const grouped = new Map();
+  const grouped = new Map(
+    FIXED_ARCHIVE_TAG_GROUPS.map((group) => [
+      group.category,
+      {
+        category: group.category,
+        categoryName: group.categoryName,
+        tags: [],
+      },
+    ]),
+  );
 
   rows.forEach((row) => {
-    const group = grouped.get(row.category) || {
-      category: row.category,
-      categoryName: ARCHIVE_TAG_CATEGORY_NAMES[row.category] || row.category,
-      tags: [],
-    };
+    const group = grouped.get(row.category);
 
     group.tags.push({
       tagId: Number(row.tag_id),
       name: row.name,
     });
-    grouped.set(row.category, group);
   });
 
   return [...grouped.values()];

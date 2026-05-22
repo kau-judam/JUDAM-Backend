@@ -462,3 +462,36 @@ CREATE TABLE IF NOT EXISTS user_archives (
     REFERENCES alcohols(alcohol_id)
     ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS archive_tags (
+  tag_id BIGSERIAL PRIMARY KEY,
+  category VARCHAR(30) NOT NULL,
+  name VARCHAR(50) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_archive_tags_category_name
+    UNIQUE (category, name)
+);
+
+-- Archive tag categories:
+-- - TASTE, SITUATION, MOOD are frontend fixed tags returned by GET /api/mypage/archives/tags.
+-- - CUSTOM is used for user-entered customTags during archive create/update.
+-- Fixed frontend seed reference:
+-- TASTE: 달콤한, 깔끔한, 묵직한, 산미있는, 쓴맛, 고소한, 부드러운, 탄산있는, 구수한, 과일향
+-- SITUATION: 혼술, 친구모임, 데이트, 특별한날, 식사중, 야외, 집들이, 기념일
+-- MOOD: 행복한, 설레는, 그리운, 편안한, 들뜬, 차분한
+
+CREATE TABLE IF NOT EXISTS user_archive_tags (
+  archive_id BIGINT NOT NULL,
+  tag_id BIGINT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT pk_user_archive_tags
+    PRIMARY KEY (archive_id, tag_id),
+  CONSTRAINT fk_user_archive_tags_archive
+    FOREIGN KEY (archive_id)
+    REFERENCES user_archives(archive_id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_user_archive_tags_tag
+    FOREIGN KEY (tag_id)
+    REFERENCES archive_tags(tag_id)
+    ON DELETE CASCADE
+);
