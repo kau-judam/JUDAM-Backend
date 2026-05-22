@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 
 // 펀딩 약관 동의
+// 펀딩 약관 동의
 const saveAgreement = async (req, res) => {
   const {
     breweryId,
@@ -34,21 +35,24 @@ const saveAgreement = async (req, res) => {
   try {
     const result = await pool.query(
       `
-      UPDATE funding_drafts
-      SET
-        is_adult_confirmed = $1,
-        is_contact_info_agreed = $2,
-        is_settlement_info_agreed = $3,
-        is_fee_policy_agreed = $4,
-        is_responsibility_agreed = $5,
-        is_license_agreed = $6,
-        is_ip_policy_agreed = $7,
-        all_required_terms_agreed = $8,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE brewery_id = $9
+      INSERT INTO funding_drafts (
+        brewery_id,
+        is_adult_confirmed,
+        is_contact_info_agreed,
+        is_settlement_info_agreed,
+        is_fee_policy_agreed,
+        is_responsibility_agreed,
+        is_license_agreed,
+        is_ip_policy_agreed,
+        all_required_terms_agreed,
+        status,
+        progress_rate
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'DRAFT', 0)
       RETURNING draft_id, brewery_id
       `,
       [
+        Number(breweryId),
         isAdultConfirmed,
         isContactInfoAgreed,
         isSettlementInfoAgreed,
@@ -57,13 +61,15 @@ const saveAgreement = async (req, res) => {
         isLicenseAgreed,
         isIpPolicyAgreed,
         allRequiredTermsAgreed,
-        Number(breweryId),
       ]
     );
 
+    const agreement = result.rows[0];
+
     return res.status(200).json({
-      agreementId: result.rows[0]?.draft_id || 1,
-      breweryId: Number(breweryId),
+      agreementId: agreement.draft_id,
+      draftId: agreement.draft_id,
+      breweryId: agreement.brewery_id,
       agreements: {
         isAdultConfirmed,
         isContactInfoAgreed,
