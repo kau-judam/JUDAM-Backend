@@ -23,6 +23,31 @@ const findUserByKakaoId = async (kakaoId) => {
   return rows[0] || null;
 };
 
+const findUserByEmail = async (email) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        user_id,
+        email,
+        password,
+        nickname,
+        phone_number,
+        role,
+        provider,
+        kakao_id,
+        profile_image,
+        last_login_at
+      FROM users
+      WHERE email = $1
+        AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [email],
+  );
+
+  return rows[0] || null;
+};
+
 const createKakaoUser = async ({ kakaoId, email, nickname, profileImage }) => {
   const { rows } = await pool.query(
     `
@@ -52,6 +77,41 @@ const createKakaoUser = async ({ kakaoId, email, nickname, profileImage }) => {
   return rows[0];
 };
 
+const createLocalUser = async ({
+  email,
+  passwordHash,
+  nickname,
+  phoneNumber,
+}) => {
+  const { rows } = await pool.query(
+    `
+      INSERT INTO users (
+        email,
+        password,
+        nickname,
+        phone_number,
+        provider,
+        kakao_id,
+        profile_image,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, 'local', NULL, NULL, CURRENT_TIMESTAMP)
+      RETURNING
+        user_id,
+        email,
+        nickname,
+        phone_number,
+        role,
+        provider,
+        profile_image,
+        last_login_at
+    `,
+    [email, passwordHash, nickname, phoneNumber],
+  );
+
+  return rows[0];
+};
+
 const updateKakaoUserLastLogin = async (userId) => {
   const { rows } = await pool.query(
     `
@@ -67,6 +127,31 @@ const updateKakaoUserLastLogin = async (userId) => {
         role,
         provider,
         kakao_id,
+        profile_image,
+        last_login_at
+    `,
+    [userId],
+  );
+
+  return rows[0];
+};
+
+const updateLocalUserLastLogin = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      UPDATE users
+      SET
+        last_login_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1
+        AND deleted_at IS NULL
+      RETURNING
+        user_id,
+        email,
+        nickname,
+        phone_number,
+        role,
+        provider,
         profile_image,
         last_login_at
     `,
@@ -259,8 +344,11 @@ const deleteUserAccount = async (userId) => {
 
 module.exports = {
   findUserByKakaoId,
+  findUserByEmail,
   createKakaoUser,
+  createLocalUser,
   updateKakaoUserLastLogin,
+  updateLocalUserLastLogin,
   findOrCreateKakaoUser,
   findUserById,
   updateUserProfile,
