@@ -1,4 +1,7 @@
-const { checkAiServerHealth } = require('../services/ai.service');
+const {
+  checkAiServerHealth,
+  requestAiChat,
+} = require('../services/ai.service');
 
 const getAiHealth = async (req, res) => {
   try {
@@ -24,4 +27,55 @@ const getAiHealth = async (req, res) => {
   }
 };
 
-module.exports = { getAiHealth };
+const postAiChat = async (req, res) => {
+  const message = typeof req.body?.message === 'string'
+    ? req.body.message.trim()
+    : '';
+  const history = req.body?.history ?? [];
+  const userId = req.body?.user_id;
+
+  if (!message) {
+    return res.status(400).json({
+      status: 400,
+      message: '메시지를 입력해주세요.',
+    });
+  }
+
+  if (!Array.isArray(history)) {
+    return res.status(400).json({
+      status: 400,
+      message: '대화 이력 형식이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const aiResponse = await requestAiChat({
+      message,
+      userId,
+      history,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: 'AI 챗봇 응답 성공',
+      data: aiResponse,
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        status: error.statusCode,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: 'AI 챗봇 응답 처리 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+module.exports = {
+  getAiHealth,
+  postAiChat,
+};
