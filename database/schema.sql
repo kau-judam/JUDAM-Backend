@@ -457,6 +457,8 @@ CREATE TABLE IF NOT EXISTS user_archives (
   abv DECIMAL(4,1),
   tasting_note TEXT,
   record_date DATE,
+  mood VARCHAR(50),
+  pairing VARCHAR(100),
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_archives_user
     FOREIGN KEY (user_id)
