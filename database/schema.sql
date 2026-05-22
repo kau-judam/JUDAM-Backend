@@ -29,6 +29,17 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id BIGINT NOT NULL,
+  badge_id VARCHAR(50) NOT NULL,
+  earned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, badge_id),
+  CONSTRAINT fk_user_badges_user
+    FOREIGN KEY (user_id)
+    REFERENCES users(user_id)
+    ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS posts (
   post_id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL,
