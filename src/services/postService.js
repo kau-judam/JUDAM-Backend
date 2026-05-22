@@ -136,4 +136,141 @@ const getPostList = async (boardType, sort, page, size, userId) => {
   };
 };
 
-module.exports = { createPost, getPostList };
+// 게시글 상세 조회 (GET /api/posts/:postId)
+// userId가 null이면 is_liked, is_mine은 항상 false (비로그인)
+const getPostById = async (postId, userId) => {
+  const postResult = await pool.query(
+    `SELECT
+       p.post_id, p.title, p.content, p.board_type, p.user_id,
+       u.nickname,
+       u.profile_image AS author_profile_image,
+       p.like_count, p.comment_count,
+       CASE WHEN pl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
+       CASE WHEN p.user_id = $2 THEN true ELSE false END AS is_mine,
+       p.created_at, p.updated_at
+     FROM posts p
+     JOIN users u ON u.user_id = p.user_id
+     LEFT JOIN post_likes pl ON pl.post_id = p.post_id AND pl.user_id = $2
+     WHERE p.post_id = $1`,
+    [postId, userId]
+  );
+
+  if (postResult.rowCount === 0) {
+    const error = new Error('해당 게시글을 찾을 수 없습니다.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const imagesResult = await pool.query(
+    `SELECT sequence, image_url
+     FROM post_images
+     WHERE post_id = $1
+     ORDER BY sequence ASC`,
+    [postId]
+  );
+
+  const row = postResult.rows[0];
+  return {
+    post_id: Number(row.post_id),
+    title: row.title,
+    content: row.content,
+    board_type: row.board_type,
+    user_id: Number(row.user_id),
+    nickname: row.nickname,
+    author_profile_image: row.author_profile_image,
+    like_count: Number(row.like_count),
+    comment_count: Number(row.comment_count),
+    is_liked: row.is_liked,
+    is_mine: row.is_mine,
+    images: imagesResult.rows.map((r) => ({
+      sequence: Number(r.sequence),
+      image_url: r.image_url,
+    })),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+};
+
+// 게시글 수정 (PUT /api/posts/:postId)
+// 작성자 본인만 가능. 이미지 완전 교체 방식.
+const updatePost = async (postId, userId, { title, content, imageUrls = [] }) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const ownerResult = await client.query(
+      'SELECT user_id FROM posts WHERE post_id = $1',
+      [postId]
+    );
+
+    if (ownerResult.rowCount === 0) {
+      const error = new Error('해당 게시글을 찾을 수 없습니다.');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (Number(ownerResult.rows[0].user_id) !== userId) {
+      const error = new Error('본인이 작성한 게시글만 수정할 수 있습니다.');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const updateResult = await client.query(
+      `UPDATE posts
+       SET title = $2, content = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE post_id = $1
+       RETURNING post_id, title, content, updated_at`,
+      [postId, title, content]
+    );
+
+    await client.query('DELETE FROM post_images WHERE post_id = $1', [postId]);
+
+    for (let i = 0; i < imageUrls.length; i++) {
+      await client.query(
+        'INSERT INTO post_images (post_id, image_url, sequence) VALUES ($1, $2, $3)',
+        [postId, imageUrls[i], i]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const row = updateResult.rows[0];
+    return {
+      post_id: Number(row.post_id),
+      title: row.title,
+      content: row.content,
+      image_urls: imageUrls,
+      updated_at: row.updated_at,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// 게시글 삭제 (DELETE /api/posts/:postId)
+// 작성자 본인만 가능. FK ON DELETE CASCADE로 post_images, post_comments, post_likes 자동 삭제.
+const deletePost = async (postId, userId) => {
+  const ownerResult = await pool.query(
+    'SELECT user_id FROM posts WHERE post_id = $1',
+    [postId]
+  );
+
+  if (ownerResult.rowCount === 0) {
+    const error = new Error('해당 게시글을 찾을 수 없습니다.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (Number(ownerResult.rows[0].user_id) !== userId) {
+    const error = new Error('본인이 작성한 게시글만 삭제할 수 있습니다.');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  await pool.query('DELETE FROM posts WHERE post_id = $1', [postId]);
+};
+
+module.exports = { createPost, getPostList, getPostById, updatePost, deletePost };
