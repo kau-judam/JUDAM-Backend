@@ -33,12 +33,15 @@ const {
   getFundingDraftPreview,
   updateFundingProject,
   getFundingList,
+  getFundingStats,
   getFundingDetail,
   getFundingIntro,
   getBreweryLogs,
   getFundingQuestions,
   createFundingQuestion,
   createFundingReply,
+  likeFundingQuestion,
+  unlikeFundingQuestion,
   getFundingReviews,
   getSupportOptions,
   createFundingOrder,
@@ -50,6 +53,7 @@ const {
   createFundingReport,
   getFundingReports,
   createFundingReview,
+  updateFundingReview,
   likeFundingProject,
   unlikeFundingProject,
   likeBreweryLog,
@@ -90,6 +94,7 @@ router.get('/', getFundingList);
 
 // 펀딩 신고 목록 조회
 router.get('/reports', getFundingReports);
+router.get('/stats', getFundingStats);
 
 router.get('/:fundingId/intro', getFundingIntro);
 router.get('/:fundingId/brewery-logs', getBreweryLogs);
@@ -106,9 +111,12 @@ router.post('/:fundingId/reports', createFundingReport);
 router.get('/:fundingId/questions', getFundingQuestions);
 router.post('/:fundingId/questions', createFundingQuestion);
 router.post('/:fundingId/questions/:questionId/replies', createFundingReply);
+router.post('/:fundingId/questions/:questionId/likes', likeFundingQuestion);
+router.delete('/:fundingId/questions/:questionId/likes', unlikeFundingQuestion);
 
 router.get('/:fundingId/reviews', getFundingReviews);
 router.post('/:fundingId/reviews', upload.array('images', 5), createFundingReview);
+router.patch('/:fundingId/reviews/:reviewId', upload.array('images', 5), updateFundingReview);
 
 router.get('/:fundingId/support-options', getSupportOptions);
 router.post('/:fundingId/orders', createFundingOrder);

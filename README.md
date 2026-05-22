@@ -10,6 +10,8 @@ JUDAM backend API server built with Express and PostgreSQL.
 - Environment template: `.env.example`
 - Database pool: `src/config/db.js`
 - Legacy database compatibility path: `src/db.js`
+- Funding DB migration: `database/20260522_funding_project_flow.sql`
+- Funding follow-up migration: `database/20260522_funding_followup.sql`
 
 More details:
 

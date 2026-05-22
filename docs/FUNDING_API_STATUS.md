@@ -36,38 +36,56 @@ Checked on 2026-05-22 from repository code, SQL files, and the `judam` DB throug
   - The flow returned a submitted draft and created a reviewing funding project.
   - Test rows were cleaned up after verification.
 
+- Funding follow-up migration added and applied:
+  - `database/20260522_funding_followup.sql`
+  - Adds `funding_drafts.funding_id`.
+  - Adds review fields for frontend form: `mood`, `pairing`, `tags`, `record_visibility`.
+  - Drops `funding_reviews.title` NOT NULL constraint.
+
+- Funding creation/manage/community flow retested against `judam`:
+  - Draft save/load/preview returns saved brewery bank/account, plan, video URL, budget, schedule, documents, and de-duplicated images.
+  - Submit creates one `REVIEWING` funding project and admin approve updates that same funding to `ONGOING`.
+  - Public detail returns draft-backed plan, brewery info, notices, legal info, documents, taste profile, and image fields.
+  - Funding like no longer returns "펀딩 프로젝트를 찾을 수 없습니다." for the submitted/approved project.
+  - Brewery log image upload returns a retrievable data URL when S3 upload is unavailable.
+  - Brewery log comments persist multiple comments.
+  - Q&A replies persist multiple replies, and Q&A like/unlike persists `liked` state.
+  - Share/report are DB-backed.
+  - Review create/update works without a title.
+  - Test rows were cleaned up after verification.
+
 ## Status By Requirement
 
 | No | Area | Current Status | Notes |
 | --- | --- | --- | --- |
 | 1 | Funding agreements | Implemented | Controller now supports 7 terms and migration adds needed columns. |
-| 2 | Draft/common state | Partial | Draft APIs exist. Migration adds draft table/columns. Auth ownership checks are still weak. |
+| 2 | Draft/common state | Implemented with auth gap | Draft APIs exist and `funding_drafts.funding_id` links a draft to its created funding. Auth ownership checks are still weak. |
 | 3 | Basic info | Partial | Saves core fields, image URL array, tags. Image order is represented by array order, not a separate `image_order` column. |
 | 4 | Schedule | Partial | Saves price, quantity, target, start/end/delivery. `platformFeeRate`/`shippingFee` are mostly calculated/static, not fully request-driven. |
 | 5 | Legal info | Implemented | Saves product type, volume, alcohol percentage, raw materials. |
 | 6 | Taste profile | Implemented | Saves sweetness, acidity, body, carbonation, alcoholIntensity, flavor notes. |
-| 7 | Project plan | Partial | Saves introduction, budget plan, schedule plan. `videoUrl` is not wired in controller yet. |
+| 7 | Project plan | Implemented | Saves and returns introduction, `videoUrl`, budget plan, and schedule plan. |
 | 8 | Brewery/settlement/business info | Implemented for required fields | Optional profile/bio/business fields are partly stored. Migration adds matching columns. |
 | 9 | Notices | Implemented | Saves refund, exchange, adult verification, risk notice. |
-| 10 | Documents | Partial | Upload API exists and now supports 5 frontend document types. Real S3 upload is still mocked as `storage.example.com`. |
-| 11 | Submit | Functional with policy gap | Happy-path submit works against `judam`. It currently creates a funding project during submit with `REVIEWING`; admin approval also creates a project separately. This needs one final policy. |
-| 12 | Public list/detail | Partial | List/detail exist with liked/likeCount/supportOptions. Missing several detail fields such as imageUrls, delivery date, bottle size, full taste profile. |
+| 10 | Documents | Functional | Upload API supports 5 frontend document types and stores file metadata/URL. S3 is used when configured; otherwise a data URL fallback is stored. |
+| 11 | Submit | Functional | Happy-path submit works against `judam`. It creates a `REVIEWING` funding project and stores `funding_id` on the draft. |
+| 12 | Public list/detail | Improved | List/detail include image fields, liked/likeCount, schedule/price fields, support options, taste profile, plan, brewery info, notices, legal info, and documents. |
 | 13 | Support options | Partial | GET exists. No create/update option API found. Migration adds volume/alcohol columns used by controller. |
 | 14 | Support order | Partial | Order creation exists with major fields. Some requested agreement fields are missing or simplified. |
 | 15 | Payment/Toss | Partial | Payment request returns `paymentUrl`/`checkoutUrl`; Toss confirm updates payment/order/funding amount. Request URL is still mocked in `order.controller.js`. |
 | 16 | Likes | Partial | Like/unlike and liked list exist. Many endpoints still use fallback user id `1` when auth is absent. |
-| 17 | Brewery logs | Partial | CRUD, like, comments, replies exist with unique `log_id`. No `videoUrl` handling in controller yet. |
-| 18 | Q&A | Partial | List/create/reply exist. Question like/unlike routes are missing. Replies are included. |
-| 19 | Reviews | Partial | List/create exist. Update/delete/like/comment APIs are missing. Review eligibility checks are missing. |
-| 20 | Share/report | Mostly mock | Share link and reports return static/mock data. DB migration adds future tables, but controller is not fully DB-backed. |
-| 21 | Admin review | Partial | Submitted list/approve/reject exist. Approval currently uses hardcoded `recipeId = 3`, so it is not production-ready. |
+| 17 | Brewery logs | Improved | CRUD, like, comments, replies exist with unique `log_id`. Image upload now stores a usable URL fallback. No `videoUrl` handling in controller yet. |
+| 18 | Q&A | Improved | List/create/reply and question like/unlike exist. Replies, `likeCount`, and `liked` are returned. |
+| 19 | Reviews | Improved | List/create/update exist. Frontend fields `rating`, `content/detailReview`, `mood`, `pairing`, `tags`, `recordVisibility`, images are supported. Delete/like/comment APIs are not added. Eligibility checks are still missing. |
+| 20 | Share/report | Implemented | Share link and reports are DB-backed. Share count increments and reports persist selected reason/detail content. |
+| 21 | Admin review | Improved | Approval updates the funding created during submit instead of creating a duplicate when `draft.funding_id` exists. Fallback path still uses `recipeId = 3` for old drafts without a linked funding. |
 
 ## Main Gaps
 
 - Repository `database/schema.sql` is older than the funding controller. The applied DB patch is tracked in `database/20260522_funding_project_flow.sql`.
 - Several funding controllers still use `req.user?.userId || 1`; auth should be enforced before production.
-- Some endpoints are DB-backed, while share/report/inquiry are still mock responses.
-- Submit and admin approval both create public funding data; choose one source of truth to avoid duplicate funding projects.
-- Real file upload is not wired for funding documents; URLs are placeholder values.
+- `createFundingInquiry` is still a mock response.
+- Old drafts without `funding_id` still fall back to admin approval's `recipeId = 3` path.
+- S3 upload requires correct bucket/IAM configuration. Local/test fallback stores data URLs unless `FILE_UPLOAD_STRICT_S3=true`.
 - `brewery_logs` owner is `judam_admin`, so additional brewery log columns/indexes require owner/admin migration.
-- Project creation happy path works, but production completion still needs auth/ownership checks, real file upload, and submit/admin approval policy cleanup.
+- Project creation/manage happy path works, but production completion still needs auth/ownership checks, real SMS verification, real account verification, and S3/IAM hardening.

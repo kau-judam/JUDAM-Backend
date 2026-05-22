@@ -22,6 +22,16 @@ Do not use the old `smart_health_dog` database for this project.
 Applied to `judam`:
 
 - `database/20260522_funding_project_flow.sql`
+- `database/20260522_funding_followup.sql`
+
+Latest verification:
+
+- Re-opened the SSM port forward on 2026-05-22.
+- Confirmed `current_database() = judam` and `current_user = judam_jaewon`.
+- Applied `database/20260522_funding_followup.sql`.
+- Confirmed `funding_drafts.funding_id`.
+- Confirmed `funding_reviews.mood`, `pairing`, `tags`, `record_visibility`, `updated_at`.
+- Confirmed `funding_reviews.title` is nullable for the frontend review form.
 
 Skipped because `brewery_logs` is owned by `judam_admin`:
 

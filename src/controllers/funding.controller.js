@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { uploadFileToS3 } = require('../services/s3.service');
 
 const getBodyValue = (body, keys) => {
   for (const key of keys) {
@@ -30,11 +31,81 @@ const parseJsonArrayField = (value, fallback = []) => {
       const parsed = JSON.parse(value);
       return Array.isArray(parsed) ? parsed : fallback;
     } catch (error) {
-      return fallback;
+      return value.trim() ? [value.trim()] : fallback;
     }
   }
 
   return fallback;
+};
+
+const parseJsonField = (value, fallback = []) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallback;
+  }
+};
+
+const stringifyJsonField = (value, fallback = []) => {
+  if (value === undefined || value === null) {
+    return JSON.stringify(fallback);
+  }
+
+  return typeof value === 'string' ? value : JSON.stringify(value);
+};
+
+const getUserId = (req) => req.user?.userId || req.user?.id || 1;
+
+const uniqueValues = (values) => [
+  ...new Set((values || []).filter((value) => typeof value === 'string' && value.trim() !== '')),
+];
+
+const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
+  const parsedImageUrls = uniqueValues(parseJsonArrayField(imageUrlsValue));
+  const normalizedThumbnailUrl = thumbnailUrl || parsedImageUrls[0] || null;
+  const imageUrls = parsedImageUrls.filter((imageUrl) => imageUrl !== normalizedThumbnailUrl);
+  const allImageUrls = uniqueValues([normalizedThumbnailUrl, ...imageUrls].filter(Boolean));
+
+  return {
+    thumbnailUrl: normalizedThumbnailUrl,
+    imageUrls,
+    allImageUrls,
+  };
+};
+
+const mapFundingDocument = (document) => ({
+  documentId: Number(document.document_id),
+  draftId: Number(document.draft_id),
+  documentType: document.document_type,
+  fileName: document.file_name,
+  fileUrl: document.file_url,
+  mimeType: document.mime_type,
+  fileSize: document.file_size === null || document.file_size === undefined
+    ? null
+    : Number(document.file_size),
+  createdAt: document.created_at,
+});
+
+const storeUploadedFile = async (file, folder, ownerId = 'anonymous') => {
+  if (!file) {
+    return null;
+  }
+
+  if (process.env.AWS_S3_BUCKET && process.env.AWS_REGION) {
+    try {
+      return await uploadFileToS3(file.buffer, file.originalname, file.mimetype, ownerId);
+    } catch (error) {
+      if (process.env.FILE_UPLOAD_STRICT_S3 === 'true') {
+        throw error;
+      }
+    }
+  }
+
+  const base64 = file.buffer.toString('base64');
+  return `data:${file.mimetype};base64,${base64}`;
 };
 
 const DOCUMENT_TYPE_ALIASES = {
@@ -1003,6 +1074,7 @@ const savePlan = async (req, res) => {
 
   const {
     introduction,
+    videoUrl,
     budgetPlan,
     schedulePlan,
   } = req.body;
@@ -1026,12 +1098,14 @@ const savePlan = async (req, res) => {
         introduction = $1,
         budget_plan = $2,
         schedule_plan = $3,
+        video_url = $4,
         progress_rate = 78,
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $4
+      WHERE draft_id = $5
       RETURNING
         draft_id,
         introduction,
+        video_url,
         budget_plan,
         schedule_plan,
         progress_rate,
@@ -1039,8 +1113,9 @@ const savePlan = async (req, res) => {
       `,
       [
         introduction,
-        budgetPlan || null,
-        schedulePlan || null,
+        stringifyJsonField(budgetPlan),
+        stringifyJsonField(schedulePlan),
+        videoUrl || null,
         Number(draftId),
       ]
     );
@@ -1059,8 +1134,9 @@ const savePlan = async (req, res) => {
       section: 'PLAN',
       plan: {
         introduction: draft.introduction,
-        budgetPlan: draft.budget_plan,
-        schedulePlan: draft.schedule_plan,
+        videoUrl: draft.video_url,
+        budgetPlan: parseJsonField(draft.budget_plan),
+        schedulePlan: parseJsonField(draft.schedule_plan),
       },
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
@@ -1175,6 +1251,7 @@ const saveBreweryInfo = async (req, res) => {
         business_item = $15,
         phone_verified = $16,
         account_verified = $17,
+        creator_name = COALESCE(creator_name, $1),
         progress_rate = GREATEST(progress_rate, 85),
         updated_at = CURRENT_TIMESTAMP
       WHERE draft_id = $18
@@ -1223,6 +1300,14 @@ const saveBreweryInfo = async (req, res) => {
       bankName: draft.bank_name,
       accountNumber: draft.account_number,
       accountHolder: draft.account_holder,
+      breweryProfileImageUrl: draft.profile_image_url,
+      breweryBio: draft.creator_introduction,
+      businessType: draft.business_type,
+      businessName: draft.business_name,
+      businessCategory: draft.business_category,
+      businessItem: draft.business_item,
+      phoneVerified: draft.phone_verified,
+      accountVerified: draft.account_verified,
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '창작자/정산/사업자 정보가 저장되었습니다.',
@@ -1251,6 +1336,8 @@ const loadBreweryInfo = async (req, res) => {
     const result = await pool.query(
       `
       SELECT
+        fd.brewery_id,
+        fd.brewery_name,
         creator_name,
         profile_image_url,
         creator_introduction,
@@ -1258,11 +1345,38 @@ const loadBreweryInfo = async (req, res) => {
         business_registration_number,
         representative_name,
         business_address,
+        contact_email,
+        contact_phone,
+        bank_name,
+        account_number,
+        account_holder,
+        phone_verified,
+        account_verified,
+        business_type,
         business_category,
         business_item,
-        tax_email
-      FROM funding_drafts
-      WHERE draft_id = $1
+        tax_email,
+        identity_document_url,
+        business_registration_file_url,
+        ba.brewery_name AS approved_brewery_name,
+        ba.location AS approved_brewery_location,
+        u.nickname AS user_nickname,
+        u.email AS user_email,
+        u.phone_number AS user_phone_number,
+        u.profile_image AS user_profile_image
+      FROM funding_drafts fd
+      LEFT JOIN users u ON u.user_id = fd.brewery_id
+      LEFT JOIN LATERAL (
+        SELECT brewery_name, location
+        FROM brewery_auth
+        WHERE user_id = fd.brewery_id
+        ORDER BY
+          CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
+          updated_at DESC,
+          application_id DESC
+        LIMIT 1
+      ) ba ON TRUE
+      WHERE fd.draft_id = $1
       `,
       [Number(draftId)]
     );
@@ -1278,16 +1392,29 @@ const loadBreweryInfo = async (req, res) => {
 
     return res.status(200).json({
       breweryInfo: {
-        creatorName: info.creator_name,
-        profileImageUrl: info.profile_image_url,
+        breweryId: info.brewery_id,
+        breweryName: info.brewery_name || info.approved_brewery_name || info.user_nickname,
+        creatorName: info.creator_name || info.brewery_name || info.approved_brewery_name || info.user_nickname,
+        profileImageUrl: info.profile_image_url || info.user_profile_image,
         creatorIntroduction: info.creator_introduction,
-        businessName: info.business_name,
+        breweryBio: info.creator_introduction,
+        businessName: info.business_name || info.brewery_name || info.approved_brewery_name,
         businessRegistrationNumber: info.business_registration_number,
         representativeName: info.representative_name,
-        businessAddress: info.business_address,
+        businessAddress: info.business_address || info.approved_brewery_location,
+        contactEmail: info.contact_email || info.user_email,
+        contactPhone: info.contact_phone || info.user_phone_number,
+        bankName: info.bank_name,
+        accountNumber: info.account_number,
+        accountHolder: info.account_holder,
+        phoneVerified: info.phone_verified,
+        accountVerified: info.account_verified,
+        businessType: info.business_type,
         businessCategory: info.business_category,
         businessItem: info.business_item,
         taxEmail: info.tax_email,
+        identityDocumentUrl: info.identity_document_url,
+        businessRegistrationFileUrl: info.business_registration_file_url,
       },
       message: '양조장 정보를 불러왔습니다. 본인 인증과 입금 계좌는 직접 입력해주세요.',
     });
@@ -1332,8 +1459,6 @@ const uploadFundingDraftFile = async (req, res) => {
     });
   }
 
-  const fileUrl = `https://storage.example.com/funding-drafts/${draftId}/${file.originalname}`;
-
   let updateColumn = null;
 
   if (fileType === 'PROFILE_IMAGE') {
@@ -1349,6 +1474,8 @@ const uploadFundingDraftFile = async (req, res) => {
   }
 
   try {
+    const fileUrl = await storeUploadedFile(file, `funding-drafts/${draftId}`, draftId);
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -1628,7 +1755,7 @@ const uploadDocument = async (req, res) => {
   }
 
   try {
-    const fileUrl = `https://storage.example.com/documents/${file.originalname}`;
+    const fileUrl = await storeUploadedFile(file, `funding-documents/${draftId}`, draftId);
 
     const result = await pool.query(
       `
@@ -1860,19 +1987,28 @@ const submitFundingDraft = async (req, res) => {
           brewery_user_id,
           recipe_id,
           title,
+          short_title,
           description,
           goal_amount,
           current_amount,
           start_date,
           end_date,
+          summary,
+          category,
+          thumbnail_url,
+          image_urls,
+          expected_delivery_date,
           price_per_bottle,
           shipping_fee,
+          volume,
+          alcohol_percentage,
           status,
           created_at,
           updated_at
         )
         VALUES (
-          $1, $2, $3, $4, $5, 0, $6, $7, $8, 3000,
+          $1, $2, $3, $4, $5, $6, 0, $7, $8, $9, $10, $11, $12, $13,
+          $14, $15, $16, $17,
           'REVIEWING',
           CURRENT_TIMESTAMP,
           CURRENT_TIMESTAMP
@@ -1880,41 +2016,91 @@ const submitFundingDraft = async (req, res) => {
         RETURNING
           funding_id,
           title,
+          short_title,
           status,
           goal_amount,
           current_amount,
           start_date,
           end_date,
+          summary,
+          category,
+          thumbnail_url,
+          image_urls,
+          expected_delivery_date,
           price_per_bottle,
           shipping_fee,
+          volume,
+          alcohol_percentage,
           created_at
         `,
         [
           breweryUserId,
           recipeId,
           draft.title,
+          draft.short_title || null,
           draft.summary || draft.introduction || '',
           Number(draft.target_amount || 0),
           draft.funding_start_date,
           draft.funding_end_date,
+          draft.summary || '',
+          draft.category || null,
+          draft.thumbnail_url || null,
+          draft.image_urls || '[]',
+          draft.expected_delivery_date || null,
           Number(draft.price_per_bottle || 0),
+          draft.shipping_fee !== null && draft.shipping_fee !== undefined
+            ? Number(draft.shipping_fee)
+            : 3000,
+          draft.volume !== null && draft.volume !== undefined ? Number(draft.volume) : null,
+          draft.alcohol_percentage !== null && draft.alcohol_percentage !== undefined
+            ? Number(draft.alcohol_percentage)
+            : null,
         ]
       );
 
       const funding = fundingResult.rows[0];
+
+      await client.query(
+        `
+        INSERT INTO taste_profiles (
+          funding_id,
+          user_id,
+          sweetness,
+          acidity,
+          body,
+          carbonation,
+          alcohol_intensity,
+          flavor_notes,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `,
+        [
+          funding.funding_id,
+          breweryUserId,
+          draft.sweetness,
+          draft.acidity,
+          draft.body,
+          draft.carbonation,
+          draft.alcohol_intensity,
+          draft.flavor_notes || '[]',
+        ]
+      );
 
       const submitResult = await client.query(
         `
         UPDATE funding_drafts
         SET
           status = 'SUBMITTED',
+          funding_id = $2,
           progress_rate = 100,
           submitted_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP
         WHERE draft_id = $1
         RETURNING draft_id, status, progress_rate, submitted_at, updated_at
         `,
-        [Number(draftId)]
+        [Number(draftId), funding.funding_id]
       );
 
       await client.query('COMMIT');
@@ -2141,21 +2327,11 @@ const getFundingDraftPreview = async (req, res) => {
     );
 
     const draft = draftResult.rows[0];
-
-    const parseJsonField = (value, fallback = []) => {
-      if (!value) return fallback;
-      if (typeof value === 'string') {
-        try {
-          return JSON.parse(value);
-        } catch (error) {
-          return fallback;
-        }
-      }
-      return value;
-    };
+    const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
 
     return res.status(200).json({
       draftId: draft.draft_id,
+      fundingId: draft.funding_id,
       status: draft.status,
       progressRate: draft.progress_rate,
 
@@ -2167,8 +2343,9 @@ const getFundingDraftPreview = async (req, res) => {
         subIngredients: parseJsonField(draft.sub_ingredients),
         alcoholPercentage: draft.alcohol_percentage,
         summary: draft.summary,
-        thumbnailUrl: draft.thumbnail_url,
-        imageUrls: parseJsonField(draft.image_urls),
+        thumbnailUrl: imageFields.thumbnailUrl,
+        imageUrls: imageFields.imageUrls,
+        allImageUrls: imageFields.allImageUrls,
         tags: parseJsonField(draft.tags),
       },
 
@@ -2200,15 +2377,19 @@ const getFundingDraftPreview = async (req, res) => {
 
       plan: {
         introduction: draft.introduction,
-        budgetPlan: draft.budget_plan,
-        schedulePlan: draft.schedule_plan,
+        videoUrl: draft.video_url,
+        budgetPlan: parseJsonField(draft.budget_plan),
+        schedulePlan: parseJsonField(draft.schedule_plan),
       },
 
       breweryInfo: {
+        breweryName: draft.brewery_name,
         creatorName: draft.creator_name,
         profileImageUrl: draft.profile_image_url,
         creatorIntroduction: draft.creator_introduction,
+        breweryBio: draft.creator_introduction,
         contactPhone: draft.contact_phone,
+        contactEmail: draft.contact_email,
         phoneVerified: draft.phone_verified,
         identityDocumentUrl: draft.identity_document_url,
         bankName: draft.bank_name,
@@ -2217,8 +2398,8 @@ const getFundingDraftPreview = async (req, res) => {
         accountVerified: draft.account_verified,
         businessType: draft.business_type,
         businessName: draft.business_name,
-        businessRegistrationNumber: draft.business_registration_number,
         representativeName: draft.representative_name,
+        businessRegistrationNumber: draft.business_registration_number,
         businessAddress: draft.business_address,
         businessCategory: draft.business_category,
         businessItem: draft.business_item,
@@ -2233,7 +2414,7 @@ const getFundingDraftPreview = async (req, res) => {
         riskNotice: draft.risk_notice,
       },
 
-      documents: documentResult.rows,
+      documents: documentResult.rows.map(mapFundingDocument),
 
       message: '프로젝트 미리보기 조회 성공',
     });
@@ -2392,6 +2573,7 @@ const mapFundingListRow = (row) => {
     breweryName: row.brewery_name,
     recipeTitle: row.recipe_title,
     thumbnailUrl: row.thumbnail_url,
+    imageUrls: parseJsonField(row.image_urls),
     status: row.status,
     currentAmount,
     targetAmount,
@@ -2399,6 +2581,10 @@ const mapFundingListRow = (row) => {
       targetAmount > 0 ? Math.floor((currentAmount / targetAmount) * 100) : 0,
     startDate: row.start_date,
     endDate: row.end_date,
+    expectedDeliveryDate: row.expected_delivery_date,
+    pricePerBottle: row.price_per_bottle,
+    shippingFee: row.shipping_fee,
+    matchRate: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
     liked: row.liked,
     likeCount: Number(row.like_count || 0),
   };
@@ -2407,8 +2593,10 @@ const mapFundingListRow = (row) => {
 const getFundingList = async (req, res) => {
   const { status, sort, page = 0, size = 10, keyword } = req.query;
 
-  const validFundingSorts = ['POPULAR', 'LATEST', 'DEADLINE', 'ID_ASC'];
-  const normalizedSort = sort || 'ID_ASC';
+  const validFundingSorts = ['RECOMMENDED', 'RECOMMEND', 'POPULAR', 'LATEST', 'DEADLINE', 'ID_ASC'];
+  const normalizedSort = typeof sort === 'string' && sort.trim()
+    ? sort.trim().toUpperCase()
+    : 'ID_ASC';
   const normalizedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
   const normalizedStatus =
     typeof status === 'string' && status.trim()
@@ -2473,7 +2661,9 @@ const getFundingList = async (req, res) => {
   `;
 
   const orderBy = {
-    POPULAR: 'ORDER BY fp.current_amount DESC, fp.created_at DESC',
+    RECOMMENDED: 'ORDER BY match_rate DESC NULLS LAST, fp.created_at DESC',
+    RECOMMEND: 'ORDER BY match_rate DESC NULLS LAST, fp.created_at DESC',
+    POPULAR: 'ORDER BY like_counts.like_count DESC, fp.created_at DESC',
     LATEST: 'ORDER BY fp.created_at DESC',
     DEADLINE: 'ORDER BY fp.end_date ASC, fp.created_at DESC',
     ID_ASC: 'ORDER BY fp.funding_id ASC',
@@ -2510,13 +2700,18 @@ const getFundingList = async (req, res) => {
         fp.description,
         COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
         r.title AS recipe_title,
-        r.image_url AS thumbnail_url,
+        COALESCE(fp.thumbnail_url, r.image_url) AS thumbnail_url,
+        fp.image_urls,
         fp.status,
         fp.current_amount,
         fp.goal_amount AS target_amount,
         fp.start_date,
         fp.end_date,
+        fp.expected_delivery_date,
+        fp.price_per_bottle,
+        fp.shipping_fee,
         COALESCE(like_counts.like_count, 0) AS like_count,
+        NULL::int AS match_rate,
         EXISTS (
           SELECT 1
           FROM funding_likes my_like
@@ -2557,6 +2752,55 @@ const getFundingList = async (req, res) => {
   }
 };
 
+const getFundingStats = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        (
+          SELECT COUNT(*)::int
+          FROM funding_projects
+          WHERE status IN ('ONGOING', 'ACTIVE')
+          AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+        ) AS available_funding_count,
+        (
+          SELECT COUNT(DISTINCT user_id)::int
+          FROM orders
+          WHERE order_status = 'PAID'
+        ) AS total_supporter_count,
+        (
+          SELECT COUNT(*)::int
+          FROM funding_projects
+          WHERE goal_amount > 0
+          AND current_amount >= goal_amount
+        ) AS successful_project_count,
+        (
+          SELECT COALESCE(SUM(current_amount), 0)::bigint
+          FROM funding_projects
+        ) AS total_raised_amount
+      `
+    );
+
+    const stats = result.rows[0];
+    const totalRaisedAmount = Number(stats.total_raised_amount || 0);
+
+    return res.status(200).json({
+      participationAvailableFunding: Number(stats.available_funding_count || 0),
+      totalSupporterCount: Number(stats.total_supporter_count || 0),
+      successfulProjectCount: Number(stats.successful_project_count || 0),
+      totalRaisedAmount,
+      totalRaisedHundredMillion: Number((totalRaisedAmount / 100000000).toFixed(1)),
+      message: '펀딩 통계 조회 성공',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '펀딩 통계 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
 // 펀딩 프로젝트 상세조회
 const getFundingDetail = async (req, res) => {
   const { fundingId } = req.params;
@@ -2578,15 +2822,60 @@ const getFundingDetail = async (req, res) => {
         fp.funding_id,
         fp.title,
         fp.description,
+        fp.summary,
+        fp.category,
+        fp.image_urls,
         fp.status,
         fp.current_amount,
         fp.goal_amount AS target_amount,
         fp.start_date,
         fp.end_date,
+        fp.expected_delivery_date,
+        fp.price_per_bottle,
+        fp.shipping_fee,
+        fp.volume,
+        fp.alcohol_percentage,
+        fp.bottle_size,
         fp.created_at,
+        fd.draft_id,
+        fd.short_title,
+        fd.main_ingredient,
+        fd.sub_ingredients,
+        fd.tags,
+        fd.product_type,
+        fd.raw_materials,
+        fd.introduction,
+        fd.video_url,
+        fd.budget_plan,
+        fd.schedule_plan,
+        fd.refund_policy,
+        fd.exchange_policy,
+        fd.adult_verification_notice,
+        fd.risk_notice,
+        fd.brewery_name AS draft_brewery_name,
+        fd.creator_name,
+        fd.profile_image_url,
+        fd.creator_introduction,
+        fd.representative_name,
+        fd.business_registration_number,
+        fd.business_address,
+        fd.contact_email,
+        fd.contact_phone,
+        fd.bank_name,
+        fd.account_number,
+        fd.account_holder,
+        fd.business_type,
+        fd.business_name,
+        fd.business_category,
+        fd.business_item,
+        fd.tax_email,
+        fd.phone_verified,
+        fd.account_verified,
+        fd.identity_document_url,
+        fd.business_registration_file_url,
         COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
         r.title AS recipe_title,
-        r.image_url AS thumbnail_url,
+        COALESCE(fp.thumbnail_url, r.image_url) AS thumbnail_url,
         COALESCE(like_counts.like_count, 0) AS like_count,
         EXISTS (
           SELECT 1
@@ -2597,6 +2886,13 @@ const getFundingDetail = async (req, res) => {
       FROM funding_projects fp
       JOIN recipes r ON r.recipe_id = fp.recipe_id
       JOIN users u ON u.user_id = fp.brewery_user_id
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM funding_drafts
+        WHERE funding_id = fp.funding_id
+        ORDER BY updated_at DESC
+        LIMIT 1
+      ) fd ON TRUE
       LEFT JOIN LATERAL (
         SELECT brewery_name
         FROM brewery_auth
@@ -2625,6 +2921,7 @@ const getFundingDetail = async (req, res) => {
     }
 
     const funding = fundingResult.rows[0];
+    const imageFields = buildImageFields(funding.thumbnail_url, funding.image_urls);
 
     const optionResult = await pool.query(
       `
@@ -2645,6 +2942,44 @@ const getFundingDetail = async (req, res) => {
       [Number(fundingId)]
     );
 
+    const tasteResult = await pool.query(
+      `
+      SELECT
+        sweetness,
+        acidity,
+        body,
+        carbonation,
+        alcohol_intensity,
+        flavor_notes
+      FROM taste_profiles
+      WHERE funding_id = $1
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1
+      `,
+      [Number(fundingId)]
+    );
+
+    const taste = tasteResult.rows[0] || null;
+    const documentResult = funding.draft_id
+      ? await pool.query(
+        `
+        SELECT
+          document_id,
+          draft_id,
+          document_type,
+          file_name,
+          file_url,
+          mime_type,
+          file_size,
+          created_at
+        FROM funding_documents
+        WHERE draft_id = $1
+        ORDER BY document_id ASC
+        `,
+        [Number(funding.draft_id)]
+      )
+      : { rows: [] };
+
     const achievementRate =
       Number(funding.target_amount) > 0
         ? Math.floor(
@@ -2655,18 +2990,83 @@ const getFundingDetail = async (req, res) => {
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
       title: funding.title,
-      summary: funding.description,
+      summary: funding.summary || funding.description,
       description: funding.description,
-      thumbnailUrl: funding.thumbnail_url,
-      breweryName: funding.brewery_name,
+      category: funding.category,
+      shortTitle: funding.short_title,
+      mainIngredient: funding.main_ingredient,
+      subIngredients: parseJsonField(funding.sub_ingredients),
+      tags: parseJsonField(funding.tags),
+      thumbnailUrl: imageFields.thumbnailUrl,
+      imageUrls: imageFields.imageUrls,
+      allImageUrls: imageFields.allImageUrls,
+      breweryName: funding.draft_brewery_name || funding.brewery_name,
       status: funding.status,
       currentAmount: Number(funding.current_amount),
       targetAmount: Number(funding.target_amount),
       achievementRate,
       startDate: funding.start_date,
       endDate: funding.end_date,
+      expectedDeliveryDate: funding.expected_delivery_date,
+      pricePerBottle: funding.price_per_bottle,
+      shippingFee: funding.shipping_fee,
+      volume: funding.volume,
+      alcoholPercentage: funding.alcohol_percentage,
+      bottleSize: funding.bottle_size,
       liked: funding.liked,
       likeCount: Number(funding.like_count || 0),
+      tasteProfile: taste
+        ? {
+            sweetness: taste.sweetness,
+            acidity: taste.acidity,
+            body: taste.body,
+            carbonation: taste.carbonation,
+            alcoholIntensity: taste.alcohol_intensity,
+            flavorNotes: parseJsonField(taste.flavor_notes),
+          }
+        : null,
+      legalInfo: {
+        productType: funding.product_type,
+        volume: funding.volume,
+        alcoholPercentage: funding.alcohol_percentage,
+        rawMaterials: parseJsonField(funding.raw_materials),
+      },
+      plan: {
+        introduction: funding.introduction,
+        videoUrl: funding.video_url,
+        budgetPlan: parseJsonField(funding.budget_plan),
+        schedulePlan: parseJsonField(funding.schedule_plan),
+      },
+      breweryInfo: {
+        breweryName: funding.draft_brewery_name || funding.brewery_name,
+        creatorName: funding.creator_name,
+        profileImageUrl: funding.profile_image_url,
+        creatorIntroduction: funding.creator_introduction,
+        representativeName: funding.representative_name,
+        businessRegistrationNumber: funding.business_registration_number,
+        businessAddress: funding.business_address,
+        contactEmail: funding.contact_email,
+        contactPhone: funding.contact_phone,
+        bankName: funding.bank_name,
+        accountNumber: funding.account_number,
+        accountHolder: funding.account_holder,
+        businessType: funding.business_type,
+        businessName: funding.business_name,
+        businessCategory: funding.business_category,
+        businessItem: funding.business_item,
+        taxEmail: funding.tax_email,
+        phoneVerified: funding.phone_verified,
+        accountVerified: funding.account_verified,
+        identityDocumentUrl: funding.identity_document_url,
+        businessRegistrationFileUrl: funding.business_registration_file_url,
+      },
+      notices: {
+        refundPolicy: funding.refund_policy,
+        exchangePolicy: funding.exchange_policy,
+        adultVerificationNotice: funding.adult_verification_notice,
+        riskNotice: funding.risk_notice,
+      },
+      documents: documentResult.rows.map(mapFundingDocument),
       supportOptions: optionResult.rows.map((option) => ({
         optionId: Number(option.option_id),
         name: option.name,
@@ -2691,7 +3091,7 @@ const getFundingDetail = async (req, res) => {
 };
 
 //프로젝트 소개 조회
-const getFundingIntro = (req, res) => {
+const getFundingIntro = async (req, res) => {
   const { fundingId } = req.params;
 
   // 유효성 검증
@@ -2702,16 +3102,61 @@ const getFundingIntro = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    fundingId: Number(fundingId),
-    title: '벚꽃 막걸리 프로젝트',
-    introduction: '못난이 농산물을 활용하여 새로운 전통주를 만드는 프로젝트입니다.',
-    story: '이 프로젝트는 지역 농가의 버려지는 사과를 활용하여 새로운 가치를 만들어내기 위해 시작되었습니다...',
-    images: [
-      'https://example.com/intro1.jpg',
-      'https://example.com/intro2.jpg',
-    ],
-  });
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        fp.funding_id,
+        fp.title,
+        fp.description,
+        fp.summary,
+        fp.image_urls,
+        fd.introduction AS draft_introduction,
+        fd.video_url,
+        fd.budget_plan,
+        fd.schedule_plan,
+        r.content AS recipe_content,
+        r.concept
+      FROM funding_projects fp
+      LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+      LEFT JOIN LATERAL (
+        SELECT introduction, video_url, budget_plan, schedule_plan
+        FROM funding_drafts
+        WHERE funding_id = fp.funding_id
+        ORDER BY updated_at DESC
+        LIMIT 1
+      ) fd ON TRUE
+      WHERE fp.funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const funding = result.rows[0];
+
+    return res.status(200).json({
+      fundingId: Number(funding.funding_id),
+      title: funding.title,
+      introduction: funding.draft_introduction || funding.summary || funding.description || funding.recipe_content || '',
+      story: funding.description || funding.recipe_content || funding.concept || '',
+      videoUrl: funding.video_url,
+      budgetPlan: parseJsonField(funding.budget_plan),
+      schedulePlan: parseJsonField(funding.schedule_plan),
+      images: parseJsonField(funding.image_urls),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '프로젝트 소개 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //양조일지 조회
@@ -2829,21 +3274,22 @@ const createBreweryLog = async (req, res) => {
     });
   }
 
-  const uploadedImageUrls = files.map(
-    (file) => `https://s3.amazonaws.com/judam/${file.originalname}`
-  );
-
-  const bodyImageUrls = Array.isArray(imageUrls) ? imageUrls : [];
-  const normalizedImageUrls = [...bodyImageUrls, ...uploadedImageUrls];
-
-  if (normalizedImageUrls.length > 5) {
-    return res.status(400).json({
-      status: 400,
-      message: '이미지는 최대 5개까지 등록할 수 있습니다.',
-    });
-  }
-
   try {
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `brewery-logs/${fundingId}`, userId));
+    }
+
+    const bodyImageUrls = parseJsonArrayField(imageUrls);
+    const normalizedImageUrls = [...bodyImageUrls, ...uploadedImageUrls];
+
+    if (normalizedImageUrls.length > 5) {
+      return res.status(400).json({
+        status: 400,
+        message: '이미지는 최대 5개까지 등록할 수 있습니다.',
+      });
+    }
+
     const result = await pool.query(
       `
       INSERT INTO brewery_logs (
@@ -2905,6 +3351,8 @@ const createBreweryLog = async (req, res) => {
 const updateBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
   const { stage, title, content, imageUrls } = req.body;
+  const files = req.files || [];
+  const userId = getUserId(req);
 
   const allowedStages = [
     'INGREDIENT',
@@ -2926,7 +3374,7 @@ const updateBreweryLog = async (req, res) => {
     });
   }
 
-  if (!stage && !title && !content && !imageUrls) {
+  if (!stage && !title && !content && !imageUrls && files.length === 0) {
     return res.status(400).json({
       status: 400,
       message: '양조일지 수정값이 올바르지 않습니다.',
@@ -2940,21 +3388,23 @@ const updateBreweryLog = async (req, res) => {
     });
   }
 
-  if (imageUrls && !Array.isArray(imageUrls)) {
-    return res.status(400).json({
-      status: 400,
-      message: '이미지 목록 입력값이 올바르지 않습니다.',
-    });
-  }
-
-  if (imageUrls && imageUrls.length > 5) {
-    return res.status(400).json({
-      status: 400,
-      message: '이미지는 최대 5개까지 등록할 수 있습니다.',
-    });
-  }
-
   try {
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `brewery-logs/${fundingId}`, userId));
+    }
+
+    const normalizedImageUrls = imageUrls || files.length > 0
+      ? [...parseJsonArrayField(imageUrls), ...uploadedImageUrls]
+      : null;
+
+    if (normalizedImageUrls && normalizedImageUrls.length > 5) {
+      return res.status(400).json({
+        status: 400,
+        message: '이미지는 최대 5개까지 등록할 수 있습니다.',
+      });
+    }
+
     const result = await pool.query(
       `
       UPDATE brewery_logs
@@ -2978,7 +3428,7 @@ const updateBreweryLog = async (req, res) => {
         stage || null,
         title || null,
         content || null,
-        imageUrls ? JSON.stringify(imageUrls) : null,
+        normalizedImageUrls ? JSON.stringify(normalizedImageUrls) : null,
         Number(fundingId),
         Number(breweryLogId),
       ]
@@ -3098,6 +3548,7 @@ const deleteBreweryLog = async (req, res) => {
 const getFundingQuestions = async (req, res) => {
   const { fundingId } = req.params;
   const { page = 0, size = 10, answered } = req.query;
+  const userId = getUserId(req);
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
@@ -3148,7 +3599,15 @@ const getFundingQuestions = async (req, res) => {
       values
     );
 
-    values.push(sizeNumber, pageNumber * sizeNumber);
+    const queryValues = [
+      ...values,
+      userId,
+      sizeNumber,
+      pageNumber * sizeNumber,
+    ];
+    const userIdParam = `$${values.length + 1}`;
+    const limitParam = `$${values.length + 2}`;
+    const offsetParam = `$${values.length + 3}`;
 
     const result = await pool.query(
       `
@@ -3162,6 +3621,13 @@ const getFundingQuestions = async (req, res) => {
         fq.is_private,
         fq.answered,
         fq.created_at,
+        COALESCE(ql.like_count, 0) AS like_count,
+        EXISTS (
+          SELECT 1
+          FROM funding_question_likes my_like
+          WHERE my_like.question_id = fq.question_id
+          AND my_like.user_id = ${userIdParam}
+        ) AS liked,
         COALESCE(
           json_agg(
             json_build_object(
@@ -3176,13 +3642,18 @@ const getFundingQuestions = async (req, res) => {
       LEFT JOIN users u ON u.user_id = fq.user_id
       LEFT JOIN funding_question_replies fqr
         ON fqr.question_id = fq.question_id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS like_count
+        FROM funding_question_likes
+        WHERE question_id = fq.question_id
+      ) ql ON TRUE
       ${whereClause}
-      GROUP BY fq.question_id, u.nickname
+      GROUP BY fq.question_id, u.nickname, ql.like_count
       ORDER BY fq.created_at DESC
-      LIMIT $${values.length - 1}
-      OFFSET $${values.length}
+      LIMIT ${limitParam}
+      OFFSET ${offsetParam}
       `,
-      values
+      queryValues
     );
 
     const totalElements = countResult.rows[0].total_count;
@@ -3197,6 +3668,8 @@ const getFundingQuestions = async (req, res) => {
         content: question.content,
         isPrivate: question.is_private,
         answered: question.answered,
+        likeCount: Number(question.like_count || 0),
+        liked: question.liked,
         replies: question.replies,
         createdAt: question.created_at,
       })),
@@ -3219,17 +3692,29 @@ const getFundingQuestions = async (req, res) => {
 
 //qna 질문등록
 const createFundingQuestion = async (req, res) => {
+  const { fundingId } = req.params;
+  const {
+    title,
+    content,
+    isPrivate = false
+  } = req.body || {};
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  if (!content || typeof content !== 'string' || content.trim() === '') {
+    return res.status(400).json({
+      status: 400,
+      message: '질문 입력값이 올바르지 않습니다.',
+    });
+  }
+
   try {
-    const { fundingId } = req.params;
-
-    const {
-      title,
-      content,
-      isPrivate = false
-    } = req.body;
-
-    const userId = 1;
-
+    const userId = getUserId(req);
     const result = await pool.query(
       `
       INSERT INTO funding_questions (
@@ -3243,11 +3728,11 @@ const createFundingQuestion = async (req, res) => {
       RETURNING *
       `,
       [
-        fundingId,
+        Number(fundingId),
         userId,
-        title,
-        content,
-        isPrivate
+        title || null,
+        content.trim(),
+        Boolean(isPrivate)
       ]
     );
 
@@ -3333,6 +3818,118 @@ const createFundingReply = async (req, res) => {
   }
 };
 
+const likeFundingQuestion = async (req, res) => {
+  const { fundingId, questionId } = req.params;
+  const userId = getUserId(req);
+
+  if (!fundingId || isNaN(Number(fundingId)) || !questionId || isNaN(Number(questionId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청입니다.',
+    });
+  }
+
+  try {
+    const questionResult = await pool.query(
+      `
+      SELECT question_id
+      FROM funding_questions
+      WHERE funding_id = $1
+      AND question_id = $2
+      `,
+      [Number(fundingId), Number(questionId)]
+    );
+
+    if (questionResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '질문을 찾을 수 없습니다.',
+      });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO funding_question_likes (
+        question_id,
+        user_id
+      )
+      VALUES ($1, $2)
+      ON CONFLICT (question_id, user_id) DO NOTHING
+      `,
+      [Number(questionId), userId]
+    );
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS like_count
+      FROM funding_question_likes
+      WHERE question_id = $1
+      `,
+      [Number(questionId)]
+    );
+
+    return res.status(201).json({
+      fundingId: Number(fundingId),
+      questionId: Number(questionId),
+      liked: true,
+      likeCount: countResult.rows[0].like_count,
+      message: 'Q&A 좋아요를 등록했습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: 'Q&A 좋아요 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const unlikeFundingQuestion = async (req, res) => {
+  const { fundingId, questionId } = req.params;
+  const userId = getUserId(req);
+
+  if (!fundingId || isNaN(Number(fundingId)) || !questionId || isNaN(Number(questionId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '잘못된 요청입니다.',
+    });
+  }
+
+  try {
+    await pool.query(
+      `
+      DELETE FROM funding_question_likes
+      WHERE question_id = $1
+      AND user_id = $2
+      `,
+      [Number(questionId), userId]
+    );
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS like_count
+      FROM funding_question_likes
+      WHERE question_id = $1
+      `,
+      [Number(questionId)]
+    );
+
+    return res.status(200).json({
+      fundingId: Number(fundingId),
+      questionId: Number(questionId),
+      liked: false,
+      likeCount: countResult.rows[0].like_count,
+      message: 'Q&A 좋아요를 취소했습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: 'Q&A 좋아요 취소 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
 // 후기 목록 조회
 const getFundingReviews = async (req, res) => {
   const { fundingId } = req.params;
@@ -3394,6 +3991,10 @@ const getFundingReviews = async (req, res) => {
         fr.title,
         fr.content,
         fr.image_urls,
+        fr.mood,
+        fr.pairing,
+        fr.tags,
+        fr.record_visibility,
         fr.created_at
       FROM funding_reviews fr
       LEFT JOIN users u ON u.user_id = fr.user_id
@@ -3419,6 +4020,10 @@ const getFundingReviews = async (req, res) => {
           typeof review.image_urls === 'string'
             ? JSON.parse(review.image_urls)
             : review.image_urls || [],
+        mood: review.mood,
+        pairing: review.pairing,
+        tags: parseJsonField(review.tags),
+        recordVisibility: review.record_visibility,
         createdAt: review.created_at,
       })),
       page: pageNumber,
@@ -3754,7 +4359,7 @@ const createFundingInquiry = (req, res) => {
 
 
 //추가4: 펀딩 공유 링크 조회
-const getFundingShareLink = (req, res) => {
+const getFundingShareLink = async (req, res) => {
   const { fundingId } = req.params;
 
   // fundingId 검증
@@ -3765,25 +4370,86 @@ const getFundingShareLink = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    fundingId: Number(fundingId),
-    shareUrl: `https://judam.com/fundings/${fundingId}`,
-    message: '공유 링크가 생성되었습니다.',
-  });
+  try {
+    const fundingResult = await pool.query(
+      `
+      SELECT
+        funding_id,
+        title,
+        COALESCE(summary, description) AS summary,
+        thumbnail_url
+      FROM funding_projects
+      WHERE funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (fundingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const publicBaseUrl = process.env.PUBLIC_WEB_BASE_URL || 'https://judam.com';
+    const shareUrl = `${publicBaseUrl.replace(/\/$/, '')}/fundings/${fundingId}`;
+
+    const shareResult = await pool.query(
+      `
+      INSERT INTO funding_shares (
+        funding_id,
+        share_url,
+        share_count
+      )
+      VALUES ($1, $2, 1)
+      ON CONFLICT (funding_id)
+      DO UPDATE SET
+        share_url = EXCLUDED.share_url,
+        share_count = funding_shares.share_count + 1,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING share_count
+      `,
+      [Number(fundingId), shareUrl]
+    );
+
+    const funding = fundingResult.rows[0];
+
+    return res.status(200).json({
+      fundingId: Number(fundingId),
+      shareUrl,
+      title: funding.title,
+      summary: funding.summary,
+      thumbnailImageUrl: funding.thumbnail_url,
+      shareCount: Number(shareResult.rows[0].share_count),
+      message: '공유 링크가 생성되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '공유 링크 생성 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //추가부분5: 펀딩 신고 등록
-const createFundingReport = (req, res) => {
+const createFundingReport = async (req, res) => {
   const { fundingId } = req.params;
-  const { reason, content } = req.body;
+  const { reason, content } = req.body || {};
 
-  const allowedReasons = [
-    'FALSE_INFORMATION',
-    'INAPPROPRIATE_CONTENT',
-    'COPYRIGHT',
-    'FRAUD',
-    'ETC',
-  ];
+  const reasonMap = {
+    FALSE_INFORMATION: 'FALSE_INFORMATION',
+    INAPPROPRIATE_CONTENT: 'INAPPROPRIATE_CONTENT',
+    COPYRIGHT: 'COPYRIGHT',
+    FRAUD: 'FRAUD',
+    ETC: 'ETC',
+    '허위 정보': 'FALSE_INFORMATION',
+    '부적절한 내용': 'INAPPROPRIATE_CONTENT',
+    '저작권 침해': 'COPYRIGHT',
+    '사기 의심': 'FRAUD',
+    기타: 'ETC',
+  };
+  const normalizedReason = reasonMap[reason];
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
@@ -3792,23 +4458,69 @@ const createFundingReport = (req, res) => {
     });
   }
 
-  if (!reason || !allowedReasons.includes(reason)) {
+  if (!normalizedReason) {
     return res.status(400).json({
       status: 400,
       message: '신고 입력값이 올바르지 않습니다.',
     });
   }
 
-  return res.status(201).json({
-    reportId: 1,
-    fundingId: Number(fundingId),
-    reason,
-    message: '신고가 접수되었습니다.',
-  });
+  try {
+    const fundingResult = await pool.query(
+      `
+      SELECT funding_id
+      FROM funding_projects
+      WHERE funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (fundingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const reporterId = getUserId(req);
+    const result = await pool.query(
+      `
+      INSERT INTO funding_reports (
+        funding_id,
+        reporter_id,
+        reason,
+        content,
+        status
+      )
+      VALUES ($1, $2, $3, $4, 'PENDING')
+      RETURNING report_id, funding_id, reporter_id, reason, content, status, created_at
+      `,
+      [Number(fundingId), reporterId, normalizedReason, content || null]
+    );
+
+    const report = result.rows[0];
+
+    return res.status(201).json({
+      reportId: Number(report.report_id),
+      fundingId: Number(report.funding_id),
+      reporterId: report.reporter_id,
+      reason: report.reason,
+      content: report.content,
+      status: report.status,
+      createdAt: report.created_at,
+      message: '신고가 접수되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '신고 접수 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //추가부분6: 펀딩 신고 목록 조회
-const getFundingReports = (req, res) => {
+const getFundingReports = async (req, res) => {
   const { status, page = 0, size = 10 } = req.query;
 
   const allowedStatuses = ['PENDING', 'REVIEWING', 'RESOLVED', 'REJECTED'];
@@ -3827,32 +4539,99 @@ const getFundingReports = (req, res) => {
     });
   }
 
-  return res.status(200).json({
-    content: [
-      {
-        reportId: 1,
-        fundingId: 12,
-        fundingTitle: '벚꽃 막걸리 프로젝트',
-        reporterId: 5,
-        reporterNickname: '술좋아하는재원',
-        reason: 'FALSE_INFORMATION',
-        content: '프로젝트 설명에 사실과 다른 내용이 포함되어 있습니다.',
-        status: status || 'PENDING',
-        createdAt: '2026-05-10T13:30:00',
-      },
-    ],
-    page: Number(page),
-    size: Number(size),
-    totalElements: 24,
-    totalPages: 3,
-  });
+  const pageNumber = Number(page);
+  const sizeNumber = Number(size);
+
+  try {
+    const values = [];
+    const conditions = [];
+
+    if (status) {
+      values.push(status);
+      conditions.push(`fr.status = $${values.length}`);
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS total_count
+      FROM funding_reports fr
+      ${whereClause}
+      `,
+      values
+    );
+
+    const listValues = [...values, sizeNumber, pageNumber * sizeNumber];
+
+    const result = await pool.query(
+      `
+      SELECT
+        fr.report_id,
+        fr.funding_id,
+        fp.title AS funding_title,
+        fr.reporter_id,
+        u.nickname AS reporter_nickname,
+        fr.reason,
+        fr.content,
+        fr.status,
+        fr.created_at
+      FROM funding_reports fr
+      LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
+      LEFT JOIN users u ON u.user_id = fr.reporter_id
+      ${whereClause}
+      ORDER BY fr.created_at DESC
+      LIMIT $${listValues.length - 1}
+      OFFSET $${listValues.length}
+      `,
+      listValues
+    );
+
+    const totalElements = countResult.rows[0].total_count;
+
+    return res.status(200).json({
+      content: result.rows.map((report) => ({
+        reportId: Number(report.report_id),
+        fundingId: Number(report.funding_id),
+        fundingTitle: report.funding_title,
+        reporterId: report.reporter_id,
+        reporterNickname: report.reporter_nickname,
+        reason: report.reason,
+        content: report.content,
+        status: report.status,
+        createdAt: report.created_at,
+      })),
+      page: pageNumber,
+      size: sizeNumber,
+      totalElements,
+      totalPages: Math.ceil(totalElements / sizeNumber),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '신고 목록 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
 };
 
 //추가부분8: 후기작성
 // 후기 작성
 const createFundingReview = async (req, res) => {
   const { fundingId } = req.params;
-  const { rating, title, content, imageUrls } = req.body;
+  const {
+    rating,
+    title,
+    content,
+    detailReview,
+    mood,
+    pairing,
+    tags,
+    recordVisibility = true,
+    showRecord,
+    imageUrls,
+  } = req.body || {};
+  const files = req.files || [];
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
@@ -3868,24 +4647,83 @@ const createFundingReview = async (req, res) => {
     });
   }
 
-  if (!title || title.trim() === '' || !content || content.trim() === '') {
-    return res.status(400).json({
-      status: 400,
-      message: '후기 제목과 내용을 입력해주세요.',
-    });
-  }
+  const normalizedContent = toTrimmedString(content || detailReview);
 
-  if (imageUrls && !Array.isArray(imageUrls)) {
+  if (!normalizedContent) {
     return res.status(400).json({
       status: 400,
-      message: '후기 이미지 목록 입력값이 올바르지 않습니다.',
+      message: '상세 후기를 입력해주세요.',
     });
   }
 
   try {
-    const userId = req.user?.userId || 1;
+    const userId = getUserId(req);
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
+    }
 
-    const result = await pool.query(
+    const normalizedImageUrls = [
+      ...parseJsonArrayField(imageUrls),
+      ...uploadedImageUrls,
+    ];
+    const normalizedTags = parseJsonArrayField(tags);
+    const normalizedRecordVisibility =
+      showRecord === undefined ? Boolean(recordVisibility) : toRequiredBoolean(showRecord);
+
+    const existingResult = await pool.query(
+      `
+      SELECT review_id
+      FROM funding_reviews
+      WHERE funding_id = $1
+      AND user_id = $2
+      `,
+      [Number(fundingId), userId]
+    );
+
+    const result = existingResult.rows.length > 0
+      ? await pool.query(
+        `
+        UPDATE funding_reviews
+        SET
+          rating = $1,
+          title = $2,
+          content = $3,
+          image_urls = $4,
+          mood = $5,
+          pairing = $6,
+          tags = $7,
+          record_visibility = $8,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE review_id = $9
+        RETURNING
+          review_id,
+          funding_id,
+          user_id,
+          rating,
+          title,
+          content,
+          image_urls,
+          mood,
+          pairing,
+          tags,
+          record_visibility,
+          created_at,
+          updated_at
+        `,
+        [
+          Number(rating),
+          title || null,
+          normalizedContent,
+          JSON.stringify(normalizedImageUrls),
+          mood || null,
+          pairing || null,
+          JSON.stringify(normalizedTags),
+          normalizedRecordVisibility,
+          existingResult.rows[0].review_id,
+        ]
+      )
+      : await pool.query(
       `
       INSERT INTO funding_reviews (
         funding_id,
@@ -3893,9 +4731,13 @@ const createFundingReview = async (req, res) => {
         rating,
         title,
         content,
-        image_urls
+        image_urls,
+        mood,
+        pairing,
+        tags,
+        record_visibility
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING
         review_id,
         funding_id,
@@ -3904,15 +4746,24 @@ const createFundingReview = async (req, res) => {
         title,
         content,
         image_urls,
-        created_at
+        mood,
+        pairing,
+        tags,
+        record_visibility,
+        created_at,
+        updated_at
       `,
       [
         Number(fundingId),
         userId,
         Number(rating),
-        title.trim(),
-        content.trim(),
-        JSON.stringify(imageUrls || []),
+        title || null,
+        normalizedContent,
+        JSON.stringify(normalizedImageUrls),
+        mood || null,
+        pairing || null,
+        JSON.stringify(normalizedTags),
+        normalizedRecordVisibility,
       ]
     );
 
@@ -3929,8 +4780,13 @@ const createFundingReview = async (req, res) => {
         typeof review.image_urls === 'string'
           ? JSON.parse(review.image_urls)
           : review.image_urls,
+      mood: review.mood,
+      pairing: review.pairing,
+      tags: parseJsonField(review.tags),
+      recordVisibility: review.record_visibility,
       createdAt: review.created_at,
-      message: '후기가 등록되었습니다.',
+      updatedAt: review.updated_at,
+      message: existingResult.rows.length > 0 ? '후기가 수정되었습니다.' : '후기가 등록되었습니다.',
     });
   } catch (error) {
     console.error(error);
@@ -3938,6 +4794,146 @@ const createFundingReview = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '후기 등록 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const updateFundingReview = async (req, res) => {
+  const { fundingId, reviewId } = req.params;
+  const {
+    rating,
+    title,
+    content,
+    detailReview,
+    mood,
+    pairing,
+    tags,
+    recordVisibility,
+    showRecord,
+    imageUrls,
+  } = req.body || {};
+  const files = req.files || [];
+
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !reviewId ||
+    isNaN(Number(reviewId))
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '후기 수정 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  if (rating !== undefined && (isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5)) {
+    return res.status(400).json({
+      status: 400,
+      message: '별점은 1점부터 5점까지 입력 가능합니다.',
+    });
+  }
+
+  try {
+    const userId = getUserId(req);
+    const existingResult = await pool.query(
+      `
+      SELECT *
+      FROM funding_reviews
+      WHERE funding_id = $1
+      AND review_id = $2
+      AND user_id = $3
+      `,
+      [Number(fundingId), Number(reviewId), userId]
+    );
+
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '수정할 후기를 찾을 수 없습니다.',
+      });
+    }
+
+    const current = existingResult.rows[0];
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
+    }
+
+    const nextImageUrls = imageUrls !== undefined || uploadedImageUrls.length > 0
+      ? [...parseJsonArrayField(imageUrls), ...uploadedImageUrls]
+      : parseJsonField(current.image_urls);
+    const nextContent = toTrimmedString(content || detailReview) || current.content;
+    const nextRecordVisibility = showRecord !== undefined
+      ? toRequiredBoolean(showRecord)
+      : recordVisibility !== undefined
+        ? Boolean(recordVisibility)
+        : current.record_visibility;
+
+    const result = await pool.query(
+      `
+      UPDATE funding_reviews
+      SET
+        rating = COALESCE($1, rating),
+        title = COALESCE($2, title),
+        content = $3,
+        image_urls = $4,
+        mood = COALESCE($5, mood),
+        pairing = COALESCE($6, pairing),
+        tags = COALESCE($7, tags),
+        record_visibility = $8,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE review_id = $9
+      RETURNING
+        review_id,
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls,
+        mood,
+        pairing,
+        tags,
+        record_visibility,
+        created_at,
+        updated_at
+      `,
+      [
+        rating !== undefined ? Number(rating) : null,
+        title || null,
+        nextContent,
+        JSON.stringify(nextImageUrls),
+        mood || null,
+        pairing || null,
+        tags !== undefined ? JSON.stringify(parseJsonArrayField(tags)) : null,
+        nextRecordVisibility,
+        Number(reviewId),
+      ]
+    );
+
+    const review = result.rows[0];
+
+    return res.status(200).json({
+      reviewId: Number(review.review_id),
+      fundingId: Number(review.funding_id),
+      userId: Number(review.user_id),
+      rating: Number(review.rating),
+      title: review.title,
+      content: review.content,
+      imageUrls: parseJsonField(review.image_urls),
+      mood: review.mood,
+      pairing: review.pairing,
+      tags: parseJsonField(review.tags),
+      recordVisibility: review.record_visibility,
+      createdAt: review.created_at,
+      updatedAt: review.updated_at,
+      message: '후기가 수정되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '후기 수정 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -4611,12 +5607,15 @@ module.exports = {
   getFundingDraftPreview,  //프로젝트 미리보기
   updateFundingProject, // 공개된 펀딩 프로젝트 수정
   getFundingList,
+  getFundingStats,
   getFundingDetail,
   getFundingIntro,
   getBreweryLogs,
   getFundingQuestions,
   createFundingQuestion,
   createFundingReply,
+  likeFundingQuestion,
+  unlikeFundingQuestion,
   getFundingReviews,
   getSupportOptions,
   createFundingOrder,
@@ -4630,6 +5629,7 @@ module.exports = {
   createFundingReport,
   getFundingReports,
   createFundingReview,
+  updateFundingReview,
   likeFundingProject,
   unlikeFundingProject,
   likeBreweryLog,

@@ -92,54 +92,150 @@ const approveFundingDraft = async (req, res) => {
       });
     }
 
-    const recipeId = 3; // TODO: 추후 draft 기반 recipe 생성 로직으로 교체
+    const client = await pool.connect();
+    let funding;
 
-    const fundingResult = await pool.query(
-      `
-      INSERT INTO funding_projects (
-        recipe_id,
-        brewery_user_id,
-        title,
-        description,
-        goal_amount,
-        current_amount,
-        start_date,
-        end_date,
-        status,
-        price_per_bottle,
-        shipping_fee
-      )
-      VALUES ($1, $2, $3, $4, $5, 0, $6, $7, 'ONGOING', $8, 3000)
-      RETURNING
-        funding_id,
-        title,
-        status,
-        created_at
-      `,
-      [
-        recipeId,
-        Number(draft.brewery_id),
-        draft.title,
-        draft.summary,
-        Number(draft.target_amount || 0),
-        draft.funding_start_date,
-        draft.funding_end_date,
-        Number(draft.price_per_bottle || 0),
-      ]
-    );
+    try {
+      await client.query('BEGIN');
 
-    await pool.query(
-      `
-      UPDATE funding_drafts
-      SET
-        status = 'APPROVED',
-        updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $1
-      `,
-      [Number(draftId)]
-    );
+      if (draft.funding_id) {
+        const fundingResult = await client.query(
+          `
+          UPDATE funding_projects
+          SET
+            title = COALESCE($1, title),
+            description = COALESCE($2, description),
+            goal_amount = COALESCE($3, goal_amount),
+            start_date = COALESCE($4, start_date),
+            end_date = COALESCE($5, end_date),
+            status = 'ONGOING',
+            summary = COALESCE($6, summary),
+            category = COALESCE($7, category),
+            thumbnail_url = COALESCE($8, thumbnail_url),
+            image_urls = COALESCE($9, image_urls),
+            expected_delivery_date = COALESCE($10, expected_delivery_date),
+            price_per_bottle = COALESCE($11, price_per_bottle),
+            shipping_fee = COALESCE($12, shipping_fee),
+            volume = COALESCE($13, volume),
+            alcohol_percentage = COALESCE($14, alcohol_percentage),
+            updated_at = CURRENT_TIMESTAMP
+          WHERE funding_id = $15
+          RETURNING
+            funding_id,
+            title,
+            status,
+            created_at
+          `,
+          [
+            draft.title,
+            draft.summary || draft.introduction || null,
+            draft.target_amount !== null && draft.target_amount !== undefined
+              ? Number(draft.target_amount)
+              : null,
+            draft.funding_start_date,
+            draft.funding_end_date,
+            draft.summary || null,
+            draft.category || null,
+            draft.thumbnail_url || null,
+            draft.image_urls || null,
+            draft.expected_delivery_date || null,
+            draft.price_per_bottle !== null && draft.price_per_bottle !== undefined
+              ? Number(draft.price_per_bottle)
+              : null,
+            draft.shipping_fee !== null && draft.shipping_fee !== undefined
+              ? Number(draft.shipping_fee)
+              : null,
+            draft.volume !== null && draft.volume !== undefined ? Number(draft.volume) : null,
+            draft.alcohol_percentage !== null && draft.alcohol_percentage !== undefined
+              ? Number(draft.alcohol_percentage)
+              : null,
+            Number(draft.funding_id),
+          ]
+        );
 
-    const funding = fundingResult.rows[0];
+        funding = fundingResult.rows[0];
+      }
+
+      if (!funding) {
+        const recipeId = draft.recipe_id || 3;
+        const fundingResult = await client.query(
+          `
+          INSERT INTO funding_projects (
+            recipe_id,
+            brewery_user_id,
+            title,
+            description,
+            goal_amount,
+            current_amount,
+            start_date,
+            end_date,
+            status,
+            summary,
+            category,
+            thumbnail_url,
+            image_urls,
+            expected_delivery_date,
+            price_per_bottle,
+            shipping_fee,
+            volume,
+            alcohol_percentage
+          )
+          VALUES (
+            $1, $2, $3, $4, $5, 0, $6, $7, 'ONGOING', $8, $9, $10, $11,
+            $12, $13, $14, $15, $16
+          )
+          RETURNING
+            funding_id,
+            title,
+            status,
+            created_at
+          `,
+          [
+            recipeId,
+            Number(draft.brewery_id),
+            draft.title,
+            draft.summary || draft.introduction || '',
+            Number(draft.target_amount || 0),
+            draft.funding_start_date,
+            draft.funding_end_date,
+            draft.summary || null,
+            draft.category || null,
+            draft.thumbnail_url || null,
+            draft.image_urls || '[]',
+            draft.expected_delivery_date || null,
+            Number(draft.price_per_bottle || 0),
+            draft.shipping_fee !== null && draft.shipping_fee !== undefined
+              ? Number(draft.shipping_fee)
+              : 3000,
+            draft.volume !== null && draft.volume !== undefined ? Number(draft.volume) : null,
+            draft.alcohol_percentage !== null && draft.alcohol_percentage !== undefined
+              ? Number(draft.alcohol_percentage)
+              : null,
+          ]
+        );
+
+        funding = fundingResult.rows[0];
+      }
+
+      await client.query(
+        `
+        UPDATE funding_drafts
+        SET
+          status = 'APPROVED',
+          funding_id = $2,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE draft_id = $1
+        `,
+        [Number(draftId), funding.funding_id]
+      );
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
 
     return res.status(200).json({
       draftId: Number(draftId),
