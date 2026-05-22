@@ -192,8 +192,11 @@ const getPostById = async (postId, userId) => {
 };
 
 // 게시글 수정 (PUT /api/posts/:postId)
-// 작성자 본인만 가능. 이미지 완전 교체 방식.
-const updatePost = async (postId, userId, { title, content, imageUrls = [] }) => {
+// 작성자 본인만 가능. 기존 유지(existingImageUrls) + 신규 추가(newImageUrls) 방식.
+// 최종 image_urls = [...existingImageUrls, ...newImageUrls], 총 5개 이하.
+const MAX_POST_IMAGES = 5;
+
+const updatePost = async (postId, userId, { title, content, existingImageUrls = [], newImageUrls = [] }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -215,6 +218,28 @@ const updatePost = async (postId, userId, { title, content, imageUrls = [] }) =>
       throw error;
     }
 
+    // existing_image_urls 보안 검증: 각 URL이 이 post의 post_images에 실제 존재하는지
+    if (existingImageUrls.length > 0) {
+      const dbUrlsResult = await client.query(
+        'SELECT image_url FROM post_images WHERE post_id = $1',
+        [postId]
+      );
+      const validUrls = new Set(dbUrlsResult.rows.map((r) => r.image_url));
+      const invalidUrls = existingImageUrls.filter((u) => !validUrls.has(u));
+      if (invalidUrls.length > 0) {
+        const error = new Error('유효하지 않은 기존 이미지 URL이 포함되어 있습니다.');
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
+    const finalUrls = [...existingImageUrls, ...newImageUrls];
+    if (finalUrls.length > MAX_POST_IMAGES) {
+      const error = new Error(`이미지는 최대 ${MAX_POST_IMAGES}개까지 첨부할 수 있습니다.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
     const updateResult = await client.query(
       `UPDATE posts
        SET title = $2, content = $3, updated_at = CURRENT_TIMESTAMP
@@ -225,10 +250,10 @@ const updatePost = async (postId, userId, { title, content, imageUrls = [] }) =>
 
     await client.query('DELETE FROM post_images WHERE post_id = $1', [postId]);
 
-    for (let i = 0; i < imageUrls.length; i++) {
+    for (let i = 0; i < finalUrls.length; i++) {
       await client.query(
         'INSERT INTO post_images (post_id, image_url, sequence) VALUES ($1, $2, $3)',
-        [postId, imageUrls[i], i]
+        [postId, finalUrls[i], i]
       );
     }
 
@@ -239,7 +264,7 @@ const updatePost = async (postId, userId, { title, content, imageUrls = [] }) =>
       post_id: Number(row.post_id),
       title: row.title,
       content: row.content,
-      image_urls: imageUrls,
+      image_urls: finalUrls,
       updated_at: row.updated_at,
     };
   } catch (error) {

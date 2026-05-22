@@ -94,7 +94,7 @@ const getPostDetail = async (req, res) => {
 
 // 게시글 수정 핸들러 (PUT /api/posts/:postId)
 // - 로그인 필수 (작성자 본인만 수정 가능)
-// - 이미지 완전 교체 방식 (기존 post_images 전체 삭제 후 새 이미지 재삽입)
+// - 이미지 = 남길 기존 URL(existing_image_urls, JSON 문자열) + 새 파일(images)을 합쳐 재구성
 // - board_type 수정 불가 (요청에 포함되어도 무시)
 const putPost = async (req, res) => {
   const postId = parseInt(req.params.postId, 10);
@@ -108,20 +108,33 @@ const putPost = async (req, res) => {
     return res.status(400).json({ status: 400, message: '필수 항목이 누락되었습니다.' });
   }
 
+  let existingImageUrls = [];
+  if (body.existing_image_urls !== undefined && body.existing_image_urls !== '') {
+    try {
+      existingImageUrls = JSON.parse(body.existing_image_urls);
+    } catch {
+      return res.status(400).json({ status: 400, message: 'existing_image_urls는 문자열 배열의 JSON이어야 합니다.' });
+    }
+    if (!Array.isArray(existingImageUrls) || !existingImageUrls.every((u) => typeof u === 'string')) {
+      return res.status(400).json({ status: 400, message: 'existing_image_urls는 문자열 배열의 JSON이어야 합니다.' });
+    }
+  }
+
   const files = req.files || [];
   if (files.length > MAX_IMAGES) {
     return res.status(400).json({ status: 400, message: `이미지는 최대 ${MAX_IMAGES}개까지 첨부할 수 있습니다.` });
   }
 
   try {
-    const imageUrls = await Promise.all(
+    const newImageUrls = await Promise.all(
       files.map((f) => uploadFileToS3(f.buffer, f.originalname, f.mimetype, req.user.id))
     );
 
     const post = await updatePost(postId, req.user.id, {
       title: body.title,
       content: body.content,
-      imageUrls,
+      existingImageUrls,
+      newImageUrls,
     });
 
     return res.status(200).json({
@@ -130,7 +143,7 @@ const putPost = async (req, res) => {
       post,
     });
   } catch (error) {
-    if (error.statusCode === 403 || error.statusCode === 404) {
+    if (error.statusCode === 400 || error.statusCode === 403 || error.statusCode === 404) {
       return res.status(error.statusCode).json({ status: error.statusCode, message: error.message });
     }
     return res.status(500).json({ status: 500, message: '서버 내부 오류' });
