@@ -10,6 +10,7 @@ const {
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,
+  requestPhoneVerificationController,
   updateProfileImageController,
   changeMyPasswordController,
   getMyArchivesController,
@@ -35,6 +36,7 @@ router.delete('/archives/:archiveId', authMiddleware, deleteMyArchiveController)
 router.get('/profile', authMiddleware, getMyProfileController);
 router.get('/profile/nickname/check', authMiddleware, checkNicknameController);
 router.patch('/profile/nickname', authMiddleware, updateNicknameController);
+router.post('/profile/phone/verification', authMiddleware, requestPhoneVerificationController);
 router.patch('/profile/phone', authMiddleware, updatePhoneNumberController);
 router.patch('/profile/image', authMiddleware, upload.single('image'), updateProfileImageController);
 router.patch('/profile/password', authMiddleware, changeMyPasswordController);

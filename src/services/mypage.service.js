@@ -1,4 +1,5 @@
 const bcrypt = require('bcrypt');
+const axios = require('axios');
 const {
   findUserById,
   updateUserProfile,
@@ -14,6 +15,9 @@ const createServiceError = (statusCode, message) => {
 };
 
 const PASSWORD_SALT_ROUNDS = 10;
+const OCTOMO_API_URL = process.env.OCTOMO_API_URL
+  || 'https://api.octoverse.kr/octomo/v1/public/message/exists';
+const OCTOMO_RECEIVE_NUMBER = process.env.OCTOMO_RECEIVE_NUMBER || '1666-3538';
 
 const mapProfileResponse = (user) => ({
   userId: String(user.user_id),
@@ -65,12 +69,155 @@ const updateNickname = async (userId, nickname) => {
   };
 };
 
-const updatePhoneNumber = async (userId, phoneNumber) => {
-  const user = await updateUserProfile(userId, { phoneNumber });
+const normalizePhoneNumber = (phoneNumber) => {
+  if (typeof phoneNumber !== 'string') {
+    throw createServiceError(400, '전화번호 형식이 올바르지 않습니다.');
+  }
+
+  const normalized = phoneNumber.replace(/\s/g, '').replace(/-/g, '');
+
+  if (!/^010\d{7,8}$/.test(normalized)) {
+    throw createServiceError(400, '전화번호 형식이 올바르지 않습니다.');
+  }
+
+  return normalized;
+};
+
+const generatePhoneVerificationCode = () => {
+  const randomNumber = Math.floor(100000 + Math.random() * 900000);
+
+  return `JUDAM${randomNumber}`;
+};
+
+const requestPhoneVerification = async (userId, phoneNumber) => {
+  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+  const verificationCode = generatePhoneVerificationCode();
+
+  await pool.query(
+    `
+      INSERT INTO phone_verifications (
+        user_id,
+        phone_number,
+        code,
+        expires_at,
+        created_at
+      )
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '5 minutes', CURRENT_TIMESTAMP)
+    `,
+    [userId, normalizedPhoneNumber, verificationCode],
+  );
 
   return {
-    phoneNumber: user.phone_number,
+    phoneNumber: normalizedPhoneNumber,
+    verificationCode,
+    sendTo: OCTOMO_RECEIVE_NUMBER,
+    guideMessage: `휴대폰 문자로 ${verificationCode}을 ${OCTOMO_RECEIVE_NUMBER}로 보내주세요.`,
   };
+};
+
+const checkOctomoMessageExists = async (phoneNumber, verificationCode) => {
+  if (!process.env.OCTOMO_API_KEY) {
+    throw createServiceError(500, '전화번호 인증 서비스 설정이 누락되었습니다.');
+  }
+
+  try {
+    const response = await axios.post(
+      OCTOMO_API_URL,
+      {
+        mobileNum: phoneNumber,
+        text: verificationCode,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Octomo ${process.env.OCTOMO_API_KEY}`,
+        },
+      },
+    );
+
+    return response.data?.exists === true;
+  } catch (error) {
+    throw createServiceError(502, '전화번호 인증 서비스와 통신할 수 없습니다.');
+  }
+};
+
+const updatePhoneNumberWithVerification = async (userId, phoneNumber, verificationCode) => {
+  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+  const normalizedVerificationCode = typeof verificationCode === 'string'
+    ? verificationCode.trim()
+    : '';
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        verification_id,
+        user_id,
+        phone_number,
+        code
+      FROM phone_verifications
+      WHERE user_id = $1
+        AND phone_number = $2
+        AND code = $3
+        AND verified_at IS NULL
+        AND expires_at > CURRENT_TIMESTAMP
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [userId, normalizedPhoneNumber, normalizedVerificationCode],
+  );
+  const verification = rows[0];
+
+  if (!verification) {
+    throw createServiceError(400, '전화번호 인증 요청이 없거나 만료되었습니다.');
+  }
+
+  const exists = await checkOctomoMessageExists(normalizedPhoneNumber, normalizedVerificationCode);
+
+  if (!exists) {
+    throw createServiceError(400, '인증 문자가 확인되지 않았습니다.');
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `
+        UPDATE phone_verifications
+        SET verified_at = CURRENT_TIMESTAMP
+        WHERE verification_id = $1
+          AND verified_at IS NULL
+      `,
+      [verification.verification_id],
+    );
+    const { rows: userRows } = await client.query(
+      `
+        UPDATE users
+        SET
+          phone_number = $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $2
+          AND deleted_at IS NULL
+        RETURNING phone_number
+      `,
+      [normalizedPhoneNumber, userId],
+    );
+
+    if (userRows.length === 0) {
+      throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      phoneNumber: userRows[0].phone_number,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 const updateProfileImage = async (userId, file) => {
@@ -1120,9 +1267,13 @@ module.exports = {
   getMyProfile,
   checkNickname,
   updateNickname,
-  updatePhoneNumber,
   updateProfileImage,
   changeMyPassword,
+  requestPhoneVerification,
+  updatePhoneNumberWithVerification,
+  normalizePhoneNumber,
+  generatePhoneVerificationCode,
+  checkOctomoMessageExists,
   getMyPageSummary,
   getMySulbti,
   saveMySulbti,
