@@ -316,11 +316,22 @@ const signup = async (req, res) => {
       privacyAgreed,
       marketingAgreed,
     });
+    const accessToken = generateAccessToken(user);
+    const refreshToken = await issueRefreshToken(user.user_id);
+    const signupUser = mapSignupUserResponse(user);
 
     return res.status(201).json({
       status: 201,
       message: '회원가입 성공',
-      data: mapSignupUserResponse(user),
+      data: {
+        ...signupUser,
+        accessToken,
+        refreshToken,
+        user: {
+          ...mapLoginUserResponse(user),
+          marketingAgreed: signupUser.marketingAgreed,
+        },
+      },
     });
   } catch (error) {
     if (error.code === '23505') {
@@ -861,6 +872,9 @@ const kakaoLoginByCode = async (req, res) => {
         data: {
           isNewUser: true,
           signupRequired: true,
+          email: kakaoProfile.email,
+          nickname: kakaoProfile.nickname,
+          profileImage: kakaoProfile.profileImage,
           kakaoSignupToken,
           kakaoProfile: {
             kakaoId: String(kakaoProfile.kakaoId),

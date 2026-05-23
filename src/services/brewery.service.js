@@ -31,6 +31,16 @@ const mapApplication = (row) => ({
   updatedAt: row.updated_at,
 });
 
+const mapUserResponse = (row) => ({
+  userId: String(row.user_id),
+  email: row.email,
+  nickname: row.nickname,
+  phoneNumber: row.phone_number,
+  provider: row.provider,
+  role: row.role,
+  profileImage: row.profile_image,
+});
+
 const createServiceError = (statusCode, message, detail) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -209,7 +219,14 @@ const createApplication = async ({
           updated_at = CURRENT_TIMESTAMP
         WHERE user_id = $1
           AND deleted_at IS NULL
-        RETURNING user_id
+        RETURNING
+          user_id,
+          email,
+          nickname,
+          phone_number,
+          provider,
+          role,
+          profile_image
       `,
       [userId],
     );
@@ -220,7 +237,10 @@ const createApplication = async ({
 
     await client.query('COMMIT');
 
-    return mapApplication(rows[0]);
+    return {
+      ...mapApplication(rows[0]),
+      user: mapUserResponse(userResult.rows[0]),
+    };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
