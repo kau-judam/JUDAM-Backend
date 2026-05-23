@@ -6,6 +6,7 @@ const findUserByKakaoId = async (kakaoId) => {
       SELECT
         user_id,
         email,
+        phone_number,
         nickname,
         role,
         provider,
@@ -48,30 +49,66 @@ const findUserByEmail = async (email) => {
   return rows[0] || null;
 };
 
-const createKakaoUser = async ({ kakaoId, email, nickname, profileImage }) => {
+const createKakaoUser = async ({
+  kakaoId,
+  email,
+  nickname,
+  phoneNumber = null,
+  profileImage = null,
+  role = 'USER',
+  termsAgreed = false,
+  privacyAgreed = false,
+  marketingAgreed = false,
+}) => {
   const { rows } = await pool.query(
     `
       INSERT INTO users (
         email,
         nickname,
-        provider,
-        kakao_id,
-        profile_image,
-        last_login_at,
-        updated_at
-      )
-      VALUES ($1, $2, 'kakao', $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      RETURNING
-        user_id,
-        email,
-        nickname,
+        phone_number,
         role,
         provider,
         kakao_id,
         profile_image,
+        terms_agreed,
+        privacy_agreed,
+        marketing_agreed,
+        terms_agreed_at,
+        privacy_agreed_at,
+        marketing_agreed_at,
+        last_login_at,
+        updated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        'kakao',
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        CASE WHEN $7 THEN CURRENT_TIMESTAMP ELSE NULL END,
+        CASE WHEN $8 THEN CURRENT_TIMESTAMP ELSE NULL END,
+        CASE WHEN $9 THEN CURRENT_TIMESTAMP ELSE NULL END,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      )
+      RETURNING
+        user_id,
+        email,
+        nickname,
+        phone_number,
+        role,
+        provider,
+        kakao_id,
+        profile_image,
+        marketing_agreed,
         last_login_at
     `,
-    [email, nickname, kakaoId, profileImage],
+    [email, nickname, phoneNumber, role, kakaoId, profileImage, termsAgreed, privacyAgreed, marketingAgreed],
   );
 
   return rows[0];
@@ -148,10 +185,12 @@ const updateKakaoUserLastLogin = async (userId) => {
         last_login_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
       WHERE user_id = $1
+        AND deleted_at IS NULL
       RETURNING
         user_id,
         email,
         nickname,
+        phone_number,
         role,
         provider,
         kakao_id,
@@ -162,6 +201,31 @@ const updateKakaoUserLastLogin = async (userId) => {
   );
 
   return rows[0];
+};
+
+const updateUserLastLogin = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      UPDATE users
+      SET
+        last_login_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1
+        AND deleted_at IS NULL
+      RETURNING
+        user_id,
+        email,
+        nickname,
+        phone_number,
+        role,
+        provider,
+        profile_image,
+        last_login_at
+    `,
+    [userId],
+  );
+
+  return rows[0] || null;
 };
 
 const updateLocalUserLastLogin = async (userId) => {
@@ -539,6 +603,7 @@ module.exports = {
   createLocalUser,
   updateKakaoUserLastLogin,
   updateLocalUserLastLogin,
+  updateUserLastLogin,
   updateUserRole,
   findOrCreateKakaoUser,
   findUserById,
