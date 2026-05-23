@@ -1,9 +1,11 @@
 const express = require('express');
+const authMiddleware = require('../middlewares/authMiddleware');
 const {
   checkEmail,
   checkNickname,
   signup,
   login,
+  updateMyRole,
   requestAuthPhoneVerificationController,
   confirmAuthPhoneVerificationController,
   requestPasswordReset,
@@ -23,6 +25,7 @@ router.get('/email/check', checkEmail);
 router.get('/nickname/check', checkNickname);
 router.post('/signup', signup);
 router.post('/login', login);
+router.patch('/me/role', authMiddleware, updateMyRole);
 router.post('/phone/verification', requestAuthPhoneVerificationController);
 router.post('/phone/verification/confirm', confirmAuthPhoneVerificationController);
 router.post('/password/reset/request', requestPasswordReset);

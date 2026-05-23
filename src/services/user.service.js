@@ -189,6 +189,35 @@ const updateLocalUserLastLogin = async (userId) => {
   return rows[0];
 };
 
+const updateUserRole = async (userId, role) => {
+  const { rows } = await pool.query(
+    `
+      UPDATE users
+      SET
+        role = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $2
+        AND deleted_at IS NULL
+      RETURNING
+        user_id,
+        email,
+        nickname,
+        phone_number,
+        role,
+        provider,
+        profile_image,
+        updated_at
+    `,
+    [role, userId],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+  }
+
+  return rows[0];
+};
+
 const findOrCreateKakaoUser = async (kakaoProfile) => {
   const existingUser = await findUserByKakaoId(kakaoProfile.kakaoId);
 
@@ -510,6 +539,7 @@ module.exports = {
   createLocalUser,
   updateKakaoUserLastLogin,
   updateLocalUserLastLogin,
+  updateUserRole,
   findOrCreateKakaoUser,
   findUserById,
   updateUserProfile,
