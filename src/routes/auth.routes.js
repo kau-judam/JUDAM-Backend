@@ -15,6 +15,7 @@ const {
   kakaoLogin,
   kakaoCallback,
   kakaoLoginByCode,
+  completeKakaoSignup,
   refreshAccessToken,
   logout,
 } = require('../controllers/auth.controller');
@@ -35,6 +36,7 @@ router.get('/kakao/url', kakaoLoginUrl);
 router.get('/kakao', kakaoLogin);
 router.get('/kakao/callback', kakaoCallback);
 router.post('/kakao/login', kakaoLoginByCode);
+router.post('/kakao/signup/complete', completeKakaoSignup);
 router.post('/refresh', refreshAccessToken);
 router.post('/logout', logout);
 

@@ -3,9 +3,12 @@ const bcrypt = require('bcrypt');
 const { getKakaoToken, getKakaoUserInfo } = require('../services/kakao.service');
 const {
   findOrCreateKakaoUser,
+  findUserByKakaoId,
   findUserByEmail,
+  createKakaoUser,
   createLocalUser,
   updateLocalUserLastLogin,
+  updateUserLastLogin,
   updateUserRole,
   isNicknameExists,
   createPasswordResetVerification,
@@ -15,6 +18,8 @@ const {
 const {
   generateAccessToken,
   issueRefreshToken,
+  generateKakaoSignupToken,
+  verifyKakaoSignupToken,
   refreshAccessToken: refreshAccessTokenService,
   revokeRefreshToken,
 } = require('../services/token.service');
@@ -82,13 +87,50 @@ const getBackendRedirectUri = () => process.env.KAKAO_BACKEND_REDIRECT_URI || pr
 
 const getFrontendRedirectUri = () => process.env.KAKAO_FRONTEND_REDIRECT_URI || process.env.KAKAO_REDIRECT_URI;
 
-const buildKakaoAuthUrl = (redirectUri) => {
+const buildKakaoAuthUrl = (redirectUri, state) => {
   const kakaoAuthUrl = new URL('https://kauth.kakao.com/oauth/authorize');
   kakaoAuthUrl.searchParams.set('response_type', 'code');
   kakaoAuthUrl.searchParams.set('client_id', process.env.KAKAO_REST_API_KEY);
+  // redirectUri는 카카오 개발자 콘솔에 등록된 값만 정상 동작한다.
   kakaoAuthUrl.searchParams.set('redirect_uri', redirectUri);
+  if (state) {
+    kakaoAuthUrl.searchParams.set('state', state);
+  }
 
   return kakaoAuthUrl.toString();
+};
+
+const encodeKakaoState = ({ appRedirectUri }) => {
+  if (!appRedirectUri) {
+    return null;
+  }
+
+  return Buffer.from(JSON.stringify({ appRedirectUri })).toString('base64url');
+};
+
+const getAppRedirectUriFromState = (state) => {
+  if (typeof state !== 'string' || !state.trim()) {
+    return null;
+  }
+
+  try {
+    const parsedState = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+    return normalizeString(parsedState?.appRedirectUri) || null;
+  } catch (error) {
+    return null;
+  }
+};
+
+const appendQueryParams = (baseUrl, params) => {
+  const url = new URL(baseUrl);
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, value);
+    }
+  });
+
+  return url.toString();
 };
 
 const generatePasswordResetCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
@@ -670,20 +712,28 @@ const resetPassword = async (req, res) => {
 };
 
 const kakaoLoginUrl = (req, res) => {
-  const frontendRedirectUri = getFrontendRedirectUri();
+  const redirectUri = normalizeString(req.query?.redirectUri) || getFrontendRedirectUri() || getBackendRedirectUri();
+  const appRedirectUri = normalizeString(req.query?.appRedirectUri);
+  const state = appRedirectUri
+    ? encodeKakaoState({ appRedirectUri })
+    : normalizeString(req.query?.state);
 
-  if (!process.env.KAKAO_REST_API_KEY || !frontendRedirectUri) {
+  if (!process.env.KAKAO_REST_API_KEY || !redirectUri) {
     return res.status(500).json({
       status: 500,
       message: '서버 내부 오류',
     });
   }
 
+  const kakaoLoginUrlValue = buildKakaoAuthUrl(redirectUri, state);
+
   return res.status(200).json({
     status: 200,
     message: '카카오 로그인 URL 조회 성공',
     data: {
-      url: buildKakaoAuthUrl(frontendRedirectUri),
+      kakaoLoginUrl: kakaoLoginUrlValue,
+      url: kakaoLoginUrlValue,
+      redirectUri,
     },
   });
 };
@@ -705,10 +755,16 @@ const kakaoLogin = (req, res) => {
 };
 
 const kakaoCallback = async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
 
   if (!code) {
     return sendError(res, 400, 'Authorization code is required', 'code query parameter is missing');
+  }
+
+  const appRedirectUri = getAppRedirectUriFromState(state) || process.env.KAKAO_APP_REDIRECT_URI;
+
+  if (appRedirectUri) {
+    return res.redirect(appendQueryParams(appRedirectUri, { code }));
   }
 
   try {
@@ -743,8 +799,23 @@ const kakaoCallback = async (req, res) => {
   }
 };
 
+const getExistingKakaoUser = async (kakaoProfile) => {
+  const kakaoUser = await findUserByKakaoId(kakaoProfile.kakaoId);
+
+  if (kakaoUser) {
+    return kakaoUser;
+  }
+
+  if (!kakaoProfile.email) {
+    return null;
+  }
+
+  return findUserByEmail(kakaoProfile.email);
+};
+
 const kakaoLoginByCode = async (req, res) => {
   const { code } = req.body || {};
+  const redirectUri = normalizeString(req.body?.redirectUri) || getFrontendRedirectUri();
 
   if (!code) {
     return res.status(400).json({
@@ -756,7 +827,7 @@ const kakaoLoginByCode = async (req, res) => {
   try {
     let tokenData;
     try {
-      tokenData = await getKakaoToken(code, getFrontendRedirectUri());
+      tokenData = await getKakaoToken(code, redirectUri);
     } catch (error) {
       if (error.statusCode === 500) {
         throw error;
@@ -779,52 +850,213 @@ const kakaoLoginByCode = async (req, res) => {
     }
 
     const kakaoProfile = buildKakaoProfile(kakaoUserInfo);
-    const dbUser = await findOrCreateKakaoUser(kakaoProfile);
-    const accessToken = generateAccessToken(dbUser);
+    const existingUser = await getExistingKakaoUser(kakaoProfile);
+
+    if (!existingUser) {
+      const kakaoSignupToken = generateKakaoSignupToken(kakaoProfile);
+
+      return res.status(200).json({
+        status: 200,
+        message: '카카오 회원가입 추가 정보가 필요합니다.',
+        data: {
+          isNewUser: true,
+          signupRequired: true,
+          kakaoSignupToken,
+          kakaoProfile: {
+            kakaoId: String(kakaoProfile.kakaoId),
+            email: kakaoProfile.email,
+            nickname: kakaoProfile.nickname,
+            profileImage: kakaoProfile.profileImage,
+          },
+        },
+      });
+    }
+
+    const loggedInUser = await updateUserLastLogin(existingUser.user_id);
+    const accessToken = generateAccessToken(loggedInUser);
+    const refreshToken = await issueRefreshToken(loggedInUser.user_id);
 
     return res.status(200).json({
       status: 200,
       message: '카카오 로그인 성공',
       data: {
-        access_token: accessToken,
-        user: {
-          user_id: dbUser.user_id,
-          email: dbUser.email,
-          nickname: dbUser.nickname,
-          profile_image: dbUser.profile_image,
-          role: dbUser.role,
-        },
+        isNewUser: false,
+        signupRequired: false,
+        accessToken,
+        refreshToken,
+        user: mapLoginUserResponse(loggedInUser),
       },
     });
   } catch (error) {
-  console.error('POST kakao login error:', {
-    message: error.message,
-    status: error.response?.status,
-    data: error.response?.data,
-    code: error.code,
-    stack: error.stack,
-  });
+    console.error('POST kakao login error:', {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data,
+      code: error.code,
+      stack: error.stack,
+    });
 
-  if (error.response?.status === 401) {
-    return res.status(401).json({
-      status: 401,
-      message: '카카오 인증에 실패했습니다.',
+    if (error.response?.status === 401) {
+      return res.status(401).json({
+        status: 401,
+        message: '카카오 인증에 실패했습니다.',
+      });
+    }
+
+    if (error.response?.config?.url?.includes('/v2/user/me')) {
+      return res.status(502).json({
+        status: 502,
+        message: '카카오 사용자 정보 조회에 실패했습니다.',
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '서버 내부 오류',
+    });
+  }
+};
+
+const completeKakaoSignup = async (req, res) => {
+  const kakaoSignupToken = normalizeString(req.body?.kakaoSignupToken);
+  const nickname = normalizeString(req.body?.nickname);
+  let phoneNumber = req.body?.phoneNumber === undefined || req.body?.phoneNumber === null
+    ? null
+    : normalizeString(req.body.phoneNumber);
+  const phoneVerificationToken = normalizeString(req.body?.phoneVerificationToken);
+  const termsAgreed = req.body?.termsAgreed === true;
+  const privacyAgreed = req.body?.privacyAgreed === true;
+  const marketingAgreed = req.body?.marketingAgreed === true;
+  const role = req.body?.role === undefined || req.body?.role === null || req.body?.role === ''
+    ? 'USER'
+    : normalizeString(req.body.role).toUpperCase();
+
+  if (!kakaoSignupToken) {
+    return res.status(400).json({
+      status: 400,
+      message: '카카오 회원가입 토큰이 필요합니다.',
     });
   }
 
-  if (error.response?.config?.url?.includes('/v2/user/me')) {
-    return res.status(502).json({
-      status: 502,
-      message: '카카오 사용자 정보 조회에 실패했습니다.',
+  if (!nickname) {
+    return res.status(400).json({
+      status: 400,
+      message: '닉네임을 입력해주세요.',
     });
   }
 
-  return res.status(500).json({
-    status: 500,
-    message: '서버 내부 오류',
-  });
-}
-}
+  if (!NICKNAME_PATTERN.test(nickname)) {
+    return res.status(400).json({
+      status: 400,
+      message: '닉네임은 2자 이상 12자 이하의 한글, 영문, 숫자만 사용할 수 있습니다.',
+    });
+  }
+
+  if (!termsAgreed || !privacyAgreed) {
+    return res.status(400).json({
+      status: 400,
+      message: '필수 약관에 동의해주세요.',
+    });
+  }
+
+  if (!ALLOWED_SIGNUP_ROLES.has(role)) {
+    return res.status(400).json({
+      status: 400,
+      message: '유효하지 않은 사용자 유형입니다.',
+    });
+  }
+
+  if (phoneNumber === '') {
+    phoneNumber = null;
+  }
+
+  try {
+    const kakaoProfile = verifyKakaoSignupToken(kakaoSignupToken);
+
+    if (phoneNumber) {
+      const phoneVerification = await verifyAuthPhoneVerificationToken(phoneNumber, phoneVerificationToken);
+
+      if (!phoneVerification.isValid) {
+        return res.status(400).json({
+          status: 400,
+          message: '전화번호 인증이 필요합니다.',
+        });
+      }
+
+      phoneNumber = phoneVerification.phoneNumber;
+    }
+
+    const [existingKakaoUser, existingEmailUser, duplicatedNickname] = await Promise.all([
+      findUserByKakaoId(kakaoProfile.kakaoId),
+      kakaoProfile.email ? findUserByEmail(kakaoProfile.email) : Promise.resolve(null),
+      isNicknameExists(nickname),
+    ]);
+
+    if (existingKakaoUser || existingEmailUser) {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 가입된 카카오 계정입니다.',
+      });
+    }
+
+    if (duplicatedNickname) {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 사용 중인 닉네임입니다.',
+      });
+    }
+
+    const user = await createKakaoUser({
+      kakaoId: kakaoProfile.kakaoId,
+      email: kakaoProfile.email || null,
+      nickname,
+      phoneNumber,
+      profileImage: kakaoProfile.profileImage || null,
+      role,
+      termsAgreed,
+      privacyAgreed,
+      marketingAgreed,
+    });
+    const accessToken = generateAccessToken(user);
+    const refreshToken = await issueRefreshToken(user.user_id);
+
+    return res.status(201).json({
+      status: 201,
+      message: '카카오 회원가입 성공',
+      data: {
+        accessToken,
+        refreshToken,
+        user: mapLoginUserResponse(user),
+      },
+    });
+  } catch (error) {
+    if (error.statusCode === 401) {
+      return res.status(400).json({
+        status: 400,
+        message: '카카오 회원가입 정보가 유효하지 않습니다.',
+      });
+    }
+
+    if (error.statusCode === 400) {
+      return res.status(400).json({
+        status: 400,
+        message: error.message,
+      });
+    }
+
+    if (error.code === '23505') {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 가입된 카카오 계정입니다.',
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '카카오 회원가입 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
 
 const refreshAccessToken = async (req, res) => {
   const { refreshToken } = req.body || {};
@@ -896,6 +1128,7 @@ module.exports = {
   kakaoLogin,
   kakaoCallback,
   kakaoLoginByCode,
+  completeKakaoSignup,
   refreshAccessToken,
   logout,
 };
