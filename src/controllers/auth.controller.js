@@ -6,6 +6,7 @@ const {
   findUserByEmail,
   createLocalUser,
   updateLocalUserLastLogin,
+  updateUserRole,
   isNicknameExists,
   createPasswordResetVerification,
   verifyPasswordResetVerification,
@@ -373,6 +374,49 @@ const login = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '로그인 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const updateMyRole = async (req, res) => {
+  const userId = req.user?.userId;
+  const role = normalizeString(req.body?.role).toUpperCase();
+
+  if (!userId) {
+    return res.status(401).json({
+      status: 401,
+      message: '유효하지 않거나 만료된 토큰입니다.',
+    });
+  }
+
+  if (!ALLOWED_SIGNUP_ROLES.has(role)) {
+    return res.status(400).json({
+      status: 400,
+      message: '변경할 수 없는 사용자 유형입니다.',
+    });
+  }
+
+  try {
+    const user = await updateUserRole(userId, role);
+
+    return res.status(200).json({
+      status: 200,
+      message: '사용자 유형 변경 성공',
+      data: {
+        user: mapLoginUserResponse(user),
+      },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        status: error.statusCode,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '사용자 유형 변경 중 서버 오류가 발생했습니다.',
     });
   }
 };
@@ -842,6 +886,7 @@ module.exports = {
   checkNickname,
   signup,
   login,
+  updateMyRole,
   requestAuthPhoneVerificationController,
   confirmAuthPhoneVerificationController,
   requestPasswordReset,
