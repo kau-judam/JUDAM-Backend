@@ -15,8 +15,9 @@ const createServiceError = (statusCode, message) => {
 };
 
 const PASSWORD_SALT_ROUNDS = 10;
+const DEFAULT_OCTOMO_API_URL = 'https://api.octoverse.kr/octomo/v1/public/message/exists';
 const OCTOMO_API_URL = process.env.OCTOMO_API_URL
-  || 'https://api.octoverse.kr/octomo/v1/public/message/exists';
+  || DEFAULT_OCTOMO_API_URL;
 const OCTOMO_RECEIVE_NUMBER = process.env.OCTOMO_RECEIVE_NUMBER || '1666-3538';
 
 const mapProfileResponse = (user) => ({
@@ -89,6 +90,20 @@ const generatePhoneVerificationCode = () => {
   return `JUDAM${randomNumber}`;
 };
 
+const getOctomoMessageExistsUrl = () => {
+  const trimmedUrl = (OCTOMO_API_URL || DEFAULT_OCTOMO_API_URL).trim().replace(/\/+$/, '');
+
+  if (trimmedUrl.endsWith('/public/message/exists')) {
+    return trimmedUrl;
+  }
+
+  if (trimmedUrl.endsWith('/public')) {
+    return `${trimmedUrl}/message/exists`;
+  }
+
+  return `${trimmedUrl}/public/message/exists`;
+};
+
 const requestPhoneVerification = async (userId, phoneNumber) => {
   const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
   const verificationCode = generatePhoneVerificationCode();
@@ -120,29 +135,32 @@ const checkOctomoMessageExists = async (phoneNumber, verificationCode) => {
     throw createServiceError(500, '전화번호 인증 서비스 설정이 누락되었습니다.');
   }
 
+  const octomoMessageExistsUrl = getOctomoMessageExistsUrl();
+
   try {
     const response = await axios.post(
-      OCTOMO_API_URL,
+      octomoMessageExistsUrl,
       {
         mobileNum: phoneNumber,
         text: verificationCode,
       },
       {
         headers: {
+          Accept: 'application/json',
           'Content-Type': 'application/json',
           Authorization: `Octomo ${process.env.OCTOMO_API_KEY}`,
         },
       },
     );
 
-    return response.data?.exists === true;
+    return response.data?.verified === true || response.data?.exists === true;
   } catch (error) {
     console.error('Octomo API request failed', {
       message: error.message,
       code: error.code,
       status: error.response?.status,
       data: error.response?.data,
-      url: OCTOMO_API_URL,
+      url: octomoMessageExistsUrl,
     });
 
     throw createServiceError(502, '전화번호 인증 서비스와 통신할 수 없습니다.');
