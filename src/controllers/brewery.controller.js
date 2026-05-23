@@ -5,6 +5,7 @@ const {
   approveApplication,
   rejectApplication,
 } = require('../services/brewery.service');
+const { verifyAuthPhoneVerificationToken } = require('../services/auth-phone.service');
 
 const APPLICATION_STATUSES = new Set(['PENDING', 'APPROVED', 'REJECTED']);
 
@@ -15,48 +16,99 @@ const getAuthenticatedUserId = (req) => {
 
 const sendError = (res, status, message, error) => {
   return res.status(status).json({
+    status,
     message,
     error,
   });
 };
 
+const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
+
 const createBreweryApplication = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
-  const { breweryName, licenseNumber, location, documentUrl, documentKey } = req.body || {};
-  const normalizedBreweryName = typeof breweryName === 'string' ? breweryName.trim() : '';
-  const normalizedLicenseNumber = typeof licenseNumber === 'string' ? licenseNumber.trim() : '';
-  const normalizedLocation = typeof location === 'string' && location.trim() ? location.trim() : null;
-  const normalizedDocumentUrl = typeof documentUrl === 'string' ? documentUrl.trim() : '';
-  const normalizedDocumentKey = typeof documentKey === 'string' && documentKey.trim() ? documentKey.trim() : null;
+  const {
+    businessNumber,
+    licenseNumber,
+    breweryName,
+    businessAddress,
+    businessAddressDetail,
+    location,
+    phoneNumber,
+    phoneVerificationToken,
+    documentUrl,
+    documentKey,
+  } = req.body || {};
+  const normalizedBusinessNumber = normalizeString(businessNumber || licenseNumber);
+  const normalizedBreweryName = normalizeString(breweryName);
+  const normalizedBusinessAddress = normalizeString(businessAddress || location);
+  const normalizedBusinessAddressDetail = normalizeString(businessAddressDetail) || null;
+  const normalizedPhoneNumber = normalizeString(phoneNumber);
+  const normalizedPhoneVerificationToken = normalizeString(phoneVerificationToken);
+  const normalizedDocumentUrl = normalizeString(documentUrl);
+  const normalizedDocumentKey = normalizeString(documentKey) || null;
 
   if (!userId) {
     return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
   }
 
-  if (!normalizedBreweryName || !normalizedLicenseNumber) {
+  if (
+    !normalizedBusinessNumber
+    || !normalizedBreweryName
+    || !normalizedBusinessAddress
+    || !normalizedPhoneNumber
+    || !normalizedPhoneVerificationToken
+  ) {
     return sendError(
       res,
       400,
       '양조장 인증 신청 입력값이 올바르지 않습니다.',
-      'breweryName, licenseNumber는 필수입니다.',
+      'businessNumber, breweryName, businessAddress, phoneNumber, phoneVerificationToken은 필수입니다.',
     );
   }
 
-  if (!normalizedDocumentUrl) {
+  if (!req.file && !normalizedDocumentUrl) {
     return sendError(
       res,
       400,
-      '증빙서류 파일 URL이 필요합니다.',
-      'documentUrl은 필수입니다.',
+      '사업자등록증 파일을 첨부해주세요.',
+      'businessLicense는 필수입니다.',
     );
   }
 
   try {
+    let phoneVerification;
+
+    try {
+      phoneVerification = await verifyAuthPhoneVerificationToken(
+        normalizedPhoneNumber,
+        normalizedPhoneVerificationToken,
+      );
+    } catch (error) {
+      if (error.statusCode === 400) {
+        return res.status(400).json({
+          status: 400,
+          message: '전화번호 인증이 필요합니다.',
+        });
+      }
+
+      throw error;
+    }
+
+    if (!phoneVerification.isValid) {
+      return res.status(400).json({
+        status: 400,
+        message: '전화번호 인증이 필요합니다.',
+      });
+    }
+
     const application = await createApplication({
       userId,
       breweryName: normalizedBreweryName,
-      licenseNumber: normalizedLicenseNumber,
-      location: normalizedLocation,
+      licenseNumber: normalizedBusinessNumber,
+      location: normalizedBusinessAddress,
+      businessAddressDetail: normalizedBusinessAddressDetail,
+      phoneNumber: phoneVerification.phoneNumber,
+      businessLicenseFile: req.file,
       documentUrl: normalizedDocumentUrl,
       documentKey: normalizedDocumentKey,
     });
@@ -123,8 +175,6 @@ const getMyBreweryApplication = async (req, res) => {
 
   try {
     const application = await getApplicationByUserId(userId);
-    console.log('getMyBreweryApplication response keys:', Object.keys(application));
-    console.log('getMyBreweryApplication response:', application);
 
     return res.status(200).json({
       status: 200,
@@ -132,6 +182,14 @@ const getMyBreweryApplication = async (req, res) => {
       data: application,
     });
   } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(200).json({
+        status: 200,
+        message: '양조장 인증 신청 내역이 없습니다.',
+        data: null,
+      });
+    }
+
     return sendError(
       res,
       error.statusCode || 500,
