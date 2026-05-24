@@ -5,10 +5,12 @@ const {
   findUserByKakaoId,
   findUserByEmail,
   createKakaoUser,
+  updateKakaoUserProfileCompletion,
   createLocalUser,
   updateLocalUserLastLogin,
   updateUserLastLogin,
   updateUserRole,
+  isNicknameUsedByAnotherUser,
   isNicknameExists,
   createPasswordResetVerification,
   verifyPasswordResetVerification,
@@ -819,6 +821,39 @@ const getExistingKakaoUser = async (kakaoProfile) => {
   return findUserByEmail(kakaoProfile.email);
 };
 
+const hasEmptyProfileValue = (value) => value === null
+  || value === undefined
+  || (typeof value === 'string' && value.trim() === '');
+
+const isIncompleteKakaoUserProfile = (user) => (
+  hasEmptyProfileValue(user?.email)
+  || hasEmptyProfileValue(user?.phone_number ?? user?.phoneNumber)
+);
+
+const buildKakaoSignupProfile = (kakaoProfile, existingUser = null) => ({
+  kakaoId: kakaoProfile.kakaoId,
+  email: kakaoProfile.email || existingUser?.email || null,
+  nickname: kakaoProfile.nickname || existingUser?.nickname || null,
+  profileImage: kakaoProfile.profileImage || existingUser?.profile_image || null,
+  ...(existingUser ? { existingUserId: existingUser.user_id } : {}),
+});
+
+const buildKakaoSignupRequiredData = (kakaoProfile, kakaoSignupToken, extraData = {}) => ({
+  isNewUser: true,
+  signupRequired: true,
+  ...extraData,
+  email: kakaoProfile.email,
+  nickname: kakaoProfile.nickname,
+  profileImage: kakaoProfile.profileImage,
+  kakaoSignupToken,
+  kakaoProfile: {
+    kakaoId: String(kakaoProfile.kakaoId),
+    email: kakaoProfile.email,
+    nickname: kakaoProfile.nickname,
+    profileImage: kakaoProfile.profileImage,
+  },
+});
+
 const kakaoLoginByCode = async (req, res) => {
   const { code } = req.body || {};
   const redirectUri = normalizeString(req.body?.redirectUri) || getFrontendRedirectUri();
@@ -859,25 +894,27 @@ const kakaoLoginByCode = async (req, res) => {
     const existingUser = await getExistingKakaoUser(kakaoProfile);
 
     if (!existingUser) {
-      const kakaoSignupToken = generateKakaoSignupToken(kakaoProfile);
+      const signupProfile = buildKakaoSignupProfile(kakaoProfile);
+      const kakaoSignupToken = generateKakaoSignupToken(signupProfile);
 
       return res.status(200).json({
         status: 200,
         message: '카카오 회원가입 추가 정보가 필요합니다.',
-        data: {
-          isNewUser: true,
-          signupRequired: true,
-          email: kakaoProfile.email,
-          nickname: kakaoProfile.nickname,
-          profileImage: kakaoProfile.profileImage,
-          kakaoSignupToken,
-          kakaoProfile: {
-            kakaoId: String(kakaoProfile.kakaoId),
-            email: kakaoProfile.email,
-            nickname: kakaoProfile.nickname,
-            profileImage: kakaoProfile.profileImage,
-          },
-        },
+        data: buildKakaoSignupRequiredData(signupProfile, kakaoSignupToken),
+      });
+    }
+
+    if (isIncompleteKakaoUserProfile(existingUser)) {
+      const signupProfile = buildKakaoSignupProfile(kakaoProfile, existingUser);
+      const kakaoSignupToken = generateKakaoSignupToken(signupProfile);
+
+      return res.status(200).json({
+        status: 200,
+        message: '카카오 회원가입 추가 정보가 필요합니다.',
+        data: buildKakaoSignupRequiredData(signupProfile, kakaoSignupToken, {
+          reason: 'INCOMPLETE_PROFILE',
+          existingUserId: String(existingUser.user_id),
+        }),
       });
     }
 
@@ -983,6 +1020,7 @@ const completeKakaoSignup = async (req, res) => {
   try {
     const kakaoProfile = verifyKakaoSignupToken(kakaoSignupToken);
     const kakaoEmail = kakaoProfile.email ? normalizeString(kakaoProfile.email).toLowerCase() : '';
+    const existingUserId = kakaoProfile.existingUserId ? String(kakaoProfile.existingUserId) : null;
 
     if (requestedEmail && requestedEmail !== kakaoEmail) {
       return res.status(400).json({
@@ -1007,10 +1045,19 @@ const completeKakaoSignup = async (req, res) => {
     const [existingKakaoUser, existingEmailUser, duplicatedNickname] = await Promise.all([
       findUserByKakaoId(kakaoProfile.kakaoId),
       kakaoProfile.email ? findUserByEmail(kakaoProfile.email) : Promise.resolve(null),
-      isNicknameExists(nickname),
+      existingUserId ? isNicknameUsedByAnotherUser(nickname, existingUserId) : isNicknameExists(nickname),
     ]);
 
-    if (existingKakaoUser || existingEmailUser) {
+    if (
+      (
+        existingKakaoUser
+        && (!existingUserId || String(existingKakaoUser.user_id) !== existingUserId)
+      )
+      || (
+        existingEmailUser
+        && (!existingUserId || String(existingEmailUser.user_id) !== existingUserId)
+      )
+    ) {
       return res.status(409).json({
         status: 409,
         message: '이미 가입된 카카오 계정입니다.',
@@ -1024,7 +1071,7 @@ const completeKakaoSignup = async (req, res) => {
       });
     }
 
-    const user = await createKakaoUser({
+    const userPayload = {
       kakaoId: kakaoProfile.kakaoId,
       email: kakaoProfile.email || null,
       nickname,
@@ -1034,7 +1081,13 @@ const completeKakaoSignup = async (req, res) => {
       termsAgreed,
       privacyAgreed,
       marketingAgreed,
-    });
+    };
+    const user = existingUserId
+      ? await updateKakaoUserProfileCompletion({
+        ...userPayload,
+        userId: existingUserId,
+      })
+      : await createKakaoUser(userPayload);
     const accessToken = generateAccessToken(user);
     const refreshToken = await issueRefreshToken(user.user_id);
 

@@ -49,14 +49,20 @@ const generateRefreshToken = (userId) => {
 };
 
 const generateKakaoSignupToken = (kakaoProfile) => {
+  const payload = {
+    purpose: 'kakao_signup',
+    kakaoId: String(kakaoProfile.kakaoId),
+    email: kakaoProfile.email,
+    nickname: kakaoProfile.nickname,
+    profileImage: kakaoProfile.profileImage,
+  };
+
+  if (kakaoProfile.existingUserId) {
+    payload.existingUserId = String(kakaoProfile.existingUserId);
+  }
+
   return jwt.sign(
-    {
-      purpose: 'kakao_signup',
-      kakaoId: String(kakaoProfile.kakaoId),
-      email: kakaoProfile.email,
-      nickname: kakaoProfile.nickname,
-      profileImage: kakaoProfile.profileImage,
-    },
+    payload,
     getJwtSecret(),
     {
       expiresIn: KAKAO_SIGNUP_TOKEN_EXPIRES_IN,
