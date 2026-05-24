@@ -735,6 +735,15 @@ const validateSulbtiPayload = (payload) => {
   };
 };
 
+const SULBTI_SURVEY_QUESTION_KEYS = Array.from({ length: 13 }, (_, index) => `q${index + 1}`);
+
+const hasSulbtiSurveyQuestionKeys = (payload) => (
+  payload
+  && typeof payload === 'object'
+  && !Array.isArray(payload)
+  && SULBTI_SURVEY_QUESTION_KEYS.some((key) => Object.prototype.hasOwnProperty.call(payload, key))
+);
+
 const isSurveyConvertPayload = (payload) => {
   if (Array.isArray(payload)) {
     return true;
@@ -748,9 +757,71 @@ const isSurveyConvertPayload = (payload) => {
     return false;
   }
 
+  if (hasSulbtiSurveyQuestionKeys(payload)) {
+    return true;
+  }
+
   return Object.prototype.hasOwnProperty.call(payload, 'answers')
     || Object.prototype.hasOwnProperty.call(payload, 'surveyResponses')
     || Object.prototype.hasOwnProperty.call(payload, 'responses');
+};
+
+const hasValidSulbtiSurveyAnswer = (payload, key) => (
+  Object.prototype.hasOwnProperty.call(payload, key)
+  && payload[key] !== undefined
+  && payload[key] !== null
+);
+
+const assertCompleteSulbtiSurveyAnswers = (normalizedPayload) => {
+  const hasAllAnswers = SULBTI_SURVEY_QUESTION_KEYS.every(
+    (key) => hasValidSulbtiSurveyAnswer(normalizedPayload, key),
+  );
+
+  if (!hasAllAnswers) {
+    throw createServiceError(400, '술BTI 설문 답변은 q1부터 q13까지 모두 필요합니다.');
+  }
+};
+
+const normalizeSulbtiSurveyAnswers = (payload) => {
+  if (hasSulbtiSurveyQuestionKeys(payload)) {
+    const normalizedPayload = SULBTI_SURVEY_QUESTION_KEYS.reduce((acc, key) => {
+      if (Object.prototype.hasOwnProperty.call(payload, key)) {
+        acc[key] = payload[key];
+      }
+
+      return acc;
+    }, {});
+
+    assertCompleteSulbtiSurveyAnswers(normalizedPayload);
+    return normalizedPayload;
+  }
+
+  const answerItems = Array.isArray(payload)
+    ? payload
+    : payload?.answers || payload?.surveyResponses || payload?.responses;
+
+  if (!Array.isArray(answerItems)) {
+    throw createServiceError(400, '술BTI 설문 답변은 q1부터 q13까지 모두 필요합니다.');
+  }
+
+  const normalizedPayload = {};
+
+  answerItems.forEach((item) => {
+    if (!item || typeof item !== 'object') {
+      return;
+    }
+
+    const questionNumber = Number(item.questionId);
+
+    if (!Number.isInteger(questionNumber) || questionNumber < 1 || questionNumber > 13) {
+      return;
+    }
+
+    normalizedPayload[`q${questionNumber}`] = item.answer;
+  });
+
+  assertCompleteSulbtiSurveyAnswers(normalizedPayload);
+  return normalizedPayload;
 };
 
 const extractSulbtiSurveyResult = (aiResponse) => {
@@ -814,7 +885,8 @@ const saveSulbtiSurveyResult = async (userId, surveyResult) => {
 };
 
 const convertAndSaveMySulbtiSurvey = async (userId, payload) => {
-  const aiResponse = await convertSurvey(payload, userId);
+  const normalizedPayload = normalizeSulbtiSurveyAnswers(payload);
+  const aiResponse = await convertSurvey(normalizedPayload, userId);
   const surveyResult = extractSulbtiSurveyResult(aiResponse);
 
   return saveSulbtiSurveyResult(userId, surveyResult);

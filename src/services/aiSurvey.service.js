@@ -35,6 +35,13 @@ const convertSurvey = async (surveyResponses, userId) => {
     }
 
     if (!response.ok) {
+      if (response.status === 422) {
+        const error = new Error('술BTI 설문 답변 형식이 올바르지 않습니다.');
+        error.status = 400;
+        error.data = data;
+        throw error;
+      }
+
       const error = new Error(data?.message || data?.detail || 'AI 서버 요청에 실패했습니다.');
       error.status = response.status || 502;
       error.data = data;
