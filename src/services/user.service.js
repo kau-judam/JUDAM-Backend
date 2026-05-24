@@ -114,6 +114,80 @@ const createKakaoUser = async ({
   return rows[0];
 };
 
+const updateKakaoUserProfileCompletion = async ({
+  userId,
+  kakaoId,
+  email,
+  nickname,
+  phoneNumber,
+  profileImage,
+  role = 'USER',
+  termsAgreed = false,
+  privacyAgreed = false,
+  marketingAgreed = false,
+}) => {
+  const { rows } = await pool.query(
+    `
+      UPDATE users
+      SET
+        email = $1,
+        nickname = $2,
+        phone_number = $3,
+        role = $4,
+        kakao_id = $5,
+        profile_image = $6,
+        terms_agreed = $7,
+        privacy_agreed = $8,
+        marketing_agreed = $9,
+        terms_agreed_at = CASE
+          WHEN $7 THEN COALESCE(terms_agreed_at, CURRENT_TIMESTAMP)
+          ELSE terms_agreed_at
+        END,
+        privacy_agreed_at = CASE
+          WHEN $8 THEN COALESCE(privacy_agreed_at, CURRENT_TIMESTAMP)
+          ELSE privacy_agreed_at
+        END,
+        marketing_agreed_at = CASE
+          WHEN $9 THEN COALESCE(marketing_agreed_at, CURRENT_TIMESTAMP)
+          ELSE NULL
+        END,
+        last_login_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $10
+        AND deleted_at IS NULL
+      RETURNING
+        user_id,
+        email,
+        nickname,
+        phone_number,
+        role,
+        provider,
+        kakao_id,
+        profile_image,
+        marketing_agreed,
+        last_login_at
+    `,
+    [
+      email,
+      nickname,
+      phoneNumber,
+      role,
+      kakaoId,
+      profileImage,
+      termsAgreed,
+      privacyAgreed,
+      marketingAgreed,
+      userId,
+    ],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(404, 'user not found');
+  }
+
+  return rows[0];
+};
+
 const createLocalUser = async ({
   email,
   passwordHash,
@@ -600,6 +674,7 @@ module.exports = {
   findUserByKakaoId,
   findUserByEmail,
   createKakaoUser,
+  updateKakaoUserProfileCompletion,
   createLocalUser,
   updateKakaoUserLastLogin,
   updateLocalUserLastLogin,
@@ -609,6 +684,7 @@ module.exports = {
   findUserById,
   updateUserProfile,
   deleteUserAccount,
+  isNicknameUsedByAnotherUser,
   isNicknameExists,
   createPasswordResetVerification,
   verifyPasswordResetVerification,
