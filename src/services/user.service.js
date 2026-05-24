@@ -389,6 +389,23 @@ const findUserById = async (userId) => {
   return rows[0] || null;
 };
 
+const findUserTasteVectorById = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        user_id,
+        taste_vector
+      FROM users
+      WHERE user_id = $1
+        AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  return rows[0] || null;
+};
+
 const createServiceError = (statusCode, message) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -682,6 +699,7 @@ module.exports = {
   updateUserRole,
   findOrCreateKakaoUser,
   findUserById,
+  findUserTasteVectorById,
   updateUserProfile,
   deleteUserAccount,
   isNicknameUsedByAnotherUser,

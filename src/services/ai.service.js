@@ -141,6 +141,38 @@ const requestAiChat = async ({ message, userId, history }) => {
   }
 };
 
+const requestAiRecommend = async ({ tasteVector, pool }) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/recommend`, {
+      taste_vector: tasteVector,
+      pool,
+    }, {
+      timeout: 30000,
+    });
+
+    return response.data;
+  } catch (error) {
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
 const generateAiImageAndUpload = async ({ payload, userId }) => {
   const baseUrl = getAiServerBaseUrl();
 
@@ -190,5 +222,6 @@ const generateAiImageAndUpload = async ({ payload, userId }) => {
 module.exports = {
   checkAiServerHealth,
   requestAiChat,
+  requestAiRecommend,
   generateAiImageAndUpload,
 };
