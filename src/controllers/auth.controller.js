@@ -100,12 +100,22 @@ const buildKakaoAuthUrl = (redirectUri, state) => {
   return kakaoAuthUrl.toString();
 };
 
-const encodeKakaoState = ({ appRedirectUri }) => {
-  if (!appRedirectUri) {
+const encodeKakaoState = ({ appRedirectUri, state }) => {
+  const payload = {};
+
+  if (appRedirectUri) {
+    payload.appRedirectUri = appRedirectUri;
+  }
+
+  if (state) {
+    payload.state = state;
+  }
+
+  if (Object.keys(payload).length === 0) {
     return null;
   }
 
-  return Buffer.from(JSON.stringify({ appRedirectUri })).toString('base64url');
+  return Buffer.from(JSON.stringify(payload)).toString('base64url');
 };
 
 const getAppRedirectUriFromState = (state) => {
@@ -730,10 +740,13 @@ const resetPassword = async (req, res) => {
 
 const kakaoLoginUrl = (req, res) => {
   const redirectUri = normalizeString(req.query?.redirectUri) || getFrontendRedirectUri() || getBackendRedirectUri();
-  const appRedirectUri = normalizeString(req.query?.appRedirectUri);
-  const state = appRedirectUri
-    ? encodeKakaoState({ appRedirectUri })
-    : normalizeString(req.query?.state);
+  const appRedirectUri = normalizeString(req.query?.appRedirectUri)
+    || process.env.KAKAO_APP_REDIRECT_URI
+    || DEFAULT_KAKAO_APP_REDIRECT_URI;
+  const state = encodeKakaoState({
+    appRedirectUri,
+    state: normalizeString(req.query?.state),
+  });
 
   if (!process.env.KAKAO_REST_API_KEY || !redirectUri) {
     return res.status(500).json({
@@ -751,6 +764,7 @@ const kakaoLoginUrl = (req, res) => {
       kakaoLoginUrl: kakaoLoginUrlValue,
       url: kakaoLoginUrlValue,
       redirectUri,
+      appRedirectUri,
     },
   });
 };
