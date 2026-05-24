@@ -1,6 +1,7 @@
 const {
   checkAiServerHealth,
   requestAiChat,
+  generateAiImageAndUpload,
 } = require('../services/ai.service');
 
 const getAiHealth = async (req, res) => {
@@ -75,7 +76,44 @@ const postAiChat = async (req, res) => {
   }
 };
 
+const postAiImageGenerate = async (req, res) => {
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    return res.status(401).json({
+      status: 401,
+      message: '유효하지 않거나 만료된 토큰입니다.',
+    });
+  }
+
+  try {
+    const data = await generateAiImageAndUpload({
+      payload: req.body || {},
+      userId,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: 'AI 이미지 생성 성공',
+      data,
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        status: error.statusCode,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: 'AI 이미지 생성 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 module.exports = {
   getAiHealth,
   postAiChat,
+  postAiImageGenerate,
 };

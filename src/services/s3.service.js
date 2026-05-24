@@ -9,8 +9,9 @@ if (process.env.AWS_ACCESS_KEY_ID) {
 }
 const s3 = new S3Client(s3Config);
 
-const uploadFileToS3 = async (buffer, originalname, mimetype, userId) => {
-  const key = `uploads/${userId}/${Date.now()}-${originalname}`;
+const getS3FileUrl = (key) => `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+
+const uploadBufferToS3 = async (buffer, key, mimetype) => {
   const command = new PutObjectCommand({
     Bucket: process.env.AWS_S3_BUCKET,
     Key: key,
@@ -19,7 +20,18 @@ const uploadFileToS3 = async (buffer, originalname, mimetype, userId) => {
   });
 
   await s3.send(command);
-  return `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+
+  return {
+    key,
+    url: getS3FileUrl(key),
+  };
 };
 
-module.exports = { uploadFileToS3 };
+const uploadFileToS3 = async (buffer, originalname, mimetype, userId) => {
+  const key = `uploads/${userId}/${Date.now()}-${originalname}`;
+  const { url } = await uploadBufferToS3(buffer, key, mimetype);
+
+  return url;
+};
+
+module.exports = { uploadFileToS3, uploadBufferToS3 };
