@@ -6,6 +6,7 @@ const {
   isNicknameExists,
 } = require('./user.service');
 const { uploadFileToS3 } = require('./s3.service');
+const { convertSurvey } = require('./aiSurvey.service');
 const pool = require('../config/db');
 
 const createServiceError = (statusCode, message) => {
@@ -508,15 +509,30 @@ const getLatestSulbti = async (userId) => {
   const { rows } = await pool.query(
     `
       SELECT
+        u.taste_vector,
+        u.bti_code,
+        u.character_name,
+        u.alcohol_label,
+        u.updated_at AS user_updated_at,
         r.result_id,
         r.created_at,
         t.type_code,
         t.type_name,
         t.description
-      FROM sul_bti_results r
+      FROM users u
+      LEFT JOIN LATERAL (
+        SELECT
+          result_id,
+          type_id,
+          created_at
+        FROM sul_bti_results
+        WHERE user_id = u.user_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) r ON TRUE
       LEFT JOIN sul_bti_types t ON r.type_id = t.type_id
-      WHERE r.user_id = $1
-      ORDER BY r.created_at DESC
+      WHERE u.user_id = $1
+        AND u.deleted_at IS NULL
       LIMIT 1
     `,
     [userId],
@@ -524,7 +540,15 @@ const getLatestSulbti = async (userId) => {
 
   const latestResult = rows[0];
 
-  if (!latestResult) {
+  const hasResult = Boolean(
+    latestResult?.result_id
+    || latestResult?.bti_code
+    || latestResult?.character_name
+    || latestResult?.alcohol_label
+    || latestResult?.taste_vector,
+  );
+
+  if (!hasResult) {
     return {
       hasResult: false,
       type: null,
@@ -536,9 +560,9 @@ const getLatestSulbti = async (userId) => {
 
   return {
     hasResult: true,
-    type: latestResult.type_code || null,
-    title: latestResult.type_name || null,
-    summary: latestResult.description || null,
+    type: latestResult.type_code || latestResult.bti_code || null,
+    title: latestResult.type_name || latestResult.character_name || null,
+    summary: latestResult.description || latestResult.alcohol_label || null,
     tags: [],
   };
 };
@@ -564,27 +588,49 @@ const getEmptySulbtiResponse = () => ({
   title: null,
   description: null,
   scores: null,
+  tasteVector: null,
+  btiCode: null,
+  characterName: null,
+  alcoholLabel: null,
   tags: [],
   createdAt: null,
   updatedAt: null,
 });
 
-const mapSulbtiResponse = (row) => ({
-  hasResult: true,
-  type: row.type_code || null,
-  title: row.type_name || null,
-  description: row.description || null,
-  scores: {
-    sweetness: Number(row.sweetness_score),
-    body: Number(row.body_score),
-    carbonation: Number(row.carbonation_score),
-    flavor: Number(row.flavor_score),
-    abv: Number(row.abv_score),
-  },
-  tags: [],
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
+const hasSulbtiScoreColumns = (row) => [
+  'sweetness_score',
+  'body_score',
+  'carbonation_score',
+  'flavor_score',
+  'abv_score',
+].every((field) => row[field] !== null && row[field] !== undefined);
+
+const mapSulbtiResponse = (row) => {
+  const scores = hasSulbtiScoreColumns(row)
+    ? {
+      sweetness: Number(row.sweetness_score),
+      body: Number(row.body_score),
+      carbonation: Number(row.carbonation_score),
+      flavor: Number(row.flavor_score),
+      abv: Number(row.abv_score),
+    }
+    : null;
+
+  return {
+    hasResult: true,
+    type: row.type_code || row.bti_code || null,
+    title: row.type_name || row.character_name || null,
+    description: row.description || row.alcohol_label || null,
+    scores,
+    tasteVector: row.taste_vector || null,
+    btiCode: row.bti_code || row.type_code || null,
+    characterName: row.character_name || row.type_name || null,
+    alcoholLabel: row.alcohol_label || null,
+    tags: [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.user_updated_at || null,
+  };
+};
 
 const findSulbtiTypeByCode = async (typeCode) => {
   const { rows } = await pool.query(
@@ -608,6 +654,11 @@ const getMySulbti = async (userId) => {
   const { rows } = await pool.query(
     `
       SELECT
+        u.taste_vector,
+        u.bti_code,
+        u.character_name,
+        u.alcohol_label,
+        u.updated_at AS user_updated_at,
         r.result_id,
         r.user_id,
         r.type_id,
@@ -621,19 +672,30 @@ const getMySulbti = async (userId) => {
         t.type_code,
         t.type_name,
         t.description
-      FROM sul_bti_results r
+      FROM users u
+      LEFT JOIN sul_bti_results r ON r.user_id = u.user_id
       LEFT JOIN sul_bti_types t ON r.type_id = t.type_id
-      WHERE r.user_id = $1
+      WHERE u.user_id = $1
+        AND u.deleted_at IS NULL
       LIMIT 1
     `,
     [userId],
   );
 
-  if (!rows[0]) {
+  const row = rows[0];
+  const hasResult = Boolean(
+    row?.result_id
+    || row?.bti_code
+    || row?.character_name
+    || row?.alcohol_label
+    || row?.taste_vector,
+  );
+
+  if (!hasResult) {
     return getEmptySulbtiResponse();
   }
 
-  return mapSulbtiResponse(rows[0]);
+  return mapSulbtiResponse(row);
 };
 
 const validateSulbtiScore = (score) => (
@@ -673,7 +735,96 @@ const validateSulbtiPayload = (payload) => {
   };
 };
 
+const isSurveyConvertPayload = (payload) => {
+  if (Array.isArray(payload)) {
+    return true;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+
+  if (payload.type !== undefined) {
+    return false;
+  }
+
+  return Object.prototype.hasOwnProperty.call(payload, 'answers')
+    || Object.prototype.hasOwnProperty.call(payload, 'surveyResponses')
+    || Object.prototype.hasOwnProperty.call(payload, 'responses');
+};
+
+const extractSulbtiSurveyResult = (aiResponse) => {
+  const result = aiResponse?.data || aiResponse?.result || aiResponse || {};
+  const tasteVector = result.taste_vector || result.tasteVector;
+  const btiCode = result.bti_code || result.btiCode;
+  const characterName = result.character_name || result.characterName;
+  const alcoholLabel = result.alcohol_label || result.alcoholLabel;
+
+  if (!tasteVector || !btiCode || !characterName || !alcoholLabel) {
+    throw createServiceError(502, 'AI 술BTI 변환 결과가 올바르지 않습니다.');
+  }
+
+  return {
+    tasteVector,
+    btiCode,
+    characterName,
+    alcoholLabel,
+  };
+};
+
+const mapSulbtiSurveySaveResponse = (row) => ({
+  tasteVector: row.taste_vector,
+  btiCode: row.bti_code,
+  characterName: row.character_name,
+  alcoholLabel: row.alcohol_label,
+});
+
+const saveSulbtiSurveyResult = async (userId, surveyResult) => {
+  const { rows } = await pool.query(
+    `
+      UPDATE users
+      SET
+        taste_vector = $1::jsonb,
+        bti_code = $2,
+        character_name = $3,
+        alcohol_label = $4,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $5
+        AND deleted_at IS NULL
+      RETURNING
+        taste_vector,
+        bti_code,
+        character_name,
+        alcohol_label
+    `,
+    [
+      JSON.stringify(surveyResult.tasteVector),
+      surveyResult.btiCode,
+      surveyResult.characterName,
+      surveyResult.alcoholLabel,
+      userId,
+    ],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+  }
+
+  return mapSulbtiSurveySaveResponse(rows[0]);
+};
+
+const convertAndSaveMySulbtiSurvey = async (userId, payload) => {
+  const aiResponse = await convertSurvey(payload, userId);
+  const surveyResult = extractSulbtiSurveyResult(aiResponse);
+
+  return saveSulbtiSurveyResult(userId, surveyResult);
+};
+
 const saveMySulbti = async (userId, payload) => {
+  if (isSurveyConvertPayload(payload)) {
+    return convertAndSaveMySulbtiSurvey(userId, payload);
+  }
+
   const {
     typeCode,
     sweetnessScore,
