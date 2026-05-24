@@ -933,6 +933,7 @@ const kakaoLoginByCode = async (req, res) => {
 
 const completeKakaoSignup = async (req, res) => {
   const kakaoSignupToken = normalizeString(req.body?.kakaoSignupToken);
+  const requestedEmail = normalizeString(req.body?.email).toLowerCase();
   const nickname = normalizeString(req.body?.nickname);
   let phoneNumber = req.body?.phoneNumber === undefined || req.body?.phoneNumber === null
     ? null
@@ -986,6 +987,14 @@ const completeKakaoSignup = async (req, res) => {
 
   try {
     const kakaoProfile = verifyKakaoSignupToken(kakaoSignupToken);
+    const kakaoEmail = kakaoProfile.email ? normalizeString(kakaoProfile.email).toLowerCase() : '';
+
+    if (requestedEmail && requestedEmail !== kakaoEmail) {
+      return res.status(400).json({
+        status: 400,
+        message: '카카오 이메일 정보가 일치하지 않습니다.',
+      });
+    }
 
     if (phoneNumber) {
       const phoneVerification = await verifyAuthPhoneVerificationToken(phoneNumber, phoneVerificationToken);
@@ -1040,7 +1049,10 @@ const completeKakaoSignup = async (req, res) => {
       data: {
         accessToken,
         refreshToken,
-        user: mapLoginUserResponse(user),
+        user: {
+          ...mapLoginUserResponse(user),
+          marketingAgreed: Boolean(user.marketing_agreed),
+        },
       },
     });
   } catch (error) {
