@@ -2,7 +2,6 @@ const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { getKakaoToken, getKakaoUserInfo } = require('../services/kakao.service');
 const {
-  findOrCreateKakaoUser,
   findUserByKakaoId,
   findUserByEmail,
   createKakaoUser,
@@ -42,6 +41,7 @@ const NICKNAME_PATTERN = /^[가-힣A-Za-z0-9]{2,12}$/u;
 const PASSWORD_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
 const ALLOWED_SIGNUP_ROLES = new Set(['USER', 'BREWERY_PENDING']);
 const PASSWORD_RESET_EXPIRES_IN_MINUTES = 5;
+const DEFAULT_KAKAO_APP_REDIRECT_URI = 'judamfrontend://kakao/callback';
 
 const normalizeString = (value) => {
   if (typeof value !== 'string') {
@@ -120,6 +120,12 @@ const getAppRedirectUriFromState = (state) => {
     return null;
   }
 };
+
+const getKakaoCallbackRedirectUri = (state) => (
+  getAppRedirectUriFromState(state)
+  || process.env.KAKAO_APP_REDIRECT_URI
+  || DEFAULT_KAKAO_APP_REDIRECT_URI
+);
 
 const appendQueryParams = (baseUrl, params) => {
   const url = new URL(baseUrl);
@@ -766,48 +772,23 @@ const kakaoLogin = (req, res) => {
 };
 
 const kakaoCallback = async (req, res) => {
-  const { code, state } = req.query;
+  const { code, state, error, error_description: errorDescription } = req.query;
+  const appRedirectUri = getKakaoCallbackRedirectUri(state);
+
+  if (error) {
+    return res.redirect(appendQueryParams(appRedirectUri, {
+      error,
+      errorDescription,
+    }));
+  }
 
   if (!code) {
-    return sendError(res, 400, 'Authorization code is required', 'code query parameter is missing');
+    return res.redirect(appendQueryParams(appRedirectUri, {
+      error: 'missing_code',
+    }));
   }
 
-  const appRedirectUri = getAppRedirectUriFromState(state) || process.env.KAKAO_APP_REDIRECT_URI;
-
-  if (appRedirectUri) {
-    return res.redirect(appendQueryParams(appRedirectUri, { code }));
-  }
-
-  try {
-    const tokenData = await getKakaoToken(code, getBackendRedirectUri());
-    const kakaoUserInfo = await getKakaoUserInfo(tokenData.access_token);
-    const kakaoProfile = buildKakaoProfile(kakaoUserInfo);
-    const dbUser = await findOrCreateKakaoUser(kakaoProfile);
-    const accessToken = generateAccessToken(dbUser);
-    const refreshToken = await issueRefreshToken(dbUser.user_id);
-
-    return res.status(200).json({
-      message: 'kakao login success',
-      accessToken,
-      refreshToken,
-      user: {
-        userId: dbUser.user_id,
-        email: dbUser.email,
-        nickname: dbUser.nickname,
-        role: dbUser.role,
-        provider: dbUser.provider,
-        profileImage: dbUser.profile_image,
-        lastLoginAt: dbUser.last_login_at,
-      },
-    });
-  } catch (error) {
-    return sendError(
-      res,
-      error.statusCode || error.response?.status || 500,
-      'kakao login failed',
-      error.response?.data || error.detail || error.message || String(error),
-    );
-  }
+  return res.redirect(appendQueryParams(appRedirectUri, { code }));
 };
 
 const getExistingKakaoUser = async (kakaoProfile) => {
