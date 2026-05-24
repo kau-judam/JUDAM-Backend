@@ -735,8 +735,9 @@ const validateSulbtiPayload = (payload) => {
   };
 };
 
-const SULBTI_SURVEY_QUESTION_KEYS = Array.from({ length: 13 }, (_, index) => `q${index + 1}`);
-const SULBTI_SURVEY_SCORE_ERROR_MESSAGE = '술BTI 설문 답변은 q1부터 q13까지 1~5 점수로 모두 필요합니다.';
+const SULBTI_SURVEY_QUESTION_KEYS = Array.from({ length: 25 }, (_, index) => `q${index + 1}`);
+const SULBTI_SURVEY_MULTI_SCORE_KEYS = ['q24', 'q25'];
+const SULBTI_SURVEY_FORMAT_ERROR_MESSAGE = '술BTI 설문 답변 형식이 올바르지 않습니다.';
 
 const hasSulbtiSurveyQuestionKeys = (payload) => (
   payload
@@ -779,10 +780,20 @@ const normalizeSulbtiSurveyScore = (value) => {
     || score < 1
     || score > 5
   ) {
-    throw createServiceError(400, SULBTI_SURVEY_SCORE_ERROR_MESSAGE);
+    throw createServiceError(400, SULBTI_SURVEY_FORMAT_ERROR_MESSAGE);
   }
 
   return score;
+};
+
+const normalizeSulbtiSurveyMultiScore = (value) => {
+  const values = Array.isArray(value) ? value : [value];
+
+  if (values.length === 0) {
+    throw createServiceError(400, SULBTI_SURVEY_FORMAT_ERROR_MESSAGE);
+  }
+
+  return values.map(normalizeSulbtiSurveyScore);
 };
 
 const assertCompleteSulbtiSurveyAnswers = (normalizedPayload) => {
@@ -791,15 +802,23 @@ const assertCompleteSulbtiSurveyAnswers = (normalizedPayload) => {
   );
 
   if (!hasAllAnswers) {
-    throw createServiceError(400, SULBTI_SURVEY_SCORE_ERROR_MESSAGE);
+    throw createServiceError(400, SULBTI_SURVEY_FORMAT_ERROR_MESSAGE);
   }
+};
+
+const normalizeSulbtiSurveyQuestionValue = (questionKey, value) => {
+  if (SULBTI_SURVEY_MULTI_SCORE_KEYS.includes(questionKey)) {
+    return normalizeSulbtiSurveyMultiScore(value);
+  }
+
+  return normalizeSulbtiSurveyScore(value);
 };
 
 const normalizeSulbtiSurveyAnswers = (payload) => {
   if (hasSulbtiSurveyQuestionKeys(payload)) {
     const normalizedPayload = SULBTI_SURVEY_QUESTION_KEYS.reduce((acc, key) => {
       if (Object.prototype.hasOwnProperty.call(payload, key)) {
-        acc[key] = normalizeSulbtiSurveyScore(payload[key]);
+        acc[key] = normalizeSulbtiSurveyQuestionValue(key, payload[key]);
       }
 
       return acc;
@@ -814,7 +833,7 @@ const normalizeSulbtiSurveyAnswers = (payload) => {
     : payload?.answers || payload?.surveyResponses || payload?.responses;
 
   if (!Array.isArray(answerItems)) {
-    throw createServiceError(400, SULBTI_SURVEY_SCORE_ERROR_MESSAGE);
+    throw createServiceError(400, SULBTI_SURVEY_FORMAT_ERROR_MESSAGE);
   }
 
   const normalizedPayload = {};
@@ -826,15 +845,16 @@ const normalizeSulbtiSurveyAnswers = (payload) => {
 
     const questionNumber = Number(item.questionId);
 
-    if (!Number.isInteger(questionNumber) || questionNumber < 1 || questionNumber > 13) {
+    if (!Number.isInteger(questionNumber) || questionNumber < 1 || questionNumber > 25) {
       return;
     }
 
+    const questionKey = `q${questionNumber}`;
     const answerValue = Object.prototype.hasOwnProperty.call(item, 'score')
       ? item.score
       : item.answer;
 
-    normalizedPayload[`q${questionNumber}`] = normalizeSulbtiSurveyScore(answerValue);
+    normalizedPayload[questionKey] = normalizeSulbtiSurveyQuestionValue(questionKey, answerValue);
   });
 
   assertCompleteSulbtiSurveyAnswers(normalizedPayload);
