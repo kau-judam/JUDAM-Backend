@@ -141,19 +141,33 @@ const requestAiChat = async ({ message, userId, history }) => {
   }
 };
 
-const requestAiRecommend = async ({ tasteVector, pool }) => {
+const requestAiRecommend = async ({ userId, tasteVector, pool }) => {
   const baseUrl = getAiServerBaseUrl();
 
   try {
     const response = await axios.post(`${baseUrl}/api/recommend`, {
-      taste_vector: tasteVector,
+      user_id: String(userId),
+      user_vector: tasteVector,
       pool,
     }, {
       timeout: 30000,
     });
 
-    return response.data;
+    const aiResponse = response.data;
+
+    if (aiResponse?.status === 'error') {
+      throw createAiServiceError(
+        400,
+        aiResponse.message || getAiErrorMessage(aiResponse),
+      );
+    }
+
+    return aiResponse;
   } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
     if (error.code === 'ECONNABORTED') {
       throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
     }
