@@ -184,19 +184,26 @@ const saveMySulbtiController = async (req, res) => {
   }
 
   try {
+    const isSurveyConvertRequest = req.body?.type === undefined && (
+      Array.isArray(req.body)
+      || Object.prototype.hasOwnProperty.call(req.body || {}, 'answers')
+      || Object.prototype.hasOwnProperty.call(req.body || {}, 'surveyResponses')
+      || Object.prototype.hasOwnProperty.call(req.body || {}, 'responses')
+    );
     const data = await saveMySulbti(userId, req.body);
+    const status = isSurveyConvertRequest ? 200 : 201;
 
-    return res.status(201).json({
-      status: 201,
+    return res.status(status).json({
+      status,
       message: '술BTI 결과 저장 성공',
       data,
     });
   } catch (error) {
     const status = getErrorStatus(error);
 
-    if (status === 400) {
-      return res.status(400).json({
-        status: 400,
+    if ([400, 500, 502, 504].includes(status)) {
+      return res.status(status).json({
+        status,
         message: error.message,
       });
     }
