@@ -186,6 +186,7 @@ const saveMySulbtiController = async (req, res) => {
   try {
     const isSurveyConvertRequest = req.body?.type === undefined && (
       Array.isArray(req.body)
+      || Object.keys(req.body || {}).some((key) => /^q(?:[1-9]|1[0-3])$/.test(key))
       || Object.prototype.hasOwnProperty.call(req.body || {}, 'answers')
       || Object.prototype.hasOwnProperty.call(req.body || {}, 'surveyResponses')
       || Object.prototype.hasOwnProperty.call(req.body || {}, 'responses')
