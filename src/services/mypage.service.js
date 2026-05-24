@@ -736,6 +736,7 @@ const validateSulbtiPayload = (payload) => {
 };
 
 const SULBTI_SURVEY_QUESTION_KEYS = Array.from({ length: 13 }, (_, index) => `q${index + 1}`);
+const SULBTI_SURVEY_SCORE_ERROR_MESSAGE = '술BTI 설문 답변은 q1부터 q13까지 1~5 점수로 모두 필요합니다.';
 
 const hasSulbtiSurveyQuestionKeys = (payload) => (
   payload
@@ -766,19 +767,31 @@ const isSurveyConvertPayload = (payload) => {
     || Object.prototype.hasOwnProperty.call(payload, 'responses');
 };
 
-const hasValidSulbtiSurveyAnswer = (payload, key) => (
-  Object.prototype.hasOwnProperty.call(payload, key)
-  && payload[key] !== undefined
-  && payload[key] !== null
-);
+const normalizeSulbtiSurveyScore = (value) => {
+  const score = typeof value === 'string' && value.trim() !== ''
+    ? Number(value)
+    : value;
+
+  if (
+    typeof score !== 'number'
+    || !Number.isFinite(score)
+    || !Number.isInteger(score)
+    || score < 1
+    || score > 5
+  ) {
+    throw createServiceError(400, SULBTI_SURVEY_SCORE_ERROR_MESSAGE);
+  }
+
+  return score;
+};
 
 const assertCompleteSulbtiSurveyAnswers = (normalizedPayload) => {
   const hasAllAnswers = SULBTI_SURVEY_QUESTION_KEYS.every(
-    (key) => hasValidSulbtiSurveyAnswer(normalizedPayload, key),
+    (key) => Object.prototype.hasOwnProperty.call(normalizedPayload, key),
   );
 
   if (!hasAllAnswers) {
-    throw createServiceError(400, '술BTI 설문 답변은 q1부터 q13까지 모두 필요합니다.');
+    throw createServiceError(400, SULBTI_SURVEY_SCORE_ERROR_MESSAGE);
   }
 };
 
@@ -786,7 +799,7 @@ const normalizeSulbtiSurveyAnswers = (payload) => {
   if (hasSulbtiSurveyQuestionKeys(payload)) {
     const normalizedPayload = SULBTI_SURVEY_QUESTION_KEYS.reduce((acc, key) => {
       if (Object.prototype.hasOwnProperty.call(payload, key)) {
-        acc[key] = payload[key];
+        acc[key] = normalizeSulbtiSurveyScore(payload[key]);
       }
 
       return acc;
@@ -801,7 +814,7 @@ const normalizeSulbtiSurveyAnswers = (payload) => {
     : payload?.answers || payload?.surveyResponses || payload?.responses;
 
   if (!Array.isArray(answerItems)) {
-    throw createServiceError(400, '술BTI 설문 답변은 q1부터 q13까지 모두 필요합니다.');
+    throw createServiceError(400, SULBTI_SURVEY_SCORE_ERROR_MESSAGE);
   }
 
   const normalizedPayload = {};
@@ -817,7 +830,11 @@ const normalizeSulbtiSurveyAnswers = (payload) => {
       return;
     }
 
-    normalizedPayload[`q${questionNumber}`] = item.answer;
+    const answerValue = Object.prototype.hasOwnProperty.call(item, 'score')
+      ? item.score
+      : item.answer;
+
+    normalizedPayload[`q${questionNumber}`] = normalizeSulbtiSurveyScore(answerValue);
   });
 
   assertCompleteSulbtiSurveyAnswers(normalizedPayload);
