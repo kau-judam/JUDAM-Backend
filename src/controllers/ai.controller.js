@@ -146,6 +146,7 @@ const getAiRecommend = async (req, res) => {
     }
 
     const aiResponse = await requestAiRecommend({
+      userId,
       tasteVector,
       pool,
     });
