@@ -1,12 +1,25 @@
 const {
   checkAiServerHealth,
   requestAiChat,
+  requestAiChatStream,
   requestAiRecommend,
   generateAiImageAndUpload,
 } = require('../services/ai.service');
 const { findUserTasteVectorById } = require('../services/user.service');
 
 const ALLOWED_RECOMMEND_POOLS = new Set(['all', 'base', 'funding', 'recipe']);
+
+const isStreamCanceled = (error) => error?.code === 'ERR_CANCELED'
+  || error?.name === 'CanceledError'
+  || error?.message === 'canceled';
+
+const writeSseErrorEvent = (res, status, message) => {
+  if (res.writableEnded || res.destroyed) {
+    return;
+  }
+
+  res.write(`event: error\ndata: ${JSON.stringify({ status, message })}\n\n`);
+};
 
 const getAiHealth = async (req, res) => {
   try {
@@ -76,6 +89,106 @@ const postAiChat = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: 'AI 챗봇 응답 처리 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const postAiChatStream = async (req, res) => {
+  const message = typeof req.body?.message === 'string'
+    ? req.body.message.trim()
+    : '';
+  const history = req.body?.history ?? [];
+  const userId = req.body?.user_id || 'anonymous';
+
+  if (!message) {
+    return res.status(400).json({
+      status: 400,
+      message: '메시지를 입력해주세요.',
+    });
+  }
+
+  if (!Array.isArray(history)) {
+    return res.status(400).json({
+      status: 400,
+      message: '대화 이력 형식이 올바르지 않습니다.',
+    });
+  }
+
+  const abortController = new AbortController();
+  let streamFinished = false;
+  let clientClosed = false;
+  let aiStream = null;
+
+  res.on('close', () => {
+    if (!streamFinished) {
+      clientClosed = true;
+      abortController.abort();
+      if (aiStream && typeof aiStream.destroy === 'function') {
+        aiStream.destroy();
+      }
+    }
+  });
+
+  try {
+    const aiStreamResponse = await requestAiChatStream({
+      message,
+      userId,
+      history,
+      signal: abortController.signal,
+    });
+    aiStream = aiStreamResponse.data;
+
+    res.status(200);
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    if (typeof res.flushHeaders === 'function') {
+      res.flushHeaders();
+    }
+
+    aiStream.on('error', () => {
+      if (clientClosed) {
+        return;
+      }
+
+      writeSseErrorEvent(res, 502, 'AI 서버와 연결할 수 없습니다.');
+      streamFinished = true;
+      if (!res.writableEnded && !res.destroyed) {
+        res.end();
+      }
+    });
+
+    aiStream.on('end', () => {
+      streamFinished = true;
+      if (!res.writableEnded) {
+        res.end();
+      }
+    });
+
+    aiStream.pipe(res, { end: false });
+  } catch (error) {
+    if (clientClosed || isStreamCanceled(error)) {
+      return;
+    }
+
+    const statusCode = error.statusCode || 500;
+    const messageText = error.statusCode
+      ? error.message
+      : 'AI 챗봇 스트리밍 처리 중 서버 오류가 발생했습니다.';
+
+    if (res.headersSent) {
+      writeSseErrorEvent(res, statusCode, messageText);
+      streamFinished = true;
+      return res.end();
+    }
+
+    return res.status(statusCode).json({
+      status: statusCode,
+      message: messageText,
     });
   }
 };
@@ -174,6 +287,7 @@ const getAiRecommend = async (req, res) => {
 module.exports = {
   getAiHealth,
   postAiChat,
+  postAiChatStream,
   postAiImageGenerate,
   getAiRecommend,
 };
