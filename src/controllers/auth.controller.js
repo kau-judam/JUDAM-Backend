@@ -93,6 +93,7 @@ const buildKakaoAuthUrl = (redirectUri, state) => {
   const kakaoAuthUrl = new URL('https://kauth.kakao.com/oauth/authorize');
   kakaoAuthUrl.searchParams.set('response_type', 'code');
   kakaoAuthUrl.searchParams.set('client_id', process.env.KAKAO_REST_API_KEY);
+  kakaoAuthUrl.searchParams.set('scope', 'account_email profile_nickname profile_image');
   // redirectUri는 카카오 개발자 콘솔에 등록된 값만 정상 동작한다.
   kakaoAuthUrl.searchParams.set('redirect_uri', redirectUri);
   if (state) {
