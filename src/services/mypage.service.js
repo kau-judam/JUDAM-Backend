@@ -7,6 +7,7 @@ const {
 } = require('./user.service');
 const { uploadFileToS3 } = require('./s3.service');
 const { convertSurvey } = require('./aiSurvey.service');
+const { updateAiTasteProfile } = require('./ai.service');
 const pool = require('../config/db');
 
 const createServiceError = (statusCode, message) => {
@@ -20,6 +21,16 @@ const DEFAULT_OCTOMO_API_URL = 'https://api.octoverse.kr/octomo/v1/public/messag
 const OCTOMO_API_URL = process.env.OCTOMO_API_URL
   || DEFAULT_OCTOMO_API_URL;
 const OCTOMO_RECEIVE_NUMBER = process.env.OCTOMO_RECEIVE_NUMBER || '1666-3538';
+const AI_TASTE_RATING_KEYS = [
+  'sweetness',
+  'body',
+  'carbonation',
+  'flavor',
+  'alcohol',
+  'acidity',
+  'aroma_intensity',
+  'finish',
+];
 
 const mapProfileResponse = (user) => ({
   userId: String(user.user_id),
@@ -1632,6 +1643,161 @@ const insertArchiveTags = async (client, archiveId, tagIds) => {
   );
 };
 
+const normalizeAiTasteNumber = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+};
+
+const parseAiTasteRatingsSource = (ratings) => {
+  if (!ratings) {
+    return {};
+  }
+
+  if (typeof ratings === 'string') {
+    try {
+      const parsed = JSON.parse(ratings);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  return typeof ratings === 'object' && !Array.isArray(ratings)
+    ? ratings
+    : {};
+};
+
+const extractAiTasteRatings = (payload = {}) => {
+  const ratingsSource = parseAiTasteRatingsSource(payload.ratings);
+  const ratings = {};
+
+  AI_TASTE_RATING_KEYS.forEach((key) => {
+    const value = hasOwn(payload, key)
+      ? payload[key]
+      : ratingsSource[key];
+    const normalized = normalizeAiTasteNumber(value);
+
+    if (normalized !== undefined) {
+      ratings[key] = normalized;
+    }
+  });
+
+  return ratings;
+};
+
+const normalizeAiTasteTags = (value) => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => normalizeAiTasteTags(item));
+  }
+
+  if (typeof value === 'object') {
+    return normalizeAiTasteTags(value.name || value.tagName || value.label);
+  }
+
+  const stringValue = String(value).trim();
+
+  if (!stringValue) {
+    return [];
+  }
+
+  if (stringValue.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(stringValue);
+      return Array.isArray(parsed) ? normalizeAiTasteTags(parsed) : [];
+    } catch (error) {
+      return [stringValue];
+    }
+  }
+
+  return stringValue
+    .split(',')
+    .map((tagName) => tagName.trim())
+    .filter(Boolean);
+};
+
+const getArchiveAiTasteDrinkId = (archive) => {
+  if (archive.alcoholId) return `alcohol_${archive.alcoholId}`;
+  if (archive.fundingId) return `funding_${archive.fundingId}`;
+  if (archive.archiveId) return `archive_${archive.archiveId}`;
+  if (archive.reviewId) return `review_${archive.reviewId}`;
+  return `custom_${Date.now()}`;
+};
+
+const buildArchiveAiTasteUpdatePayload = (userId, archive, sourcePayload = {}) => {
+  const rating = normalizeAiTasteNumber(archive.rating);
+  const ratings = extractAiTasteRatings(sourcePayload);
+
+  if (rating === undefined && Object.keys(ratings).length === 0) {
+    return null;
+  }
+
+  const tagNames = [
+    ...normalizeAiTasteTags(archive.tags),
+    ...normalizeAiTasteTags(sourcePayload.customTags),
+    ...normalizeAiTasteTags(sourcePayload.tagNames),
+    ...normalizeAiTasteTags(sourcePayload.tags),
+  ];
+
+  const aiPayload = {
+    user_id: String(userId),
+    drink_id: getArchiveAiTasteDrinkId(archive),
+    tags: [...new Set(tagNames)],
+  };
+
+  if (rating !== undefined) {
+    aiPayload.rating = rating;
+  }
+
+  if (Object.keys(ratings).length > 0) {
+    aiPayload.ratings = ratings;
+  }
+
+  return aiPayload;
+};
+
+const shouldUpdateArchiveAiTaste = (archive, sourcePayload = {}, isCreate = false) => {
+  if (Object.keys(extractAiTasteRatings(sourcePayload)).length > 0) {
+    return true;
+  }
+
+  if (isCreate) {
+    return normalizeAiTasteNumber(archive.rating) !== undefined;
+  }
+
+  return hasOwn(sourcePayload, 'rating')
+    && normalizeAiTasteNumber(archive.rating) !== undefined;
+};
+
+const updateArchiveAiTasteProfile = async (userId, archive, sourcePayload = {}, isCreate = false) => {
+  if (!shouldUpdateArchiveAiTaste(archive, sourcePayload, isCreate)) {
+    return null;
+  }
+
+  const aiPayload = buildArchiveAiTasteUpdatePayload(userId, archive, sourcePayload);
+
+  if (!aiPayload) {
+    return null;
+  }
+
+  return updateAiTasteProfile(aiPayload);
+};
+
+const appendAiTasteUpdate = (archive, aiTasteUpdate) => (
+  aiTasteUpdate
+    ? { ...archive, aiTasteUpdate }
+    : archive
+);
+
 const parseArchiveFormTagIds = (tagIds) => {
   if (tagIds === undefined) {
     return undefined;
@@ -1962,7 +2128,8 @@ const createMyArchive = async (userId, payload) => {
     const [archive] = await mapArchivesWithRelations([archiveRow], client);
 
     await client.query('COMMIT');
-    return archive;
+    const aiTasteUpdate = await updateArchiveAiTasteProfile(userId, archive, payload, true);
+    return appendAiTasteUpdate(archive, aiTasteUpdate);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -2048,7 +2215,8 @@ const updateMyArchive = async (userId, archiveId, payload) => {
     const [archive] = await mapArchivesWithRelations([archiveRow], client);
 
     await client.query('COMMIT');
-    return archive;
+    const aiTasteUpdate = await updateArchiveAiTasteProfile(userId, archive, payload, false);
+    return appendAiTasteUpdate(archive, aiTasteUpdate);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

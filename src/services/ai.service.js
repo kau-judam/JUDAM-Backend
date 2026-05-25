@@ -5,6 +5,7 @@ const DEFAULT_IMAGE_MIME_TYPE = 'image/png';
 const AI_IMAGE_GENERATION_TIMEOUT_MS = 60000;
 const AI_FUNDING_REGISTER_TIMEOUT_MS = 30000;
 const AI_LAW_FILTER_TIMEOUT_MS = 30000;
+const AI_TASTE_UPDATE_TIMEOUT_MS = 30000;
 
 const getAiServerBaseUrl = () => {
   const { AI_SERVER_BASE_URL } = process.env;
@@ -238,6 +239,49 @@ const requestAiRecommend = async ({ userId, tasteVector, pool }) => {
   }
 };
 
+const updateAiTasteProfile = async (payload) => {
+  let baseUrl;
+
+  try {
+    baseUrl = getAiServerBaseUrl();
+
+    const response = await axios.post(`${baseUrl}/api/taste/update`, payload, {
+      timeout: AI_TASTE_UPDATE_TIMEOUT_MS,
+    });
+    const aiResponse = response.data || {};
+
+    if (aiResponse.status && aiResponse.status !== 'success') {
+      console.warn('AI taste update returned non-success response', {
+        status: aiResponse.status,
+        message: aiResponse.message,
+      });
+
+      return {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
+
+    return {
+      updated: true,
+      message: aiResponse.message || 'AI 취향 업데이트 성공',
+    };
+  } catch (error) {
+    console.warn('AI taste update failed', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      data: error.response?.data,
+      url: baseUrl ? `${baseUrl}/api/taste/update` : null,
+    });
+
+    return {
+      updated: false,
+      message: 'AI 취향 업데이트에 실패했습니다.',
+    };
+  }
+};
+
 const isDuplicateFundingRegisterError = (error) => {
   if (error.response?.status !== 400) {
     return false;
@@ -389,6 +433,7 @@ module.exports = {
   requestAiChat,
   requestAiChatStream,
   requestAiRecommend,
+  updateAiTasteProfile,
   registerFundingToAiPool,
   requestLawFilter,
   generateAiImageAndUpload,
