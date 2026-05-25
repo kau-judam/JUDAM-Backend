@@ -314,6 +314,9 @@ const createMyArchiveWithImagesController = async (req, res) => {
     }
 
     const data = await getMyArchiveDetail(userId, archive.archiveId);
+    if (archive.aiTasteUpdate) {
+      data.aiTasteUpdate = archive.aiTasteUpdate;
+    }
 
     return res.status(201).json({
       status: 201,
@@ -363,9 +366,11 @@ const updateMyArchiveWithImagesController = async (req, res) => {
   try {
     const payload = normalizeArchiveFormPayload(req.body);
     const deleteImageIds = normalizeArchiveDeleteImageIds(req.body?.deleteImageIds);
+    let aiTasteUpdate = null;
 
     if (Object.keys(payload).length > 0) {
-      await updateMyArchive(userId, req.params.archiveId, payload);
+      const updatedArchive = await updateMyArchive(userId, req.params.archiveId, payload);
+      aiTasteUpdate = updatedArchive.aiTasteUpdate || null;
     }
 
     if (Array.isArray(deleteImageIds) && deleteImageIds.length > 0) {
@@ -379,6 +384,9 @@ const updateMyArchiveWithImagesController = async (req, res) => {
     }
 
     const data = await getMyArchiveDetail(userId, req.params.archiveId);
+    if (aiTasteUpdate) {
+      data.aiTasteUpdate = aiTasteUpdate;
+    }
 
     return res.status(200).json({
       status: 200,

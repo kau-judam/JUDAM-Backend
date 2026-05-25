@@ -4,6 +4,18 @@ const {
   isAiFundingRegistrationStatus,
   registerFundingProjectToAiPool,
 } = require('../services/funding.service');
+const { updateAiTasteProfile } = require('../services/ai.service');
+
+const AI_TASTE_RATING_KEYS = [
+  'sweetness',
+  'body',
+  'carbonation',
+  'flavor',
+  'alcohol',
+  'acidity',
+  'aroma_intensity',
+  'finish',
+];
 
 const getBodyValue = (body, keys) => {
   for (const key of keys) {
@@ -97,6 +109,137 @@ const uniqueValues = (values) => [
       .map((value) => value.trim())
   ),
 ];
+
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
+
+const normalizeAiTasteNumber = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+};
+
+const parseAiTasteRatingsSource = (ratings) => {
+  if (!ratings) {
+    return {};
+  }
+
+  if (typeof ratings === 'string') {
+    try {
+      const parsed = JSON.parse(ratings);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  return typeof ratings === 'object' && !Array.isArray(ratings)
+    ? ratings
+    : {};
+};
+
+const extractAiTasteRatings = (payload = {}) => {
+  const ratingsSource = parseAiTasteRatingsSource(payload.ratings);
+  const ratings = {};
+
+  AI_TASTE_RATING_KEYS.forEach((key) => {
+    const value = hasOwn(payload, key)
+      ? payload[key]
+      : ratingsSource[key];
+    const normalized = normalizeAiTasteNumber(value);
+
+    if (normalized !== undefined) {
+      ratings[key] = normalized;
+    }
+  });
+
+  return ratings;
+};
+
+const normalizeAiTasteTags = (value) => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => normalizeAiTasteTags(item));
+  }
+
+  if (typeof value === 'object') {
+    return normalizeAiTasteTags(value.name || value.tagName || value.label);
+  }
+
+  const stringValue = String(value).trim();
+
+  if (!stringValue) {
+    return [];
+  }
+
+  if (stringValue.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(stringValue);
+      return Array.isArray(parsed) ? normalizeAiTasteTags(parsed) : [];
+    } catch (error) {
+      return [stringValue];
+    }
+  }
+
+  return stringValue
+    .split(',')
+    .map((tagName) => tagName.trim())
+    .filter(Boolean);
+};
+
+const shouldUpdateReviewAiTaste = (requestBody = {}, isCreate = false) => {
+  if (Object.keys(extractAiTasteRatings(requestBody)).length > 0) {
+    return true;
+  }
+
+  return isCreate || hasOwn(requestBody, 'rating');
+};
+
+const updateFundingReviewAiTasteProfile = async ({
+  userId,
+  review,
+  requestBody,
+  isCreate = false,
+}) => {
+  if (!shouldUpdateReviewAiTaste(requestBody, isCreate)) {
+    return null;
+  }
+
+  const rating = normalizeAiTasteNumber(review.rating);
+  const ratings = extractAiTasteRatings(requestBody);
+
+  if (rating === undefined && Object.keys(ratings).length === 0) {
+    return null;
+  }
+
+  const tagNames = [
+    ...normalizeAiTasteTags(review.tags),
+    ...normalizeAiTasteTags(requestBody.customTags),
+    ...normalizeAiTasteTags(requestBody.tagNames),
+  ];
+  const aiPayload = {
+    user_id: String(userId),
+    drink_id: review.funding_id ? `funding_${review.funding_id}` : `review_${review.review_id}`,
+    tags: [...new Set(tagNames)],
+  };
+
+  if (rating !== undefined) {
+    aiPayload.rating = rating;
+  }
+
+  if (Object.keys(ratings).length > 0) {
+    aiPayload.ratings = ratings;
+  }
+
+  return updateAiTasteProfile(aiPayload);
+};
 
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
   const parsedImageUrls = uniqueValues(parseJsonArrayField(imageUrlsValue));
@@ -5504,9 +5647,16 @@ const createFundingReview = async (req, res) => {
     );
 
     const review = result.rows[0];
+    const aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+      userId,
+      review,
+      requestBody: req.body || {},
+      isCreate: existingResult.rows.length === 0,
+    });
 
     return res.status(201).json({
       ...mapFundingReview(review),
+      ...(aiTasteUpdate ? { aiTasteUpdate } : {}),
       message: existingResult.rows.length > 0 ? '후기가 수정되었습니다.' : '후기가 등록되었습니다.',
     });
   } catch (error) {
@@ -5640,9 +5790,16 @@ const updateFundingReview = async (req, res) => {
     );
 
     const review = result.rows[0];
+    const aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+      userId,
+      review,
+      requestBody: req.body || {},
+      isCreate: false,
+    });
 
     return res.status(200).json({
       ...mapFundingReview(review),
+      ...(aiTasteUpdate ? { aiTasteUpdate } : {}),
       message: '후기가 수정되었습니다.',
     });
   } catch (error) {
