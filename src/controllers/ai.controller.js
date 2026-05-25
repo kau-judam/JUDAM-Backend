@@ -4,10 +4,26 @@ const {
   requestAiChatStream,
   requestAiRecommend,
   generateAiImageAndUpload,
+  requestNewDrink,
+  approveNewDrinkRequest,
 } = require('../services/ai.service');
 const { findUserTasteVectorById } = require('../services/user.service');
 
 const ALLOWED_RECOMMEND_POOLS = new Set(['all', 'base', 'funding', 'recipe']);
+
+const sendAiControllerError = (res, error, fallbackMessage) => {
+  if (error.statusCode) {
+    return res.status(error.statusCode).json({
+      status: error.statusCode,
+      message: error.message,
+    });
+  }
+
+  return res.status(500).json({
+    status: 500,
+    message: fallbackMessage,
+  });
+};
 
 const isStreamCanceled = (error) => error?.code === 'ERR_CANCELED'
   || error?.name === 'CanceledError'
@@ -229,6 +245,76 @@ const postAiImageGenerate = async (req, res) => {
   }
 };
 
+const postAiDrinkRequest = async (req, res) => {
+  const userId = req.user?.userId;
+  const name = typeof req.body?.name === 'string'
+    ? req.body.name.trim()
+    : '';
+
+  if (!userId) {
+    return res.status(401).json({
+      status: 401,
+      message: '유효하지 않거나 만료된 토큰입니다.',
+    });
+  }
+
+  if (!name) {
+    return res.status(400).json({
+      status: 400,
+      message: '전통주 이름을 입력해주세요.',
+    });
+  }
+
+  try {
+    const aiResponse = await requestNewDrink({
+      user_id: String(userId),
+      name,
+      brewery: req.body?.brewery || null,
+      region: req.body?.region || null,
+      description: req.body?.description || null,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '신규 전통주 등록 요청 성공',
+      data: aiResponse,
+    });
+  } catch (error) {
+    return sendAiControllerError(
+      res,
+      error,
+      '신규 전통주 등록 요청 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const postAiDrinkRequestApprove = async (req, res) => {
+  const requestId = req.params?.requestId;
+
+  if (!requestId || !/^\d+$/.test(String(requestId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '전통주 등록 요청 ID가 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const aiResponse = await approveNewDrinkRequest(requestId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '신규 전통주 등록 요청 승인 성공',
+      data: aiResponse,
+    });
+  } catch (error) {
+    return sendAiControllerError(
+      res,
+      error,
+      '신규 전통주 등록 요청 승인 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
 const getAiRecommend = async (req, res) => {
   const userId = req.user?.userId;
   const pool = req.query?.pool || 'all';
@@ -289,5 +375,7 @@ module.exports = {
   postAiChat,
   postAiChatStream,
   postAiImageGenerate,
+  postAiDrinkRequest,
+  postAiDrinkRequestApprove,
   getAiRecommend,
 };
