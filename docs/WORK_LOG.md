@@ -151,7 +151,7 @@
 - 일정, 프로젝트 계획, 문서 업로드, 제출, 목록/상세, 주문/결제, 찜, 양조일지, Q&A, 후기는 부분 구현 상태입니다.
 - 공유/신고/문의 일부는 아직 mock 응답 성격이 남아 있습니다.
 - 관리자 승인은 존재하지만 `recipeId = 3` 하드코딩이 있어 production-ready가 아닙니다.
-- 여러 API가 `req.user?.userId || 1` fallback을 사용하고 있어 인증/권한 정리가 필요합니다.
+- 2026-05-26 기준 펀딩 write API의 `req.user?.userId || 1` fallback은 제거했습니다.
 
 상세 문서:
 
@@ -464,6 +464,96 @@
 - 검증용 `draftId=29`, `fundingId=22` 관련 데이터는 모두 삭제했습니다.
 - 테스트 row 0건을 확인했습니다.
 
+### Funding Cleanup, Image Arrays, And Bank Verification
+
+완료:
+
+- Judam DB에서 제목이 정확히 `test`인 펀딩 데이터를 삭제했습니다.
+  - `funding_projects`: 3건 삭제
+  - 연결된 `funding_drafts`: 2건 삭제
+- 펀딩 상세/관리 이미지 응답 정규화를 보강했습니다.
+  - `imageUrls`는 항상 배열입니다.
+  - `allImageUrls`는 항상 배열이며 대표 이미지 포함, 중복 제거 기준입니다.
+  - legacy DB 값이 단일 문자열 또는 JSON 문자열로 들어와도 배열로 정규화합니다.
+- 계좌 인증 요청/확인용 마이그레이션을 추가하고 Judam DB에 적용했습니다.
+  - `database/20260525_funding_bank_account_verifications.sql`
+- 계좌 인증 API를 추가했습니다.
+  - `POST /api/fundings/bank-account/verification`
+  - `POST /api/fundings/bank-account/verification/confirm`
+- `PATCH /api/fundings/drafts/:draftId/brewery-info`에서 `bankVerificationToken`이 있으면 검증 후 `accountVerified=true`로 저장하도록 보강했습니다.
+- 기존 `POST /api/fundings/drafts/:draftId/account-verification`도 즉시 인증 완료가 아니라 확인된 `bankVerificationToken`이 있어야 통과하도록 수정했습니다.
+
+검증:
+
+- `funding_projects.title = 'test'` 잔여 0건 확인
+- `funding_drafts.title = 'test'` 잔여 0건 확인
+- `funding_bank_account_verifications` 테이블 생성 확인
+- 계좌 인증 요청/확인/토큰 기반 draft 계좌 인증 스모크 테스트 완료
+- 스모크 테스트 row 삭제 후 잔여 0건 확인
+- `node --check src/controllers/funding.controller.js` 통과
+- `node --check src/routes/fundingRoutes.js` 통과
+- `git diff --check` 통과
+
+### Funding Writer Identity Fields
+
+완료:
+
+- Q&A 질문/답글 응답에 실제 작성자 식별 필드를 추가했습니다.
+  - `writerId`, `writer_id`, `userId`, `user_id`
+  - `writerNickname`
+  - `writerRole`, `role`
+  - `isBrewery`, `writerIsBrewery`
+- 양조일지 댓글/답글 작성/목록 응답에 같은 작성자 식별 필드를 추가했습니다.
+- 일반 유저 작성자는 `role=USER`, `isBrewery=false`로 내려갑니다.
+- 양조장 계정 작성자는 `role=BREWERY`, `isBrewery=true`로 내려갑니다.
+- 작성자 닉네임은 프로젝트 양조장명이 아니라 `users.nickname` 기준입니다.
+
+검증:
+
+- Judam DB 기준 일반 `USER` 계정으로 Q&A 질문/답글 생성 후 목록 재조회 스모크 테스트를 완료했습니다.
+- Judam DB 기준 일반 `USER` 계정으로 양조일지 댓글/답글 생성 후 목록 재조회 스모크 테스트를 완료했습니다.
+- 일반 유저 응답이 `writerNickname=테스트소비자`, `writerRole=USER`, `isBrewery=false`로 내려오는 것을 확인했습니다.
+- 스모크 테스트 데이터 삭제 후 잔여 0건을 확인했습니다.
+
+### Funding Flow Recheck And Auth Fallback Removal
+
+완료:
+
+- 펀딩 라우트에 optional auth middleware를 추가했습니다.
+  - Authorization 토큰이 있으면 `req.user`를 세팅합니다.
+  - Authorization이 없으면 공개 GET은 통과합니다.
+  - 잘못된 Authorization 토큰은 401을 반환합니다.
+- 댓글/답글/좋아요/후기/주문 등 사용자 저장이 필요한 API에서 `userId=1` fallback을 제거했습니다.
+- 인증이 필요한 write API는 `req.user.userId`가 없으면 401을 반환하도록 정리했습니다.
+- 비로그인 공개 조회에서는 `liked=false`가 내려가도록 확인했습니다.
+- 후기 댓글 작성자 응답에도 실제 작성자 정보를 추가했습니다.
+  - `writerId`, `userId`, `writerNickname`, `writerProfileImage`, `writerRole`, `role`, `isBrewery`, `writerIsBrewery`
+- 댓글/답글 작성자 닉네임 fallback을 `users.nickname -> "사용자"`로 고정했습니다.
+  - 프로젝트 양조장명, `funding_projects.brewery_user_id`, `brewery_auth.brewery_name` 기준 fallback은 사용하지 않습니다.
+- 기존에 이미 잘못된 `user_id`로 저장된 과거 댓글/답글은 저장된 `user_id` 기준으로 표시되므로, 실제 작성자 매핑 없이는 자동 보정하지 않습니다.
+- 공개 상세 API가 linked draft 값을 fallback으로 사용하도록 보강했습니다.
+  - `category`
+  - `thumbnailUrl`
+  - `imageUrls`
+  - `tasteProfile`
+  - `legalInfo`
+  - `plan`
+  - `breweryInfo`
+  - `notices`
+  - `documents`
+
+검증:
+
+- Judam DB 기준 임시 linked `funding_project + funding_draft + documents 5종` 데이터를 생성해 `GET /api/fundings/drafts/by-funding/:fundingId`를 검증했습니다.
+- 관리하기 응답에서 `basicInfo`, `plan`, `breweryInfo`, `documents` 5종이 내려오는 것을 확인했습니다.
+- `basicInfo.allImageUrls`가 대표 이미지를 포함하고 중복 제거된 배열로 내려오는 것을 확인했습니다.
+- 공개 상세 응답에서 등록값 기반 `category`, `mainIngredient`, `legalInfo`, `tasteProfile`, `plan`, `breweryInfo`, `notices`, `documents`가 내려오는 것을 확인했습니다.
+- 일반 USER 계정으로 Q&A, 양조일지, 후기 댓글 작성/조회 시 실제 작성자 닉네임/role/profile 필드가 내려오는 것을 확인했습니다.
+- 신고 `reason/content`가 `funding_reports`에 저장되는 것을 확인했습니다.
+- 스모크 테스트 데이터 삭제 후 잔여 0건을 확인했습니다.
+- `node --check src/controllers/funding.controller.js`, `node --check src/routes/fundingRoutes.js`, `node --check src/middlewares/optionalAuthMiddleware.js` 통과
+- `git diff --check` 통과
+
 ## Backlog
 
 - 전체 펀딩 API 통합 테스트 작성 또는 Postman/curl 시나리오 정리
@@ -473,5 +563,5 @@
 - inquiry mock 응답 DB-backed로 전환
 - Toss checkout URL 생성 로직 완성
 - Toss confirm 에러 응답 JSON 핸들러 추가
-- `req.user?.userId || 1` 테스트 fallback 제거 및 인증 미들웨어 적용
+- 운영 서버 재시작/배포 후 auth fallback 제거 로직 반영 확인
 - `database/schema.sql`과 마이그레이션 파일의 기준 정리

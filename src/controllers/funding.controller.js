@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const pool = require('../config/db');
 const { uploadFileToS3 } = require('../services/s3.service');
 
@@ -13,6 +14,15 @@ const getBodyValue = (body, keys) => {
 
 const toRequiredBoolean = (value) =>
   value === true || value === 'true' || value === 1 || value === '1';
+
+const toNullableNumber = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+};
 
 const parseOptionalBoolean = (value) => {
   if (value === undefined || value === null || value === '') {
@@ -56,7 +66,9 @@ const parseJsonArrayField = (value, fallback = []) => {
   if (typeof value === 'string') {
     try {
       const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : fallback;
+      if (Array.isArray(parsed)) return parsed;
+      if (typeof parsed === 'string' && parsed.trim()) return [parsed.trim()];
+      return fallback;
     } catch (error) {
       return value.trim() ? [value.trim()] : fallback;
     }
@@ -84,7 +96,24 @@ const stringifyJsonField = (value, fallback = []) => {
   return typeof value === 'string' ? value : JSON.stringify(value);
 };
 
-const getUserId = (req) => req.user?.userId || req.user?.id || 1;
+const getUserId = (req) => {
+  const userId = Number(req.user?.userId || req.user?.id);
+  return Number.isInteger(userId) && userId > 0 ? userId : null;
+};
+
+const requireUserId = (req, res) => {
+  const userId = getUserId(req);
+
+  if (!userId) {
+    res.status(401).json({
+      status: 401,
+      message: '로그인이 필요합니다.',
+    });
+    return null;
+  }
+
+  return userId;
+};
 
 const uniqueValues = (values) => [
   ...new Set(
@@ -97,9 +126,7 @@ const uniqueValues = (values) => [
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
   const parsedImageUrls = uniqueValues(parseJsonArrayField(imageUrlsValue));
   const normalizedThumbnailUrl = toTrimmedString(thumbnailUrl) || parsedImageUrls[0] || null;
-  const imageUrls = parsedImageUrls.length <= 1
-    ? []
-    : parsedImageUrls.filter((imageUrl) => imageUrl !== normalizedThumbnailUrl);
+  const imageUrls = parsedImageUrls.filter((imageUrl) => imageUrl !== normalizedThumbnailUrl);
   const allImageUrls = uniqueValues([normalizedThumbnailUrl, ...imageUrls].filter(Boolean));
 
   return {
@@ -108,6 +135,39 @@ const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
     allImageUrls,
   };
 };
+
+const getNullableUserId = (req) => {
+  return getUserId(req);
+};
+
+const createBankVerificationCode = () => String(crypto.randomInt(0, 10000)).padStart(4, '0');
+
+const createBankVerificationToken = () => crypto.randomBytes(32).toString('hex');
+
+const getBankVerificationTtlMinutes = () => {
+  const ttl = Number(process.env.BANK_ACCOUNT_VERIFICATION_TTL_MINUTES || 10);
+  return Number.isFinite(ttl) && ttl > 0 ? Math.floor(ttl) : 10;
+};
+
+const shouldExposeBankVerificationCode = () =>
+  process.env.BANK_ACCOUNT_VERIFICATION_EXPOSE_CODE === 'true'
+  || process.env.NODE_ENV !== 'production';
+
+const normalizeComparableAccountNumber = (accountNumber) =>
+  toTrimmedString(accountNumber).replace(/[\s-]/g, '');
+
+const getBankVerificationFields = (body = {}) => ({
+  bankName: toTrimmedString(getBodyValue(body, ['bankName', 'bank_name'])),
+  accountNumber: toTrimmedString(getBodyValue(body, ['accountNumber', 'account_number'])),
+  normalizedAccountNumber: normalizeComparableAccountNumber(
+    getBodyValue(body, ['accountNumber', 'account_number'])
+  ),
+  accountHolder: toTrimmedString(getBodyValue(body, ['accountHolder', 'account_holder'])),
+});
+
+const normalizeWriterRole = (role) => toTrimmedString(role || 'USER').toUpperCase() || 'USER';
+
+const isBreweryWriterRole = (role) => normalizeWriterRole(role).startsWith('BREWERY');
 
 const normalizeSulbtiScore = (score) => {
   const numberScore = Number(score);
@@ -159,7 +219,13 @@ const mapFundingReview = (review) => {
     writer_id: writerId,
     userId: writerId,
     user_id: writerId,
-    writerNickname: review.writer_nickname || null,
+    writerNickname: review.writer_nickname || '사용자',
+    writerProfileImage: review.writer_profile_image || null,
+    profileImage: review.writer_profile_image || null,
+    writerRole: normalizeWriterRole(review.writer_role),
+    role: normalizeWriterRole(review.writer_role),
+    isBrewery: isBreweryWriterRole(review.writer_role),
+    writerIsBrewery: isBreweryWriterRole(review.writer_role),
     rating: Number(review.rating),
     title: review.title,
     content: review.content,
@@ -190,7 +256,13 @@ const mapFundingReviewComment = (comment) => {
     writer_id: writerId,
     userId: writerId,
     user_id: writerId,
-    writerNickname: comment.writer_nickname || null,
+    writerNickname: comment.writer_nickname || '사용자',
+    writerProfileImage: comment.writer_profile_image || null,
+    profileImage: comment.writer_profile_image || null,
+    writerRole: normalizeWriterRole(comment.writer_role),
+    role: normalizeWriterRole(comment.writer_role),
+    isBrewery: isBreweryWriterRole(comment.writer_role),
+    writerIsBrewery: isBreweryWriterRole(comment.writer_role),
     content: comment.content,
     likeCount: Number(comment.like_count || 0),
     liked: Boolean(comment.liked),
@@ -1456,6 +1528,14 @@ const saveBreweryInfo = async (req, res) => {
   const accountHolder = toTrimmedString(
     getBodyValue(body, ['accountHolder', 'account_holder']) || representativeName
   );
+  const bankVerificationToken = toTrimmedString(
+    getBodyValue(body, [
+      'bankVerificationToken',
+      'bank_verification_token',
+      'accountVerificationToken',
+      'account_verification_token',
+    ])
+  );
   const breweryProfileImageUrl = getBodyValue(body, [
     'breweryProfileImageUrl',
     'brewery_profile_image_url',
@@ -1511,6 +1591,38 @@ const saveBreweryInfo = async (req, res) => {
   }
 
   try {
+    let resolvedAccountVerified = accountVerified;
+
+    if (bankVerificationToken) {
+      const verificationResult = await pool.query(
+        `
+        SELECT verification_id
+        FROM funding_bank_account_verifications
+        WHERE verification_token = $1
+          AND status = 'VERIFIED'
+          AND bank_name = $2
+          AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $3
+          AND account_holder = $4
+        LIMIT 1
+        `,
+        [
+          bankVerificationToken,
+          bankName,
+          normalizeComparableAccountNumber(accountNumber),
+          accountHolder,
+        ]
+      );
+
+      if (verificationResult.rows.length === 0) {
+        return res.status(400).json({
+          status: 400,
+          message: '계좌 인증 토큰이 올바르지 않습니다.',
+        });
+      }
+
+      resolvedAccountVerified = true;
+    }
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -1555,7 +1667,7 @@ const saveBreweryInfo = async (req, res) => {
         businessCategory || null,
         businessItem || null,
         phoneVerified,
-        accountVerified,
+        resolvedAccountVerified,
         Number(draftId),
       ]
     );
@@ -1843,14 +1955,29 @@ const verifyPhoneForFundingDraft = async (req, res) => {
 //프젝생성 추가4: 입금계좌 인증처리
 const verifyAccountForFundingDraft = async (req, res) => {
   const { draftId } = req.params;
-  const { bankName, accountNumber, accountHolder } = req.body;
+  const {
+    bankName,
+    accountNumber,
+    accountHolder,
+    bankVerificationToken,
+    bank_verification_token: snakeBankVerificationToken,
+    accountVerificationToken,
+    account_verification_token: snakeAccountVerificationToken,
+  } = req.body || {};
+  const resolvedBankVerificationToken = toTrimmedString(
+    bankVerificationToken
+    || snakeBankVerificationToken
+    || accountVerificationToken
+    || snakeAccountVerificationToken
+  );
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
     !bankName ||
     !accountNumber ||
-    !accountHolder
+    !accountHolder ||
+    !resolvedBankVerificationToken
   ) {
     return res.status(400).json({
       status: 400,
@@ -1859,6 +1986,32 @@ const verifyAccountForFundingDraft = async (req, res) => {
   }
 
   try {
+    const verificationResult = await pool.query(
+      `
+      SELECT verification_id
+      FROM funding_bank_account_verifications
+      WHERE verification_token = $1
+        AND status = 'VERIFIED'
+        AND bank_name = $2
+        AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $3
+        AND account_holder = $4
+      LIMIT 1
+      `,
+      [
+        resolvedBankVerificationToken,
+        bankName,
+        normalizeComparableAccountNumber(accountNumber),
+        accountHolder,
+      ]
+    );
+
+    if (verificationResult.rows.length === 0) {
+      return res.status(400).json({
+        status: 400,
+        message: '계좌 인증 토큰이 올바르지 않습니다.',
+      });
+    }
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -1902,6 +2055,240 @@ const verifyAccountForFundingDraft = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '계좌 인증 처리 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const requestBankAccountVerification = async (req, res) => {
+  const userId = getNullableUserId(req);
+  const {
+    bankName,
+    accountNumber,
+    normalizedAccountNumber,
+    accountHolder,
+  } = getBankVerificationFields(req.body);
+
+  if (!bankName || !accountNumber || !normalizedAccountNumber || !accountHolder) {
+    return res.status(400).json({
+      status: 400,
+      message: '계좌 인증 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  const verificationCode = createBankVerificationCode();
+  const ttlMinutes = getBankVerificationTtlMinutes();
+
+  try {
+    await pool.query(
+      `
+      UPDATE funding_bank_account_verifications
+      SET
+        status = 'EXPIRED',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'PENDING'
+        AND expires_at <= CURRENT_TIMESTAMP
+      `
+    );
+
+    const result = await pool.query(
+      `
+      INSERT INTO funding_bank_account_verifications (
+        user_id,
+        bank_name,
+        account_number,
+        account_holder,
+        verification_code,
+        status,
+        requested_at,
+        expires_at,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        'PENDING',
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP + ($6::int * INTERVAL '1 minute'),
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      )
+      RETURNING
+        verification_id,
+        bank_name,
+        account_number,
+        account_holder,
+        status,
+        requested_at,
+        expires_at
+      `,
+      [
+        userId,
+        bankName,
+        accountNumber,
+        accountHolder,
+        verificationCode,
+        ttlMinutes,
+      ]
+    );
+
+    const verification = result.rows[0];
+    const response = {
+      verificationId: Number(verification.verification_id),
+      bankName: verification.bank_name,
+      accountNumber: verification.account_number,
+      accountHolder: verification.account_holder,
+      verified: false,
+      accountVerified: false,
+      bankVerificationToken: null,
+      status: verification.status,
+      requestedAt: verification.requested_at,
+      expiresAt: verification.expires_at,
+      message: '계좌 인증 요청이 생성되었습니다.',
+    };
+
+    if (shouldExposeBankVerificationCode()) {
+      response.verificationCode = verificationCode;
+      response.devMessage = '실제 1원 송금 제공사 연동 전까지 개발/로컬 확인용 인증번호입니다.';
+    }
+
+    return res.status(201).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '계좌 인증 요청 생성 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const confirmBankAccountVerification = async (req, res) => {
+  const userId = getNullableUserId(req);
+  const body = req.body || {};
+  const verificationId = Number(getBodyValue(body, ['verificationId', 'verification_id']));
+  const verificationCode = toTrimmedString(
+    getBodyValue(body, [
+      'verificationCode',
+      'verification_code',
+      'code',
+      'senderCode',
+      'sender_code',
+    ])
+  );
+  const {
+    bankName,
+    accountNumber,
+    normalizedAccountNumber,
+    accountHolder,
+  } = getBankVerificationFields(body);
+
+  if (!bankName || !accountNumber || !normalizedAccountNumber || !accountHolder || !verificationCode) {
+    return res.status(400).json({
+      status: 400,
+      message: '계좌 인증 확인 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    await pool.query(
+      `
+      UPDATE funding_bank_account_verifications
+      SET
+        status = 'EXPIRED',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'PENDING'
+        AND expires_at <= CURRENT_TIMESTAMP
+      `
+    );
+
+    const verificationResult = await pool.query(
+      `
+      SELECT
+        verification_id,
+        bank_name,
+        account_number,
+        account_holder,
+        verification_code
+      FROM funding_bank_account_verifications
+      WHERE status = 'PENDING'
+        AND bank_name = $1
+        AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $2
+        AND account_holder = $3
+        AND expires_at > CURRENT_TIMESTAMP
+        AND user_id IS NOT DISTINCT FROM $4
+        AND ($5::bigint IS NULL OR verification_id = $5)
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [
+        bankName,
+        normalizedAccountNumber,
+        accountHolder,
+        userId,
+        Number.isInteger(verificationId) && verificationId > 0 ? verificationId : null,
+      ]
+    );
+
+    if (verificationResult.rows.length === 0) {
+      return res.status(400).json({
+        status: 400,
+        message: '계좌 인증 요청을 찾을 수 없거나 만료되었습니다.',
+      });
+    }
+
+    const verification = verificationResult.rows[0];
+
+    if (verification.verification_code !== verificationCode) {
+      return res.status(400).json({
+        status: 400,
+        message: '계좌 인증번호가 올바르지 않습니다.',
+      });
+    }
+
+    const bankVerificationToken = createBankVerificationToken();
+    const updateResult = await pool.query(
+      `
+      UPDATE funding_bank_account_verifications
+      SET
+        status = 'VERIFIED',
+        verification_token = $2,
+        confirmed_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE verification_id = $1
+      RETURNING
+        verification_id,
+        bank_name,
+        account_number,
+        account_holder,
+        status,
+        verification_token,
+        confirmed_at
+      `,
+      [Number(verification.verification_id), bankVerificationToken]
+    );
+
+    const confirmed = updateResult.rows[0];
+
+    return res.status(200).json({
+      verificationId: Number(confirmed.verification_id),
+      bankName: confirmed.bank_name,
+      accountNumber: confirmed.account_number,
+      accountHolder: confirmed.account_holder,
+      verified: true,
+      accountVerified: true,
+      bankVerificationToken: confirmed.verification_token,
+      status: confirmed.status,
+      confirmedAt: confirmed.confirmed_at,
+      message: '계좌 인증이 완료되었습니다.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '계좌 인증 확인 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -2212,8 +2599,15 @@ const submitFundingDraft = async (req, res) => {
     try {
       await client.query('BEGIN');
 
-      // TODO: JWT 연동 후 req.user.userId 사용
-      const breweryUserId = req.user?.userId || Number(draft.brewery_id) || 1;
+      const breweryUserId = getUserId(req) || Number(draft.brewery_id);
+
+      if (!Number.isInteger(Number(breweryUserId)) || Number(breweryUserId) <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          status: 400,
+          message: '양조장 사용자 정보가 없어 제출할 수 없습니다.',
+        });
+      }
 
       /**
        * 현재 funding_projects 테이블 기준으로 필요한 최소 필드만 생성
@@ -2903,8 +3297,7 @@ const getFundingList = async (req, res) => {
     });
   }
 
-  // TODO: JWT 연동 후 req.user.userId 사용
-  const userId = req.user?.userId || 1;
+  const userId = getUserId(req);
 
   const values = [];
   const conditions = [];
@@ -3134,8 +3527,7 @@ const getFundingDetail = async (req, res) => {
     });
   }
 
-  // TODO: JWT 연동 후 req.user.userId 사용
-  const userId = req.user?.userId || 1;
+  const userId = getUserId(req);
 
   try {
     const fundingResult = await pool.query(
@@ -3144,9 +3536,9 @@ const getFundingDetail = async (req, res) => {
         fp.funding_id,
         fp.title,
         fp.description,
-        fp.summary,
-        fp.category,
-        fp.image_urls,
+        COALESCE(fp.summary, fd.summary) AS summary,
+        COALESCE(fp.category, fd.category) AS category,
+        COALESCE(fp.image_urls::text, fd.image_urls::text) AS image_urls,
         fp.status,
         fp.current_amount,
         fp.goal_amount AS target_amount,
@@ -3164,6 +3556,12 @@ const getFundingDetail = async (req, res) => {
         fd.main_ingredient,
         fd.sub_ingredients,
         fd.tags,
+        fd.sweetness,
+        fd.acidity,
+        fd.body,
+        fd.carbonation,
+        fd.alcohol_intensity,
+        fd.flavor_notes,
         fd.product_type,
         fd.raw_materials,
         fd.introduction,
@@ -3197,7 +3595,7 @@ const getFundingDetail = async (req, res) => {
         fd.business_registration_file_url,
         COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
         r.title AS recipe_title,
-        COALESCE(fp.thumbnail_url, r.image_url) AS thumbnail_url,
+        COALESCE(fp.thumbnail_url, fd.thumbnail_url, r.image_url) AS thumbnail_url,
         COALESCE(like_counts.like_count, 0) AS like_count,
         EXISTS (
           SELECT 1
@@ -3281,7 +3679,24 @@ const getFundingDetail = async (req, res) => {
       [resolvedFundingId]
     );
 
-    const taste = tasteResult.rows[0] || null;
+    const draftTaste = [
+      funding.sweetness,
+      funding.acidity,
+      funding.body,
+      funding.carbonation,
+      funding.alcohol_intensity,
+      funding.flavor_notes,
+    ].some((value) => value !== null && value !== undefined)
+      ? {
+          sweetness: funding.sweetness,
+          acidity: funding.acidity,
+          body: funding.body,
+          carbonation: funding.carbonation,
+          alcohol_intensity: funding.alcohol_intensity,
+          flavor_notes: funding.flavor_notes,
+        }
+      : null;
+    const taste = tasteResult.rows[0] || draftTaste;
     const sulbtiResult = await pool.query(
       `
       SELECT
@@ -3504,7 +3919,7 @@ const getFundingIntro = async (req, res) => {
 //양조일지 조회
 const getBreweryLogs = async (req, res) => {
   const { fundingId } = req.params;
-  const userId = req.user?.userId || 1;
+  const userId = getUserId(req);
   const resolvedFundingId = await resolveFundingId(fundingId);
 
   if (!resolvedFundingId) {
@@ -3586,7 +4001,8 @@ const createBreweryLog = async (req, res) => {
   const { fundingId } = req.params;
   const { stage, title, content, imageUrls } = req.body;
   const files = req.files || [];
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   const resolvedFundingId = await resolveFundingId(fundingId);
 
   const allowedStages = [
@@ -3696,7 +4112,8 @@ const updateBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
   const { stage, title, content, imageUrls } = req.body;
   const files = req.files || [];
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   const allowedStages = [
     'INGREDIENT',
@@ -3960,6 +4377,8 @@ const getFundingQuestions = async (req, res) => {
         fq.funding_id,
         fq.user_id,
         u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role,
         fq.title,
         fq.content,
         fq.is_private,
@@ -3977,7 +4396,16 @@ const getFundingQuestions = async (req, res) => {
             json_build_object(
               'replyId', fqr.reply_id,
               'writerId', fqr.user_id,
+              'userId', fqr.user_id,
+              'writer_id', fqr.user_id,
+              'user_id', fqr.user_id,
               'writerNickname', reply_user.nickname,
+              'writerProfileImage', reply_user.profile_image,
+              'profileImage', reply_user.profile_image,
+              'writerRole', COALESCE(reply_user.role, 'USER'),
+              'role', COALESCE(reply_user.role, 'USER'),
+              'isBrewery', COALESCE(reply_user.role, 'USER') LIKE 'BREWERY%',
+              'writerIsBrewery', COALESCE(reply_user.role, 'USER') LIKE 'BREWERY%',
               'content', fqr.content,
               'likeCount', COALESCE(fqrl.like_count, 0),
               'liked', EXISTS (
@@ -4008,7 +4436,7 @@ const getFundingQuestions = async (req, res) => {
         WHERE question_id = fq.question_id
       ) ql ON TRUE
       ${whereClause}
-      GROUP BY fq.question_id, u.nickname, ql.like_count
+      GROUP BY fq.question_id, u.nickname, u.profile_image, u.role, ql.like_count
       ORDER BY fq.created_at DESC
       LIMIT ${limitParam}
       OFFSET ${offsetParam}
@@ -4019,20 +4447,72 @@ const getFundingQuestions = async (req, res) => {
     const totalElements = countResult.rows[0].total_count;
 
     return res.status(200).json({
-      content: result.rows.map((question) => ({
-        questionId: question.question_id,
-        fundingId: question.funding_id,
-        writerId: question.user_id,
-        writerNickname: question.writer_nickname,
-        title: question.title,
-        content: question.content,
-        isPrivate: question.is_private,
-        answered: question.answered,
-        likeCount: Number(question.like_count || 0),
-        liked: question.liked,
-        replies: question.replies,
-        createdAt: question.created_at,
-      })),
+      content: result.rows.map((question) => {
+        const writerRole = normalizeWriterRole(question.writer_role);
+        const writerIsBrewery = isBreweryWriterRole(writerRole);
+        const replies = Array.isArray(question.replies)
+          ? question.replies
+          : parseJsonField(question.replies, []);
+        const writerId = question.user_id === null || question.user_id === undefined
+          ? null
+          : Number(question.user_id);
+
+        return {
+          questionId: Number(question.question_id),
+          fundingId: Number(question.funding_id),
+          writerId,
+          writer_id: writerId,
+          userId: writerId,
+          user_id: writerId,
+          writerNickname: question.writer_nickname || '사용자',
+          writerProfileImage: question.writer_profile_image || null,
+          profileImage: question.writer_profile_image || null,
+          writerRole,
+          role: writerRole,
+          isBrewery: writerIsBrewery,
+          writerIsBrewery,
+          title: question.title,
+          content: question.content,
+          isPrivate: question.is_private,
+          answered: question.answered,
+          likeCount: Number(question.like_count || 0),
+          liked: question.liked,
+          replies: replies.map((reply) => {
+            const replyWriterRole = normalizeWriterRole(reply.writerRole || reply.role);
+            const replyWriterIsBrewery = isBreweryWriterRole(replyWriterRole);
+            const replyWriterId = reply.writerId ?? reply.userId ?? reply.writer_id ?? reply.user_id;
+
+            return {
+              ...reply,
+              replyId: reply.replyId === null || reply.replyId === undefined
+                ? reply.replyId
+                : Number(reply.replyId),
+              writerId: replyWriterId === null || replyWriterId === undefined
+                ? null
+                : Number(replyWriterId),
+              writer_id: replyWriterId === null || replyWriterId === undefined
+                ? null
+                : Number(replyWriterId),
+              userId: replyWriterId === null || replyWriterId === undefined
+                ? null
+                : Number(replyWriterId),
+              user_id: replyWriterId === null || replyWriterId === undefined
+                ? null
+                : Number(replyWriterId),
+              writerNickname: reply.writerNickname || '사용자',
+              writerProfileImage: reply.writerProfileImage || reply.profileImage || null,
+              profileImage: reply.writerProfileImage || reply.profileImage || null,
+              writerRole: replyWriterRole,
+              role: replyWriterRole,
+              isBrewery: replyWriterIsBrewery,
+              writerIsBrewery: replyWriterIsBrewery,
+              likeCount: Number(reply.likeCount || 0),
+              liked: Boolean(reply.liked),
+            };
+          }),
+          createdAt: question.created_at,
+        };
+      }),
       page: pageNumber,
       size: sizeNumber,
       totalElements,
@@ -4074,18 +4554,28 @@ const createFundingQuestion = async (req, res) => {
   }
 
   try {
-    const userId = getUserId(req);
+    const userId = requireUserId(req, res);
+    if (!userId) return;
     const result = await pool.query(
       `
-      INSERT INTO funding_questions (
-        funding_id,
-        user_id,
-        title,
-        content,
-        is_private
+      WITH inserted AS (
+        INSERT INTO funding_questions (
+          funding_id,
+          user_id,
+          title,
+          content,
+          is_private
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
       )
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
+      SELECT
+        inserted.*,
+        u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role
+      FROM inserted
+      LEFT JOIN users u ON u.user_id = inserted.user_id
       `,
       [
         Number(fundingId),
@@ -4097,11 +4587,23 @@ const createFundingQuestion = async (req, res) => {
     );
 
     const question = result.rows[0];
+    const writerRole = normalizeWriterRole(question.writer_role);
+    const writerIsBrewery = isBreweryWriterRole(writerRole);
 
     return res.status(201).json({
-      questionId: question.question_id,
-      fundingId: question.funding_id,
-      userId: question.user_id,
+      questionId: Number(question.question_id),
+      fundingId: Number(question.funding_id),
+      writerId: Number(question.user_id),
+      writer_id: Number(question.user_id),
+      userId: Number(question.user_id),
+      user_id: Number(question.user_id),
+      writerNickname: question.writer_nickname || '사용자',
+      writerProfileImage: question.writer_profile_image || null,
+      profileImage: question.writer_profile_image || null,
+      writerRole,
+      role: writerRole,
+      isBrewery: writerIsBrewery,
+      writerIsBrewery,
       title: question.title,
       content: question.content,
       isPrivate: question.is_private,
@@ -4133,17 +4635,27 @@ const createFundingReply = async (req, res) => {
   }
 
   try {
-    const userId = req.user?.userId || 1;
+    const userId = requireUserId(req, res);
+    if (!userId) return;
     const replyResult = await pool.query(
       `
-      INSERT INTO funding_question_replies (
-        question_id,
-        funding_id,
-        user_id,
-        content
+      WITH inserted AS (
+        INSERT INTO funding_question_replies (
+          question_id,
+          funding_id,
+          user_id,
+          content
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING reply_id, question_id, funding_id, user_id, content, created_at
       )
-      VALUES ($1, $2, $3, $4)
-      RETURNING reply_id, question_id, funding_id, user_id, content, created_at
+      SELECT
+        inserted.*,
+        u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role
+      FROM inserted
+      LEFT JOIN users u ON u.user_id = inserted.user_id
       `,
       [Number(questionId), Number(fundingId), userId, content.trim()]
     );
@@ -4158,13 +4670,27 @@ const createFundingReply = async (req, res) => {
     );
 
     const reply = replyResult.rows[0];
+    const writerRole = normalizeWriterRole(reply.writer_role);
+    const writerIsBrewery = isBreweryWriterRole(writerRole);
 
     return res.status(201).json({
       fundingId: Number(reply.funding_id),
       questionId: Number(reply.question_id),
+      writerId: Number(reply.user_id),
+      writer_id: Number(reply.user_id),
       userId: Number(reply.user_id),
+      user_id: Number(reply.user_id),
       replyId: Number(reply.reply_id),
+      writerNickname: reply.writer_nickname || '사용자',
+      writerProfileImage: reply.writer_profile_image || null,
+      profileImage: reply.writer_profile_image || null,
+      writerRole,
+      role: writerRole,
+      isBrewery: writerIsBrewery,
+      writerIsBrewery,
       content: reply.content,
+      likeCount: 0,
+      liked: false,
       createdAt: reply.created_at,
       message: '답변이 등록되었습니다.',
     });
@@ -4180,7 +4706,8 @@ const createFundingReply = async (req, res) => {
 
 const likeFundingQuestion = async (req, res) => {
   const { fundingId, questionId } = req.params;
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   if (!fundingId || isNaN(Number(fundingId)) || !questionId || isNaN(Number(questionId))) {
     return res.status(400).json({
@@ -4246,7 +4773,8 @@ const likeFundingQuestion = async (req, res) => {
 
 const unlikeFundingQuestion = async (req, res) => {
   const { fundingId, questionId } = req.params;
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   if (!fundingId || isNaN(Number(fundingId)) || !questionId || isNaN(Number(questionId))) {
     return res.status(400).json({
@@ -4292,7 +4820,8 @@ const unlikeFundingQuestion = async (req, res) => {
 
 const likeFundingQuestionReply = async (req, res) => {
   const { fundingId, questionId, replyId } = req.params;
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   if (
     !fundingId ||
@@ -4367,7 +4896,8 @@ const likeFundingQuestionReply = async (req, res) => {
 
 const unlikeFundingQuestionReply = async (req, res) => {
   const { fundingId, questionId, replyId } = req.params;
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   if (
     !fundingId ||
@@ -4478,6 +5008,8 @@ const getFundingReviews = async (req, res) => {
         fr.funding_id,
         fr.user_id,
         u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role,
         fr.rating,
         fr.title,
         fr.content,
@@ -4554,6 +5086,8 @@ const getFundingReviewDetail = async (req, res) => {
         fr.funding_id,
         fr.user_id,
         u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role,
         fr.rating,
         fr.title,
         fr.content,
@@ -4612,6 +5146,8 @@ const getFundingReviewById = async ({ fundingId, reviewId, userId }) => {
       fr.funding_id,
       fr.user_id,
       u.nickname AS writer_nickname,
+      u.profile_image AS writer_profile_image,
+      u.role AS writer_role,
       fr.rating,
       fr.title,
       fr.content,
@@ -4647,7 +5183,8 @@ const getFundingReviewById = async ({ fundingId, reviewId, userId }) => {
 
 const likeFundingReview = async (req, res) => {
   const { fundingId, reviewId } = req.params;
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   const resolvedFundingId = await resolveFundingId(fundingId);
 
   if (!resolvedFundingId || !reviewId || isNaN(Number(reviewId))) {
@@ -4705,7 +5242,8 @@ const likeFundingReview = async (req, res) => {
 
 const unlikeFundingReview = async (req, res) => {
   const { fundingId, reviewId } = req.params;
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   const resolvedFundingId = await resolveFundingId(fundingId);
 
   if (!resolvedFundingId || !reviewId || isNaN(Number(reviewId))) {
@@ -4953,7 +5491,8 @@ const createFundingOrder = async (req, res) => {
     const totalAmount =
       pricePerBottle * bottleCount + shippingFee + donationAmountNumber;
 
-    const userId = req.user?.userId || 1;
+    const userId = requireUserId(req, res);
+    if (!userId) return;
 
     const orderResult = await pool.query(
       `
@@ -5383,7 +5922,8 @@ const createFundingReview = async (req, res) => {
   }
 
   try {
-    const userId = getUserId(req);
+    const userId = requireUserId(req, res);
+    if (!userId) return;
     const uploadedImageUrls = [];
     for (const file of files) {
       uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
@@ -5495,7 +6035,11 @@ const createFundingReview = async (req, res) => {
       ]
     );
 
-    const review = result.rows[0];
+    const review = await getFundingReviewById({
+      fundingId: Number(fundingId),
+      reviewId: result.rows[0].review_id,
+      userId,
+    }) || result.rows[0];
 
     return res.status(201).json({
       ...mapFundingReview(review),
@@ -5549,7 +6093,8 @@ const updateFundingReview = async (req, res) => {
   }
 
   try {
-    const userId = getUserId(req);
+    const userId = requireUserId(req, res);
+    if (!userId) return;
     const existingResult = await pool.query(
       `
       SELECT *
@@ -5631,7 +6176,11 @@ const updateFundingReview = async (req, res) => {
       ]
     );
 
-    const review = result.rows[0];
+    const review = await getFundingReviewById({
+      fundingId: Number(fundingId),
+      reviewId: result.rows[0].review_id,
+      userId,
+    }) || result.rows[0];
 
     return res.status(200).json({
       ...mapFundingReview(review),
@@ -5662,7 +6211,8 @@ const deleteFundingReview = async (req, res) => {
   }
 
   try {
-    const userId = getUserId(req);
+    const userId = requireUserId(req, res);
+    if (!userId) return;
     const result = await pool.query(
       `
       DELETE FROM funding_reviews
@@ -5744,6 +6294,8 @@ const getFundingReviewComments = async (req, res) => {
         frc.review_id,
         frc.user_id,
         u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role,
         frc.content,
         frc.created_at,
         frc.updated_at,
@@ -5784,7 +6336,8 @@ const getFundingReviewComments = async (req, res) => {
 const createFundingReviewComment = async (req, res) => {
   const { fundingId, reviewId } = req.params;
   const content = toTrimmedString(req.body?.content);
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   const resolvedFundingId = await resolveFundingId(fundingId);
 
   if (
@@ -5848,6 +6401,8 @@ const createFundingReviewComment = async (req, res) => {
         inserted.review_id,
         inserted.user_id,
         u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role,
         inserted.content,
         inserted.created_at,
         inserted.updated_at,
@@ -5881,6 +6436,8 @@ const getFundingReviewCommentById = async ({ fundingId, reviewId, commentId, use
       frc.review_id,
       frc.user_id,
       u.nickname AS writer_nickname,
+      u.profile_image AS writer_profile_image,
+      u.role AS writer_role,
       frc.content,
       frc.created_at,
       frc.updated_at,
@@ -5910,7 +6467,8 @@ const getFundingReviewCommentById = async ({ fundingId, reviewId, commentId, use
 
 const likeFundingReviewComment = async (req, res) => {
   const { fundingId, reviewId, commentId } = req.params;
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   const resolvedFundingId = await resolveFundingId(fundingId);
 
   if (
@@ -5976,7 +6534,8 @@ const likeFundingReviewComment = async (req, res) => {
 
 const unlikeFundingReviewComment = async (req, res) => {
   const { fundingId, reviewId, commentId } = req.params;
-  const userId = getUserId(req);
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   const resolvedFundingId = await resolveFundingId(fundingId);
 
   if (
@@ -6049,8 +6608,8 @@ const likeFundingProject = async (req, res) => {
     });
   }
 
-  // TODO: JWT 연동 후 req.user.userId 사용
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   try {
     await pool.query(
@@ -6103,8 +6662,8 @@ const unlikeFundingProject = async (req, res) => {
     });
   }
 
-  // TODO: JWT 연동 후 req.user.userId 사용
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   try {
     await pool.query(
@@ -6144,7 +6703,8 @@ const unlikeFundingProject = async (req, res) => {
 // 양조일지 좋아요 등록
 const likeBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   if (!fundingId || isNaN(Number(fundingId)) || !breweryLogId || isNaN(Number(breweryLogId))) {
     return res.status(400).json({
@@ -6213,7 +6773,8 @@ const likeBreweryLog = async (req, res) => {
 // 양조일지 좋아요 취소
 const unlikeBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   if (!fundingId || isNaN(Number(fundingId)) || !breweryLogId || isNaN(Number(breweryLogId))) {
     return res.status(400).json({
@@ -6286,8 +6847,8 @@ const createBreweryLogComment = async (req, res) => {
     });
   }
 
-  // TODO: JWT 연동 후 req.user.userId 사용
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   try {
     // 양조일지 존재 확인
@@ -6330,6 +6891,8 @@ const createBreweryLogComment = async (req, res) => {
         inserted.brewery_log_id,
         inserted.user_id,
         u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role,
         inserted.content,
         inserted.created_at,
         inserted.updated_at
@@ -6344,13 +6907,23 @@ const createBreweryLogComment = async (req, res) => {
     );
 
     const comment = result.rows[0];
+    const writerRole = normalizeWriterRole(comment.writer_role);
+    const writerIsBrewery = isBreweryWriterRole(writerRole);
 
     return res.status(201).json({
       commentId: Number(comment.comment_id),
       breweryLogId: Number(comment.brewery_log_id),
       userId: Number(comment.user_id),
+      user_id: Number(comment.user_id),
       writerId: Number(comment.user_id),
-      writerNickname: comment.writer_nickname,
+      writer_id: Number(comment.user_id),
+      writerNickname: comment.writer_nickname || '사용자',
+      writerProfileImage: comment.writer_profile_image || null,
+      profileImage: comment.writer_profile_image || null,
+      writerRole,
+      role: writerRole,
+      isBrewery: writerIsBrewery,
+      writerIsBrewery,
       content: comment.content,
       likeCount: 0,
       liked: false,
@@ -6399,8 +6972,8 @@ const createBreweryLogReply = async (req, res) => {
     });
   }
 
-  // TODO: JWT 연동 후 req.user.userId 사용
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   try {
     // 부모 댓글 조회
@@ -6457,6 +7030,8 @@ const createBreweryLogReply = async (req, res) => {
         inserted.brewery_log_id,
         inserted.user_id,
         u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role,
         inserted.parent_comment_id,
         inserted.content,
         inserted.created_at,
@@ -6473,6 +7048,8 @@ const createBreweryLogReply = async (req, res) => {
     );
 
     const reply = result.rows[0];
+    const writerRole = normalizeWriterRole(reply.writer_role);
+    const writerIsBrewery = isBreweryWriterRole(writerRole);
 
     return res.status(201).json({
       replyId: Number(reply.comment_id),
@@ -6480,8 +7057,16 @@ const createBreweryLogReply = async (req, res) => {
       parentCommentId: Number(reply.parent_comment_id),
       breweryLogId: Number(reply.brewery_log_id),
       userId: Number(reply.user_id),
+      user_id: Number(reply.user_id),
       writerId: Number(reply.user_id),
-      writerNickname: reply.writer_nickname,
+      writer_id: Number(reply.user_id),
+      writerNickname: reply.writer_nickname || '사용자',
+      writerProfileImage: reply.writer_profile_image || null,
+      profileImage: reply.writer_profile_image || null,
+      writerRole,
+      role: writerRole,
+      isBrewery: writerIsBrewery,
+      writerIsBrewery,
       content: reply.content,
       likeCount: 0,
       liked: false,
@@ -6502,7 +7087,7 @@ const createBreweryLogReply = async (req, res) => {
 // 양조일지 댓글 목록 조회
 const getBreweryLogComments = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
-  const userId = req.user?.userId || 1;
+  const userId = getUserId(req);
   const resolvedFundingId = await resolveFundingId(fundingId);
 
   if (
@@ -6524,6 +7109,8 @@ const getBreweryLogComments = async (req, res) => {
         c.brewery_log_id,
         c.user_id,
         u.nickname AS writer_nickname,
+        u.profile_image AS writer_profile_image,
+        u.role AS writer_role,
         c.parent_comment_id,
         c.content,
         c.created_at,
@@ -6556,34 +7143,62 @@ const getBreweryLogComments = async (req, res) => {
       (comment) => comment.parent_comment_id !== null
     );
 
-    const content = comments.map((comment) => ({
-      commentId: Number(comment.comment_id),
-      breweryLogId: Number(comment.brewery_log_id),
-      userId: Number(comment.user_id),
-      writerId: Number(comment.user_id),
-      writerNickname: comment.writer_nickname,
-      content: comment.content,
-      likeCount: Number(comment.like_count || 0),
-      liked: comment.liked,
-      createdAt: comment.created_at,
-      updatedAt: comment.updated_at,
-      replies: replies
-        .filter((reply) => Number(reply.parent_comment_id) === Number(comment.comment_id))
-        .map((reply) => ({
-          replyId: Number(reply.comment_id),
-          commentId: Number(reply.comment_id),
-          parentCommentId: Number(reply.parent_comment_id),
-          breweryLogId: Number(reply.brewery_log_id),
-          userId: Number(reply.user_id),
-          writerId: Number(reply.user_id),
-          writerNickname: reply.writer_nickname,
-          content: reply.content,
-          likeCount: Number(reply.like_count || 0),
-          liked: reply.liked,
-          createdAt: reply.created_at,
-          updatedAt: reply.updated_at,
-        })),
-    }));
+    const content = comments.map((comment) => {
+      const writerRole = normalizeWriterRole(comment.writer_role);
+      const writerIsBrewery = isBreweryWriterRole(writerRole);
+      const writerId = toNullableNumber(comment.user_id);
+
+      return {
+        commentId: Number(comment.comment_id),
+        breweryLogId: Number(comment.brewery_log_id),
+        userId: writerId,
+        user_id: writerId,
+        writerId,
+        writer_id: writerId,
+        writerNickname: comment.writer_nickname || '사용자',
+        writerProfileImage: comment.writer_profile_image || null,
+        profileImage: comment.writer_profile_image || null,
+        writerRole,
+        role: writerRole,
+        isBrewery: writerIsBrewery,
+        writerIsBrewery,
+        content: comment.content,
+        likeCount: Number(comment.like_count || 0),
+        liked: comment.liked,
+        createdAt: comment.created_at,
+        updatedAt: comment.updated_at,
+        replies: replies
+          .filter((reply) => Number(reply.parent_comment_id) === Number(comment.comment_id))
+          .map((reply) => {
+            const replyWriterRole = normalizeWriterRole(reply.writer_role);
+            const replyWriterIsBrewery = isBreweryWriterRole(replyWriterRole);
+            const replyWriterId = toNullableNumber(reply.user_id);
+
+            return {
+              replyId: Number(reply.comment_id),
+              commentId: Number(reply.comment_id),
+              parentCommentId: Number(reply.parent_comment_id),
+              breweryLogId: Number(reply.brewery_log_id),
+              userId: replyWriterId,
+              user_id: replyWriterId,
+              writerId: replyWriterId,
+              writer_id: replyWriterId,
+              writerNickname: reply.writer_nickname || '사용자',
+              writerProfileImage: reply.writer_profile_image || null,
+              profileImage: reply.writer_profile_image || null,
+              writerRole: replyWriterRole,
+              role: replyWriterRole,
+              isBrewery: replyWriterIsBrewery,
+              writerIsBrewery: replyWriterIsBrewery,
+              content: reply.content,
+              likeCount: Number(reply.like_count || 0),
+              liked: reply.liked,
+              createdAt: reply.created_at,
+              updatedAt: reply.updated_at,
+            };
+          }),
+      };
+    });
 
     return res.status(200).json({
       fundingId: resolvedFundingId,
@@ -6606,7 +7221,8 @@ const getBreweryLogComments = async (req, res) => {
 const likeBreweryLogComment = async (req, res) => {
   const { fundingId, breweryLogId, commentId, replyId } = req.params;
   const targetCommentId = replyId || commentId;
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   if (!targetCommentId || isNaN(Number(targetCommentId))) {
     return res.status(400).json({
@@ -6684,7 +7300,8 @@ const likeBreweryLogComment = async (req, res) => {
 const unlikeBreweryLogComment = async (req, res) => {
   const { fundingId, breweryLogId, commentId, replyId } = req.params;
   const targetCommentId = replyId || commentId;
-  const userId = req.user?.userId || 1;
+  const userId = requireUserId(req, res);
+  if (!userId) return;
 
   if (!targetCommentId || isNaN(Number(targetCommentId))) {
     return res.status(400).json({
@@ -6744,6 +7361,8 @@ module.exports = {
   uploadFundingDraftFile,
   verifyPhoneForFundingDraft,
   verifyAccountForFundingDraft,//추가4
+  requestBankAccountVerification,
+  confirmBankAccountVerification,
   saveNotices,
   uploadDocument,
   submitFundingDraft, //프로젝트제출

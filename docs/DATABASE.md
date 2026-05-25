@@ -26,9 +26,21 @@ Applied to `judam`:
 - `database/20260524_funding_interactions.sql`
 - `database/20260524_funding_review_comments.sql`
 - `database/20260525_funding_review_likes.sql`
+- `database/20260525_funding_bank_account_verifications.sql`
 
 Latest verification:
 
+- Rechecked after merge on 2026-05-25.
+- Confirmed `current_database() = judam` and `current_user = judam_jaewon`.
+- Confirmed `funding_review_comments`, `funding_review_comment_likes`, and `funding_review_likes`.
+- Confirmed review comment/like indexes:
+  - `idx_funding_review_comments_review_id`
+  - `idx_funding_review_comments_funding_review`
+  - `idx_funding_review_comment_likes_comment_id`
+  - `idx_funding_review_likes_review_id`
+- Confirmed review metadata columns still exist on `funding_reviews`: `mood`, `pairing`, `tags`, `record_visibility`, `updated_at`.
+- Applied and confirmed `funding_bank_account_verifications` for funding bank account verification request/confirm APIs.
+- Deleted all `funding_projects`/linked `funding_drafts` with exact title `test`; verified remaining count is 0.
 - Re-opened the SSM port forward on 2026-05-22.
 - Confirmed `current_database() = judam` and `current_user = judam_jaewon`.
 - Applied `database/20260522_funding_followup.sql`.
