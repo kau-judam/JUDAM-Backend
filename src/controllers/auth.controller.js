@@ -821,6 +821,18 @@ const getExistingKakaoUser = async (kakaoProfile) => {
   return findUserByEmail(kakaoProfile.email);
 };
 
+const sendKakaoEmailDuplicateResponse = (res, email, provider = 'local') => (
+  res.status(409).json({
+    status: 409,
+    message: '중복된 이메일로 가입된 기록이 있습니다.',
+    data: {
+      emailAlreadyExists: true,
+      provider,
+      email,
+    },
+  })
+);
+
 const hasEmptyProfileValue = (value) => value === null
   || value === undefined
   || (typeof value === 'string' && value.trim() === '');
@@ -892,6 +904,14 @@ const kakaoLoginByCode = async (req, res) => {
 
     const kakaoProfile = buildKakaoProfile(kakaoUserInfo);
     const existingUser = await getExistingKakaoUser(kakaoProfile);
+
+    if (existingUser && existingUser.provider !== 'kakao') {
+      return sendKakaoEmailDuplicateResponse(
+        res,
+        kakaoProfile.email || existingUser.email,
+        existingUser.provider,
+      );
+    }
 
     if (!existingUser) {
       const signupProfile = buildKakaoSignupProfile(kakaoProfile);
