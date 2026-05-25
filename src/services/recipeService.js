@@ -1,16 +1,109 @@
-const { checkRecipeLegalFilter } = require('../utils/aiFilterInterface');
+const { requestLawFilter } = require('./ai.service');
 const pool = require('../db');
 
 const INTEREST_THRESHOLD = 100;
+const LAW_FILTER_UNAVAILABLE_MESSAGE = '법률 검토 서비스가 일시적으로 unavailable하여 레시피를 등록할 수 없습니다.';
+const LAW_FILTER_BLOCK_MESSAGE = '법률 검토 결과 등록할 수 없는 레시피입니다.';
+
+const normalizeString = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  return String(value).trim();
+};
+
+const parseIngredientList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(normalizeString).filter(Boolean);
+  }
+
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+
+      if (Array.isArray(parsed)) {
+        return parsed.map(normalizeString).filter(Boolean);
+      }
+    } catch (error) {
+      // Fall back to comma/newline splitting below.
+    }
+
+    return value
+      .split(/[,\n]/)
+      .map(normalizeString)
+      .filter(Boolean);
+  }
+
+  return [normalizeString(value)].filter(Boolean);
+};
+
+const buildRecipeLawFilterPayload = (recipeData = {}) => {
+  const title = normalizeString(recipeData.title || recipeData.recipeTitle || 'recipe');
+  const description = [
+    recipeData.description,
+    recipeData.content,
+    recipeData.tastingNote,
+    recipeData.method,
+    recipeData.concept,
+    recipeData.summary,
+    recipeData.target_flavor,
+  ]
+    .map(normalizeString)
+    .filter(Boolean)
+    .join('\n');
+
+  const ingredients = [
+    ...parseIngredientList(recipeData.ingredients),
+    ...parseIngredientList(recipeData.main_ingredient),
+    ...parseIngredientList(recipeData.mainIngredient),
+    ...parseIngredientList(recipeData.sub_ingredient),
+    ...parseIngredientList(recipeData.subIngredient),
+    ...parseIngredientList(recipeData.ai_sub_ingredient),
+  ];
+
+  return {
+    content_type: 'recipe',
+    title,
+    description,
+    ingredients: [...new Set(ingredients)],
+  };
+};
+
+const createServiceError = (statusCode, message, data) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+
+  if (data !== undefined) {
+    error.data = data;
+  }
+
+  return error;
+};
+
+const runRecipeLawFilter = async (recipeData) => {
+  let lawFilter;
+
+  try {
+    lawFilter = await requestLawFilter(buildRecipeLawFilterPayload(recipeData));
+  } catch (error) {
+    throw createServiceError(error.statusCode || 502, LAW_FILTER_UNAVAILABLE_MESSAGE);
+  }
+
+  if (lawFilter.violation === true) {
+    throw createServiceError(400, LAW_FILTER_BLOCK_MESSAGE, lawFilter);
+  }
+
+  return lawFilter;
+};
 
 // 레시피 작성 (POST /api/recipes)
 const createRecipe = async (recipeData, user) => {
-  const { passed, reason } = await checkRecipeLegalFilter(recipeData);
-  if (!passed) {
-    const error = new Error(reason || '등록할 수 없는 내용이 포함되어 있습니다. 레시피 내용을 다시 확인해 주세요.');
-    error.statusCode = 400;
-    throw error;
-  }
+  const lawFilter = await runRecipeLawFilter(recipeData);
 
   const author_type = user.role === 'BREWERY' ? 'BREWERY' : 'USER';
 
@@ -35,7 +128,7 @@ const createRecipe = async (recipeData, user) => {
   );
 
   const row = result.rows[0];
-  return { ...row, recipe_id: parseInt(row.recipe_id) };
+  return { ...row, recipe_id: parseInt(row.recipe_id), lawFilter };
 };
 
 // 레시피 목록 조회 (GET /api/recipes)
@@ -197,12 +290,7 @@ const removeInterest = async (recipeId, userId) => {
 
 // 양조장 레시피 등록 (POST /api/recipes/brewery)
 const createBreweryRecipe = async (recipeData, user) => {
-  const { passed, reason } = await checkRecipeLegalFilter(recipeData);
-  if (!passed) {
-    const error = new Error(reason || '등록할 수 없는 내용이 포함되어 있습니다. 레시피 내용을 다시 확인해 주세요.');
-    error.statusCode = 400;
-    throw error;
-  }
+  const lawFilter = await runRecipeLawFilter(recipeData);
 
   const result = await pool.query(
     `INSERT INTO recipes
@@ -225,7 +313,7 @@ const createBreweryRecipe = async (recipeData, user) => {
   );
 
   const row = result.rows[0];
-  return { ...row, recipe_id: Number(row.recipe_id) };
+  return { ...row, recipe_id: Number(row.recipe_id), lawFilter };
 };
 
 // 양조장이 소비자 레시피 확인 (GET /api/recipes/brewery)

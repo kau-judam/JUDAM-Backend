@@ -4,6 +4,7 @@ const { uploadBufferToS3 } = require('./s3.service');
 const DEFAULT_IMAGE_MIME_TYPE = 'image/png';
 const AI_IMAGE_GENERATION_TIMEOUT_MS = 60000;
 const AI_FUNDING_REGISTER_TIMEOUT_MS = 30000;
+const AI_LAW_FILTER_TIMEOUT_MS = 30000;
 
 const getAiServerBaseUrl = () => {
   const { AI_SERVER_BASE_URL } = process.env;
@@ -246,6 +247,48 @@ const registerFundingToAiPool = async (fundingPayload) => {
   }
 };
 
+const requestLawFilter = async (payload) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/law/filter`, payload, {
+      timeout: AI_LAW_FILTER_TIMEOUT_MS,
+    });
+    const aiResponse = response.data;
+
+    if (!aiResponse || typeof aiResponse.violation !== 'boolean') {
+      throw createAiServiceError(502, 'AI 법률 검토 결과가 올바르지 않습니다.');
+    }
+
+    return {
+      violation: aiResponse.violation,
+      details: Array.isArray(aiResponse.details) ? aiResponse.details : [],
+      recommendation: aiResponse.recommendation || null,
+    };
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
 const generateAiImageAndUpload = async ({ payload, userId }) => {
   const baseUrl = getAiServerBaseUrl();
 
@@ -297,5 +340,6 @@ module.exports = {
   requestAiChat,
   requestAiRecommend,
   registerFundingToAiPool,
+  requestLawFilter,
   generateAiImageAndUpload,
 };
