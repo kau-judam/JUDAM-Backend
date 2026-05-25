@@ -41,6 +41,8 @@ Expected response:
 - Schema: `database/schema.sql`
 - Funding migration: `database/20260522_funding_project_flow.sql`
 - Funding follow-up migration: `database/20260522_funding_followup.sql`
+- Funding interactions migration: `database/20260524_funding_interactions.sql`
 - DB operation notes: `docs/DATABASE.md`
+- Funding frontend handoff: `docs/FRONTEND_HANDOFF_FUNDING.md`
 
 New code should import the database pool from `src/config/db.js`. Existing code that imports `src/db.js` continues to work because it re-exports the shared pool.

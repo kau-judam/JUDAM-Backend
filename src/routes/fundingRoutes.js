@@ -28,6 +28,7 @@ const {
   submitFundingDraft,
   uploadDocument,
   getFundingDraft,
+  getFundingDraftByFundingId,
   getFundingDraftList,
   deleteFundingDraft,
   getFundingDraftPreview,
@@ -42,7 +43,12 @@ const {
   createFundingReply,
   likeFundingQuestion,
   unlikeFundingQuestion,
+  likeFundingQuestionReply,
+  unlikeFundingQuestionReply,
   getFundingReviews,
+  getFundingReviewDetail,
+  likeFundingReview,
+  unlikeFundingReview,
   getSupportOptions,
   createFundingOrder,
   createFundingInquiry,
@@ -54,6 +60,11 @@ const {
   getFundingReports,
   createFundingReview,
   updateFundingReview,
+  deleteFundingReview,
+  getFundingReviewComments,
+  createFundingReviewComment,
+  likeFundingReviewComment,
+  unlikeFundingReviewComment,
   likeFundingProject,
   unlikeFundingProject,
   likeBreweryLog,
@@ -69,6 +80,7 @@ router.post('/agreements', saveAgreement);
 
 router.post('/drafts', createFundingDraft);
 router.get('/drafts', getFundingDraftList);
+router.get('/drafts/by-funding/:fundingId', getFundingDraftByFundingId);
 router.get('/drafts/:draftId', getFundingDraft);
 router.patch('/drafts/:draftId', updateFundingDraft);
 router.delete('/drafts/:draftId', deleteFundingDraft);
@@ -113,10 +125,20 @@ router.post('/:fundingId/questions', createFundingQuestion);
 router.post('/:fundingId/questions/:questionId/replies', createFundingReply);
 router.post('/:fundingId/questions/:questionId/likes', likeFundingQuestion);
 router.delete('/:fundingId/questions/:questionId/likes', unlikeFundingQuestion);
+router.post('/:fundingId/questions/:questionId/replies/:replyId/likes', likeFundingQuestionReply);
+router.delete('/:fundingId/questions/:questionId/replies/:replyId/likes', unlikeFundingQuestionReply);
 
 router.get('/:fundingId/reviews', getFundingReviews);
+router.get('/:fundingId/reviews/:reviewId', getFundingReviewDetail);
 router.post('/:fundingId/reviews', upload.array('images', 5), createFundingReview);
 router.patch('/:fundingId/reviews/:reviewId', upload.array('images', 5), updateFundingReview);
+router.delete('/:fundingId/reviews/:reviewId', deleteFundingReview);
+router.post('/:fundingId/reviews/:reviewId/likes', likeFundingReview);
+router.delete('/:fundingId/reviews/:reviewId/likes', unlikeFundingReview);
+router.get('/:fundingId/reviews/:reviewId/comments', getFundingReviewComments);
+router.post('/:fundingId/reviews/:reviewId/comments', createFundingReviewComment);
+router.post('/:fundingId/reviews/:reviewId/comments/:commentId/likes', likeFundingReviewComment);
+router.delete('/:fundingId/reviews/:reviewId/comments/:commentId/likes', unlikeFundingReviewComment);
 
 router.get('/:fundingId/support-options', getSupportOptions);
 router.post('/:fundingId/orders', createFundingOrder);
@@ -142,6 +164,8 @@ router.get('/:fundingId/brewery-logs/:breweryLogId/comments', getBreweryLogComme
 router.post('/:fundingId/brewery-logs/:breweryLogId/comments/:commentId/likes', likeBreweryLogComment);
 
 router.delete('/:fundingId/brewery-logs/:breweryLogId/comments/:commentId/likes',unlikeBreweryLogComment);
+router.post('/:fundingId/brewery-logs/:breweryLogId/comments/:commentId/replies/:replyId/likes', likeBreweryLogComment);
+router.delete('/:fundingId/brewery-logs/:breweryLogId/comments/:commentId/replies/:replyId/likes', unlikeBreweryLogComment);
 
 router.get('/:fundingId', getFundingDetail); // 모든 상세/기타 라우트들은 이거 위에 있어야 함
 

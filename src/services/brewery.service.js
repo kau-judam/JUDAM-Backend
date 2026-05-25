@@ -430,10 +430,86 @@ const rejectApplication = async ({ applicationId, rejectReason }) => {
   return mapApplication(rows[0]);
 };
 
+const updateApprovedApplicationByUserId = async ({
+  userId,
+  breweryName,
+  licenseNumber,
+  location,
+  documentUrl,
+  documentKey,
+}) => {
+  const updates = [];
+  const values = [userId];
+
+  const addUpdate = (column, value) => {
+    if (value === undefined) {
+      return;
+    }
+
+    values.push(value);
+    updates.push(`${column} = $${values.length}`);
+  };
+
+  addUpdate('brewery_name', breweryName);
+  addUpdate('license_number', licenseNumber);
+  addUpdate('location', location);
+  addUpdate('document_url', documentUrl);
+  addUpdate('document_key', documentKey);
+
+  if (updates.length === 0) {
+    throw createServiceError(
+      400,
+      '수정할 양조장 정보가 없습니다.',
+      'breweryName, licenseNumber, location, documentUrl, documentKey 중 하나 이상 필요합니다.',
+    );
+  }
+
+  const { rows } = await pool.query(
+    `
+      UPDATE brewery_auth
+      SET
+        ${updates.join(', ')},
+        updated_at = CURRENT_TIMESTAMP
+      WHERE application_id = (
+        SELECT application_id
+        FROM brewery_auth
+        WHERE user_id = $1
+          AND status = 'APPROVED'
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      )
+      RETURNING
+        application_id,
+        user_id,
+        brewery_name,
+        license_number,
+        location AS location,
+        document_url,
+        document_key,
+        reject_reason,
+        status,
+        created_at,
+        updated_at
+    `,
+    values,
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(
+      404,
+      '승인된 양조장 인증 정보를 찾을 수 없습니다.',
+      `user_id=${userId}`,
+    );
+  }
+
+  return mapApplication(rows[0]);
+};
+
 module.exports = {
   createApplication,
   getApplications,
   getApplicationByUserId,
   approveApplication,
   rejectApplication,
+  updateApprovedApplicationByUserId,
 };
