@@ -165,7 +165,7 @@ const createApplication = async ({
         VALUES (
           $1,
           $2,
-          'PENDING',
+          'APPROVED',
           $3,
           $4,
           $5,
@@ -215,7 +215,7 @@ const createApplication = async ({
       `
         UPDATE users
         SET
-          role = 'BREWERY_PENDING',
+          role = 'BREWERY',
           updated_at = CURRENT_TIMESTAMP
         WHERE user_id = $1
           AND deleted_at IS NULL
