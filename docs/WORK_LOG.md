@@ -308,6 +308,162 @@
 - 주소 검색은 보통 프론트에서 주소 검색 API를 붙이고, 백엔드는 선택된 주소/우편번호를 저장하는 구조가 필요합니다.
 - 술BTI 추천순의 실제 매칭 %는 현재 백엔드에 점수 테이블/AI 결과가 없어 `matchRate`를 실제 계산하지 못합니다.
 
+### Address Storage And Frontend Handoff
+
+완료:
+
+- 프론트가 다음/카카오 주소 검색에서 만든 `[우편번호] 주소` 문자열을 백엔드가 그대로 저장하는 방식으로 확정했습니다.
+- `PATCH /api/fundings/drafts/:draftId/brewery-info`의 `businessAddress`는 `funding_drafts.business_address`에 그대로 저장됩니다.
+- `POST /api/fundings/:fundingId/orders`의 `shippingAddress`는 `orders.shipping_address`에 그대로 저장됩니다.
+- `shippingAddress`가 `[06236] 서울 강남구 테헤란로 152` 형식이고 `postalCode`가 생략되면 백엔드가 `06236`을 추출해 `orders.postal_code`에 저장하도록 보강했습니다.
+- 후원 주문 주소 필드에 camelCase/snake_case alias를 추가했습니다.
+- S3 권한 요청, 주소 저장 방식, 업로드 API, 17개 항목 검증 결과를 프론트 전달용 문서로 정리했습니다.
+
+검증:
+
+- 실제 `judam` DB 기준으로 사업장 소재지 저장/불러오기와 후원 주문 배송지 저장을 확인했습니다.
+- 검증 주소: `[06236] 서울 강남구 테헤란로 152`
+- 확인 결과:
+  - `businessAddress` 저장/응답/불러오기 정상
+  - `shippingAddress` 저장/응답 정상
+  - `postalCode = 06236` 자동 추출/저장 정상
+- 테스트 데이터는 검증 후 삭제했습니다.
+
+문서:
+
+- `docs/FRONTEND_HANDOFF_FUNDING.md`
+
+### Funding Interaction Follow-up
+
+완료:
+
+- 프론트 재점검 피드백 기준으로 누락/애매한 상호작용 API를 보강했습니다.
+- `database/20260524_funding_interactions.sql`을 추가하고 `judam` DB에 적용했습니다.
+- Q&A 답글 좋아요/취소 API를 추가했습니다.
+- Q&A 목록 응답의 `replies`에 `writerId`, `writerNickname`, `likeCount`, `liked`를 추가했습니다.
+- 양조일지 답글 좋아요 전용 URL alias를 추가했습니다.
+- 기존 `brewery_log_comment_likes` 구조를 댓글/답글 공통 좋아요 저장소로 유지했습니다.
+- 후기 수정 API에서 multipart 이미지 추가와 `deleteImageUrls` 제거를 지원하도록 수정했습니다.
+- 후기 삭제 API를 추가했습니다.
+- 펀딩 목록/상세에 SulBTI 매칭 점수 alias를 추가했습니다:
+  - `sulbtiMatchScore`
+  - `matchScore`
+  - `tasteMatchScore`
+  - `matchRate`
+- `sort=RECOMMENDED`가 SulBTI 매칭 점수 기준으로 정렬되도록 수정했습니다.
+
+검증:
+
+- 실제 `judam` DB와 로컬 서버 `PORT=3100` 기준으로 API 통합 검증을 완료했습니다.
+- 검증 항목:
+  - Q&A 답글 좋아요/취소와 목록 재조회 시 `liked`, `likeCount` 유지
+  - 양조일지 댓글 좋아요
+  - 양조일지 답글 좋아요 전용 URL
+  - 양조일지 댓글 목록에서 댓글/답글 `liked`, `likeCount` 유지
+  - 후기 multipart 수정, 신규 이미지 추가, `deleteImageUrls` 제거
+  - 후기 삭제
+  - SulBTI 매칭 점수 4개 alias 반환
+- 테스트로 생성한 `fundingId=17` 관련 데이터는 모두 삭제했습니다.
+- 테스트 데이터 잔여 row 0건을 확인했습니다.
+
+### Funding Frontend Confirmation Follow-up
+
+완료:
+
+- 프론트 확인 요청 기준으로 후기 응답의 작성자 식별값을 보강했습니다.
+- 후기 목록, 상세, 작성, 수정, 삭제 응답에 아래 alias를 함께 내려주도록 통일했습니다:
+  - `writerId`
+  - `writer_id`
+  - `userId`
+  - `user_id`
+- 후기 상세 API를 추가했습니다:
+  - `GET /api/fundings/:fundingId/reviews/:reviewId`
+- 후기 목록/상세/작성/수정 응답에 `content`와 같은 값의 `detailReview`, `recordVisibility`와 같은 값의 `showRecord` alias를 추가했습니다.
+- 후기 multipart 수정에서 `tags`와 `deleteImageUrls` JSON 문자열 배열 파싱을 유지했습니다.
+- multipart/form-data에서 `recordVisibility=false` 또는 `showRecord=false`가 문자열로 와도 false로 처리되도록 boolean 파싱을 보강했습니다.
+- 양조일지 댓글/답글 좋아요와 Q&A 답글 좋아요 응답의 `liked`, `likeCount` 반환을 재확인했습니다.
+- SulBTI 매칭 점수 alias와 계산 불가 시 `null` 반환을 재확인했습니다.
+
+검증:
+
+- `node --check src/controllers/funding.controller.js`
+- `node --check src/routes/fundingRoutes.js`
+- 실제 `judam` DB 기준으로 임시 funding/review/Q&A/양조일지/SulBTI 데이터를 생성해 통합 검증했습니다.
+- 검증 항목:
+  - 후기 목록/상세/작성/수정/삭제 응답의 writer alias
+  - multipart `tags`, `deleteImageUrls` JSON 문자열 배열 처리
+  - Q&A 답글 좋아요 응답의 `liked`, `likeCount`
+  - 양조일지 댓글/답글 좋아요 응답의 `liked`, `likeCount`
+  - 펀딩 목록/상세 SulBTI match alias
+- 검증용 `fundingId=18` 관련 데이터는 모두 삭제했고, 테스트 row 0건을 확인했습니다.
+
+### Funding Review Comments And Brewery Update Follow-up
+
+완료:
+
+- 후기 상세 댓글 DB 저장용 마이그레이션을 추가하고 Judam DB에 적용했습니다:
+  - `database/20260524_funding_review_comments.sql`
+- 후기 댓글 목록/작성 API를 추가했습니다:
+  - `GET /api/fundings/:fundingId/reviews/:reviewId/comments`
+  - `POST /api/fundings/:fundingId/reviews/:reviewId/comments`
+- 후기 댓글 좋아요/취소 API를 추가했습니다:
+  - `POST /api/fundings/:fundingId/reviews/:reviewId/comments/:commentId/likes`
+  - `DELETE /api/fundings/:fundingId/reviews/:reviewId/comments/:commentId/likes`
+- 후기 댓글 응답에 `commentId`, `writerId`, `writerNickname`, `content`, `likeCount`, `liked`, `createdAt`, `updatedAt`을 포함했습니다.
+- 승인된 양조장 정보 수정 API를 추가했습니다:
+  - `PATCH /api/breweries/applications/me`
+- 양조장 인증 상태 조회는 기존 `GET /api/breweries/applications/me`를 유지하며, 프론트는 `data.status`로 PENDING/REJECTED/APPROVED UI를 붙이면 됩니다.
+
+검증:
+
+- Judam DB에 `20260524_funding_review_comments.sql` 적용 완료
+- 후기 댓글 작성/목록/좋아요/취소 통합 테스트 완료
+- 승인된 양조장 정보 수정 통합 테스트 완료
+- 검증용 `fundingId=20`, `reviewId=7`, `applicationId=6` 관련 데이터는 모두 삭제했습니다.
+- 테스트 row 0건을 확인했습니다.
+
+### Funding Creation Manage Final Recheck
+
+완료:
+
+- 관리하기 화면용 draft 조회 API를 추가했습니다:
+  - `GET /api/fundings/drafts/by-funding/:fundingId`
+- 제출 직후 프론트가 실수로 `draftId`를 상세/찜 API에 넘겨도 연결된 `fundingId`로 해석하도록 보강했습니다.
+- `GET /api/fundings/:fundingId`와 `POST/DELETE /api/fundings/:fundingId/likes`가 draft id fallback을 지원합니다.
+- 대표 이미지 1장이 2장처럼 보이지 않도록 이미지 URL 정규화/중복 제거를 강화했습니다.
+- 진행률이 100% 이후 프로젝트 계획/일정/고시/맛지표/안내사항 재저장 시 낮아지지 않도록 `GREATEST(progress_rate, n)` 기준으로 수정했습니다.
+- 일정 저장 시 `platformFeeRate`, `platformFeeAmount`, `shippingFee`를 draft DB에 저장하고 다시 내려주도록 보강했습니다.
+- 펀딩 통계 응답에 천만원 단위 필드를 추가했습니다:
+  - `totalRaisedTenMillion`
+  - `totalRaisedTenMillionUnit`
+- 양조일지 댓글 작성/목록 응답에 `writerId`, `writerNickname`, `likeCount`, `liked`, `replies`를 포함하도록 보강했습니다.
+- 후기 자체 좋아요/취소 API를 추가했습니다:
+  - `POST /api/fundings/:fundingId/reviews/:reviewId/likes`
+  - `DELETE /api/fundings/:fundingId/reviews/:reviewId/likes`
+- 후기 목록/상세 응답에 후기 자체 `likeCount`, `liked`를 포함했습니다.
+- 신고 저장은 한국어 사유 5종 기준으로 DB 저장됨을 재검증했습니다.
+
+검증:
+
+- Judam DB 기준 전체 플로우 통합 검증을 완료했습니다.
+- 검증 항목:
+  - 양조장 정보 탭 불러오기
+  - draft preview/manage load
+  - 프로젝트 계획 영상/예산/일정 로드
+  - 양조장 은행/계좌/대표자/업태/종목/파일 로드
+  - 필수 서류 5종 로드
+  - 제출 후 상세 조회
+  - 상세/찜의 draftId fallback
+  - 대표 이미지 중복 제거
+  - 진행률 100% 유지
+  - 천만원 단위 통계
+  - 양조일지 댓글 DB 저장/조회
+  - 신고 DB 저장
+  - 후기 mood/pairing/tags/recordVisibility 로드
+  - 후기 좋아요/댓글/댓글 좋아요
+- 검증용 `draftId=29`, `fundingId=22` 관련 데이터는 모두 삭제했습니다.
+- 테스트 row 0건을 확인했습니다.
+
 ## Backlog
 
 - 전체 펀딩 API 통합 테스트 작성 또는 Postman/curl 시나리오 정리
@@ -317,6 +473,5 @@
 - inquiry mock 응답 DB-backed로 전환
 - Toss checkout URL 생성 로직 완성
 - Toss confirm 에러 응답 JSON 핸들러 추가
-- 후기 삭제/좋아요/댓글 API 검토
 - `req.user?.userId || 1` 테스트 fallback 제거 및 인증 미들웨어 적용
 - `database/schema.sql`과 마이그레이션 파일의 기준 정리

@@ -4,6 +4,7 @@ const {
   getApplicationByUserId,
   approveApplication,
   rejectApplication,
+  updateApprovedApplicationByUserId,
 } = require('../services/brewery.service');
 
 const APPLICATION_STATUSES = new Set(['PENDING', 'APPROVED', 'REJECTED']);
@@ -18,6 +19,18 @@ const sendError = (res, status, message, error) => {
     message,
     error,
   });
+};
+
+const getOptionalString = (body, key) => {
+  if (!Object.prototype.hasOwnProperty.call(body, key)) {
+    return undefined;
+  }
+
+  if (body[key] === null) {
+    return null;
+  }
+
+  return typeof body[key] === 'string' ? body[key].trim() : String(body[key]).trim();
 };
 
 const createBreweryApplication = async (req, res) => {
@@ -123,8 +136,6 @@ const getMyBreweryApplication = async (req, res) => {
 
   try {
     const application = await getApplicationByUserId(userId);
-    console.log('getMyBreweryApplication response keys:', Object.keys(application));
-    console.log('getMyBreweryApplication response:', application);
 
     return res.status(200).json({
       status: 200,
@@ -136,6 +147,57 @@ const getMyBreweryApplication = async (req, res) => {
       res,
       error.statusCode || 500,
       error.message || '양조장 인증 신청 조회에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const updateMyApprovedBreweryApplication = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  const body = req.body || {};
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  const breweryName = getOptionalString(body, 'breweryName');
+  const licenseNumber = getOptionalString(body, 'licenseNumber');
+  const locationValue = getOptionalString(body, 'location');
+  const documentUrlValue = getOptionalString(body, 'documentUrl');
+  const documentKeyValue = getOptionalString(body, 'documentKey');
+  const location = locationValue === '' ? null : locationValue;
+  const documentUrl = documentUrlValue === '' ? null : documentUrlValue;
+  const documentKey = documentKeyValue === '' ? null : documentKeyValue;
+
+  if (breweryName === '' || licenseNumber === '') {
+    return sendError(
+      res,
+      400,
+      '양조장 정보 수정 입력값이 올바르지 않습니다.',
+      'breweryName, licenseNumber는 빈 문자열로 수정할 수 없습니다.',
+    );
+  }
+
+  try {
+    const application = await updateApprovedApplicationByUserId({
+      userId,
+      breweryName,
+      licenseNumber,
+      location,
+      documentUrl,
+      documentKey,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '승인된 양조장 정보가 수정되었습니다.',
+      data: application,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '승인된 양조장 정보 수정에 실패했습니다.',
       error.detail || error.message,
     );
   }
@@ -219,6 +281,7 @@ module.exports = {
   createBreweryApplication,
   getBreweryApplications,
   getMyBreweryApplication,
+  updateMyApprovedBreweryApplication,
   approveBreweryApplication,
   rejectBreweryApplication,
 };

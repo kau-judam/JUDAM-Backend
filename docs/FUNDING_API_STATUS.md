@@ -54,6 +54,27 @@ Checked on 2026-05-22 from repository code, SQL files, and the `judam` DB throug
   - Review create/update works without a title.
   - Test rows were cleaned up after verification.
 
+- Address storage retested against `judam`:
+  - `businessAddress` stores `[06236] 서울 강남구 테헤란로 152` unchanged in `funding_drafts.business_address`.
+  - `shippingAddress` stores `[06236] 서울 강남구 테헤란로 152` unchanged in `orders.shipping_address`.
+  - `orders.postal_code` is automatically extracted as `06236` when `postalCode` is omitted.
+
+- Interaction follow-up tested against `judam`:
+  - `database/20260524_funding_interactions.sql` applied.
+  - Q&A reply like/unlike persists and `GET /api/fundings/:fundingId/questions` returns reply `liked`, `likeCount`, `writerNickname`.
+  - Brewery log comment/reply likes persist and comment list returns `liked`/`likeCount` for both.
+  - Review `PATCH` supports multipart image upload plus `deleteImageUrls`.
+  - Review list/detail/create/update/delete responses include writer aliases: `writerId`, `writer_id`, `userId`, `user_id`.
+  - Review list/detail/create/update responses include `detailReview` and `showRecord` aliases.
+  - Review `DELETE` works.
+  - Review detail comment APIs were added: list/create/comment like/comment unlike.
+  - Review like/unlike APIs were added and list/detail return `liked`, `likeCount`.
+  - Draft manage load by funding id was added: `GET /api/fundings/drafts/by-funding/:fundingId`.
+  - Funding detail/like now resolve a submitted `draftId` to the linked `fundingId`.
+  - Funding stats include `totalRaisedTenMillion` for ten-million KRW display.
+  - Approved brewery info update API was added: `PATCH /api/breweries/applications/me`.
+  - Funding list/detail return SulBTI match aliases: `sulbtiMatchScore`, `matchScore`, `tasteMatchScore`, `matchRate`.
+
 ## Status By Requirement
 
 | No | Area | Current Status | Notes |
@@ -69,14 +90,14 @@ Checked on 2026-05-22 from repository code, SQL files, and the `judam` DB throug
 | 9 | Notices | Implemented | Saves refund, exchange, adult verification, risk notice. |
 | 10 | Documents | Functional | Upload API supports 5 frontend document types and stores file metadata/URL. S3 is used when configured; otherwise a data URL fallback is stored. |
 | 11 | Submit | Functional | Happy-path submit works against `judam`. It creates a `REVIEWING` funding project and stores `funding_id` on the draft. |
-| 12 | Public list/detail | Improved | List/detail include image fields, liked/likeCount, schedule/price fields, support options, taste profile, plan, brewery info, notices, legal info, and documents. |
+| 12 | Public list/detail | Improved | List/detail include de-duplicated image fields, liked/likeCount, schedule/price fields, support options, taste profile, plan, brewery info, notices, legal info, and documents. Detail resolves submitted draft ids to linked funding ids. |
 | 13 | Support options | Partial | GET exists. No create/update option API found. Migration adds volume/alcohol columns used by controller. |
 | 14 | Support order | Partial | Order creation exists with major fields. Some requested agreement fields are missing or simplified. |
 | 15 | Payment/Toss | Partial | Payment request returns `paymentUrl`/`checkoutUrl`; Toss confirm updates payment/order/funding amount. Request URL is still mocked in `order.controller.js`. |
 | 16 | Likes | Partial | Like/unlike and liked list exist. Many endpoints still use fallback user id `1` when auth is absent. |
 | 17 | Brewery logs | Improved | CRUD, like, comments, replies exist with unique `log_id`. Image upload now stores a usable URL fallback. No `videoUrl` handling in controller yet. |
-| 18 | Q&A | Improved | List/create/reply and question like/unlike exist. Replies, `likeCount`, and `liked` are returned. |
-| 19 | Reviews | Improved | List/create/update exist. Frontend fields `rating`, `content/detailReview`, `mood`, `pairing`, `tags`, `recordVisibility`, images are supported. Delete/like/comment APIs are not added. Eligibility checks are still missing. |
+| 18 | Q&A | Improved | List/create/reply, question like/unlike, and reply like/unlike exist. Replies include writer, `likeCount`, and `liked`. |
+| 19 | Reviews | Improved | List/detail/create/update/delete exist. Responses include writer id aliases plus `detailReview`/`showRecord`. Review like/unlike exist. Detail comments list/create/like/unlike exist. Update supports multipart images, JSON-string `tags`, and `deleteImageUrls`. Eligibility checks are still missing. |
 | 20 | Share/report | Implemented | Share link and reports are DB-backed. Share count increments and reports persist selected reason/detail content. |
 | 21 | Admin review | Improved | Approval updates the funding created during submit instead of creating a duplicate when `draft.funding_id` exists. Fallback path still uses `recipeId = 3` for old drafts without a linked funding. |
 

@@ -4,6 +4,7 @@ const {
   createBreweryApplication,
   getBreweryApplications,
   getMyBreweryApplication,
+  updateMyApprovedBreweryApplication,
   approveBreweryApplication,
   rejectBreweryApplication,
 } = require('../controllers/brewery.controller');
@@ -13,6 +14,7 @@ const router = express.Router();
 router.post('/applications', authMiddleware, createBreweryApplication);
 router.get('/applications', authMiddleware, getBreweryApplications);
 router.get('/applications/me', authMiddleware, getMyBreweryApplication);
+router.patch('/applications/me', authMiddleware, updateMyApprovedBreweryApplication);
 router.patch('/applications/:applicationId/approve', authMiddleware, approveBreweryApplication);
 router.patch('/applications/:applicationId/reject', authMiddleware, rejectBreweryApplication);
 

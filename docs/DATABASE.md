@@ -23,6 +23,9 @@ Applied to `judam`:
 
 - `database/20260522_funding_project_flow.sql`
 - `database/20260522_funding_followup.sql`
+- `database/20260524_funding_interactions.sql`
+- `database/20260524_funding_review_comments.sql`
+- `database/20260525_funding_review_likes.sql`
 
 Latest verification:
 
@@ -32,6 +35,11 @@ Latest verification:
 - Confirmed `funding_drafts.funding_id`.
 - Confirmed `funding_reviews.mood`, `pairing`, `tags`, `record_visibility`, `updated_at`.
 - Confirmed `funding_reviews.title` is nullable for the frontend review form.
+- Applied `database/20260524_funding_interactions.sql` on 2026-05-24.
+- Confirmed `funding_question_reply_likes` for Q&A reply like persistence.
+- Added `database/20260524_funding_review_comments.sql` for review detail comments and comment likes.
+- Applied `database/20260525_funding_review_likes.sql` on 2026-05-25.
+- Confirmed funding review like persistence through `funding_review_likes`.
 
 Skipped because `brewery_logs` is owned by `judam_admin`:
 
