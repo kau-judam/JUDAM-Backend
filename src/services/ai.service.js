@@ -3,6 +3,10 @@ const { uploadBufferToS3 } = require('./s3.service');
 
 const DEFAULT_IMAGE_MIME_TYPE = 'image/png';
 const AI_IMAGE_GENERATION_TIMEOUT_MS = 60000;
+const AI_FUNDING_REGISTER_TIMEOUT_MS = 30000;
+const AI_LAW_FILTER_TIMEOUT_MS = 30000;
+const AI_TASTE_UPDATE_TIMEOUT_MS = 30000;
+const AI_DRINK_REQUEST_TIMEOUT_MS = 30000;
 
 const getAiServerBaseUrl = () => {
   const { AI_SERVER_BASE_URL } = process.env;
@@ -141,6 +145,55 @@ const requestAiChat = async ({ message, userId, history }) => {
   }
 };
 
+const requestAiChatStream = async ({
+  message,
+  userId,
+  history,
+  signal,
+}) => {
+  const baseUrl = getAiServerBaseUrl();
+  const body = {
+    message,
+    history,
+  };
+
+  if (userId !== undefined && userId !== null) {
+    body.user_id = userId;
+  }
+
+  try {
+    return await axios.post(`${baseUrl}/api/chat/stream`, body, {
+      responseType: 'stream',
+      timeout: 30000,
+      signal,
+      headers: {
+        Accept: 'text/event-stream',
+      },
+    });
+  } catch (error) {
+    if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError') {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
 const requestAiRecommend = async ({ userId, tasteVector, pool }) => {
   const baseUrl = getAiServerBaseUrl();
 
@@ -163,6 +216,234 @@ const requestAiRecommend = async ({ userId, tasteVector, pool }) => {
     }
 
     return aiResponse;
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
+const updateAiTasteProfile = async (payload) => {
+  let baseUrl;
+
+  try {
+    baseUrl = getAiServerBaseUrl();
+
+    const response = await axios.post(`${baseUrl}/api/taste/update`, payload, {
+      timeout: AI_TASTE_UPDATE_TIMEOUT_MS,
+    });
+    const aiResponse = response.data || {};
+
+    if (aiResponse.status && aiResponse.status !== 'success') {
+      console.warn('AI taste update returned non-success response', {
+        status: aiResponse.status,
+        message: aiResponse.message,
+      });
+
+      return {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
+
+    return {
+      updated: true,
+      message: aiResponse.message || 'AI 취향 업데이트 성공',
+    };
+  } catch (error) {
+    console.warn('AI taste update failed', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      data: error.response?.data,
+      url: baseUrl ? `${baseUrl}/api/taste/update` : null,
+    });
+
+    return {
+      updated: false,
+      message: 'AI 취향 업데이트에 실패했습니다.',
+    };
+  }
+};
+
+const requestNewDrink = async (payload) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/drinks/request`, payload, {
+      timeout: AI_DRINK_REQUEST_TIMEOUT_MS,
+    });
+    const aiResponse = response.data || {};
+
+    if (aiResponse?.status === 'error') {
+      throw createAiServiceError(
+        400,
+        aiResponse.message || getAiErrorMessage(aiResponse),
+      );
+    }
+
+    return {
+      ...aiResponse,
+      requestId: aiResponse.request_id ?? aiResponse.requestId ?? null,
+    };
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
+const approveNewDrinkRequest = async (requestId) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/drinks/requests/${requestId}/approve`, null, {
+      timeout: AI_DRINK_REQUEST_TIMEOUT_MS,
+    });
+    const aiResponse = response.data || {};
+
+    if (aiResponse?.status === 'error') {
+      throw createAiServiceError(
+        400,
+        aiResponse.message || getAiErrorMessage(aiResponse),
+      );
+    }
+
+    return aiResponse;
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
+const isDuplicateFundingRegisterError = (error) => {
+  if (error.response?.status !== 400) {
+    return false;
+  }
+
+  const message = getAiErrorMessage(error.response.data);
+  return message.includes('이미 등록된 funding_id') || message.toLowerCase().includes('already');
+};
+
+const registerFundingToAiPool = async (fundingPayload) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/funding/register`, fundingPayload, {
+      timeout: AI_FUNDING_REGISTER_TIMEOUT_MS,
+    });
+    const aiResponse = response.data;
+
+    if (aiResponse?.status === 'error') {
+      throw createAiServiceError(
+        502,
+        aiResponse.message || getAiErrorMessage(aiResponse),
+      );
+    }
+
+    return aiResponse;
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (isDuplicateFundingRegisterError(error)) {
+      return {
+        status: 'success',
+        alreadyRegistered: true,
+        message: getAiErrorMessage(error.response.data),
+      };
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
+const requestLawFilter = async (payload) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/law/filter`, payload, {
+      timeout: AI_LAW_FILTER_TIMEOUT_MS,
+    });
+    const aiResponse = response.data;
+
+    if (!aiResponse || typeof aiResponse.violation !== 'boolean') {
+      throw createAiServiceError(502, 'AI 법률 검토 결과가 올바르지 않습니다.');
+    }
+
+    return {
+      violation: aiResponse.violation,
+      details: Array.isArray(aiResponse.details) ? aiResponse.details : [],
+      recommendation: aiResponse.recommendation || null,
+    };
   } catch (error) {
     if (error.statusCode) {
       throw error;
@@ -236,6 +517,12 @@ const generateAiImageAndUpload = async ({ payload, userId }) => {
 module.exports = {
   checkAiServerHealth,
   requestAiChat,
+  requestAiChatStream,
   requestAiRecommend,
+  updateAiTasteProfile,
+  requestNewDrink,
+  approveNewDrinkRequest,
+  registerFundingToAiPool,
+  requestLawFilter,
   generateAiImageAndUpload,
 };

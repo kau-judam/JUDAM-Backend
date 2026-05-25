@@ -186,7 +186,7 @@ const saveMySulbtiController = async (req, res) => {
   try {
     const isSurveyConvertRequest = req.body?.type === undefined && (
       Array.isArray(req.body)
-      || Object.keys(req.body || {}).some((key) => /^q(?:[1-9]|1[0-3])$/.test(key))
+      || Object.keys(req.body || {}).some((key) => /^q(?:[1-9]|1[0-9]|2[0-5])$/.test(key))
       || Object.prototype.hasOwnProperty.call(req.body || {}, 'answers')
       || Object.prototype.hasOwnProperty.call(req.body || {}, 'surveyResponses')
       || Object.prototype.hasOwnProperty.call(req.body || {}, 'responses')
@@ -314,6 +314,9 @@ const createMyArchiveWithImagesController = async (req, res) => {
     }
 
     const data = await getMyArchiveDetail(userId, archive.archiveId);
+    if (archive.aiTasteUpdate) {
+      data.aiTasteUpdate = archive.aiTasteUpdate;
+    }
 
     return res.status(201).json({
       status: 201,
@@ -363,9 +366,11 @@ const updateMyArchiveWithImagesController = async (req, res) => {
   try {
     const payload = normalizeArchiveFormPayload(req.body);
     const deleteImageIds = normalizeArchiveDeleteImageIds(req.body?.deleteImageIds);
+    let aiTasteUpdate = null;
 
     if (Object.keys(payload).length > 0) {
-      await updateMyArchive(userId, req.params.archiveId, payload);
+      const updatedArchive = await updateMyArchive(userId, req.params.archiveId, payload);
+      aiTasteUpdate = updatedArchive.aiTasteUpdate || null;
     }
 
     if (Array.isArray(deleteImageIds) && deleteImageIds.length > 0) {
@@ -379,6 +384,9 @@ const updateMyArchiveWithImagesController = async (req, res) => {
     }
 
     const data = await getMyArchiveDetail(userId, req.params.archiveId);
+    if (aiTasteUpdate) {
+      data.aiTasteUpdate = aiTasteUpdate;
+    }
 
     return res.status(200).json({
       status: 200,

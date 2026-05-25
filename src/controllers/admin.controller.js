@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { registerFundingProjectToAiPool } = require('../services/funding.service');
 
 // 관리자 제출 프로젝트 목록 조회
 const getSubmittedFundingDrafts = async (req, res) => {
@@ -237,12 +238,15 @@ const approveFundingDraft = async (req, res) => {
       client.release();
     }
 
+    const aiRecommendation = await registerFundingProjectToAiPool(funding.funding_id);
+
     return res.status(200).json({
       draftId: Number(draftId),
       fundingId: funding.funding_id,
       title: funding.title,
       status: funding.status,
       createdAt: funding.created_at,
+      aiRecommendation,
       message: '프로젝트가 승인되었습니다.',
     });
   } catch (error) {

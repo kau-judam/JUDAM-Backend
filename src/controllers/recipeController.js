@@ -66,8 +66,12 @@ const postRecipe = async (req, res) => {
       recipe,
     });
   } catch (error) {
-    if (error.statusCode === 400) {
-      return res.status(400).json({ status: 400, message: error.message });
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        status: error.statusCode,
+        message: error.message,
+        ...(error.data ? { data: error.data } : {}),
+      });
     }
     return res.status(500).json({ status: 500, message: '서버 내부 오류' });
   }
@@ -157,8 +161,12 @@ const postBreweryRecipe = async (req, res) => {
     publishRecipeAiReviewRequest(recipe, req.user);
     return res.status(201).json({ status: 201, message: '레시피가 등록되었습니다.', recipe });
   } catch (error) {
-    if (error.statusCode === 400) {
-      return res.status(400).json({ status: 400, message: error.message });
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        status: error.statusCode,
+        message: error.message,
+        ...(error.data ? { data: error.data } : {}),
+      });
     }
     return res.status(500).json({ status: 500, message: '서버 내부 오류' });
   }
