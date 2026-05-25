@@ -3,6 +3,7 @@ const { uploadBufferToS3 } = require('./s3.service');
 
 const DEFAULT_IMAGE_MIME_TYPE = 'image/png';
 const AI_IMAGE_GENERATION_TIMEOUT_MS = 60000;
+const AI_FUNDING_REGISTER_TIMEOUT_MS = 30000;
 
 const getAiServerBaseUrl = () => {
   const { AI_SERVER_BASE_URL } = process.env;
@@ -187,6 +188,64 @@ const requestAiRecommend = async ({ userId, tasteVector, pool }) => {
   }
 };
 
+const isDuplicateFundingRegisterError = (error) => {
+  if (error.response?.status !== 400) {
+    return false;
+  }
+
+  const message = getAiErrorMessage(error.response.data);
+  return message.includes('이미 등록된 funding_id') || message.toLowerCase().includes('already');
+};
+
+const registerFundingToAiPool = async (fundingPayload) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/funding/register`, fundingPayload, {
+      timeout: AI_FUNDING_REGISTER_TIMEOUT_MS,
+    });
+    const aiResponse = response.data;
+
+    if (aiResponse?.status === 'error') {
+      throw createAiServiceError(
+        502,
+        aiResponse.message || getAiErrorMessage(aiResponse),
+      );
+    }
+
+    return aiResponse;
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (isDuplicateFundingRegisterError(error)) {
+      return {
+        status: 'success',
+        alreadyRegistered: true,
+        message: getAiErrorMessage(error.response.data),
+      };
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
 const generateAiImageAndUpload = async ({ payload, userId }) => {
   const baseUrl = getAiServerBaseUrl();
 
@@ -237,5 +296,6 @@ module.exports = {
   checkAiServerHealth,
   requestAiChat,
   requestAiRecommend,
+  registerFundingToAiPool,
   generateAiImageAndUpload,
 };
