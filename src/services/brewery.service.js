@@ -103,21 +103,66 @@ const createApplication = async ({
 
   const existingApplication = await pool.query(
     `
-      SELECT application_id, status
+      SELECT
+        application_id,
+        user_id,
+        brewery_name,
+        license_number,
+        location,
+        business_address_detail,
+        phone_number,
+        document_url,
+        document_key,
+        original_name,
+        mime_type,
+        file_size,
+        reject_reason,
+        status,
+        created_at,
+        updated_at
       FROM brewery_auth
       WHERE user_id = $1
-        AND status = 'PENDING'
+        AND status IN ('PENDING', 'APPROVED')
+      ORDER BY
+        CASE WHEN status = 'PENDING' THEN 0 ELSE 1 END,
+        updated_at DESC NULLS LAST,
+        created_at DESC
       LIMIT 1
     `,
     [userId],
   );
 
-  if (existingApplication.rows.length > 0) {
-    throw createServiceError(
-      409,
-      '이미 진행 중인 양조장 인증 신청이 있습니다.',
-      `application_id=${existingApplication.rows[0].application_id}, status=${existingApplication.rows[0].status}`,
+  const existing = existingApplication.rows[0] || null;
+
+  if (existing?.status === 'APPROVED') {
+    const userResult = await pool.query(
+      `
+        UPDATE users
+        SET
+          role = 'BREWERY',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+          AND deleted_at IS NULL
+        RETURNING
+          user_id,
+          email,
+          nickname,
+          phone_number,
+          provider,
+          role,
+          profile_image
+      `,
+      [userId],
     );
+
+    if (userResult.rows.length === 0) {
+      throw createServiceError(404, '?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎.', `user_id=${userId}`);
+    }
+
+    return {
+      ...mapApplication(existing),
+      user: mapUserResponse(userResult.rows[0]),
+    };
   }
 
   let uploadedDocumentUrl = documentUrl || null;
@@ -137,6 +182,101 @@ const createApplication = async ({
     originalName = businessLicenseFile.originalname;
     mimeType = businessLicenseFile.mimetype;
     fileSize = businessLicenseFile.size;
+  }
+
+  if (existing?.status === 'PENDING') {
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const { rows } = await client.query(
+        `
+          UPDATE brewery_auth
+          SET
+            license_number = $1,
+            status = 'APPROVED',
+            location = $2,
+            brewery_name = $3,
+            business_address_detail = $4,
+            phone_number = $5,
+            document_url = $6,
+            document_key = $7,
+            original_name = $8,
+            mime_type = $9,
+            file_size = $10,
+            reject_reason = NULL,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE application_id = $11
+          RETURNING
+            application_id,
+            user_id,
+            brewery_name,
+            license_number,
+            location,
+            business_address_detail,
+            phone_number,
+            document_url,
+            document_key,
+            original_name,
+            mime_type,
+            file_size,
+            reject_reason,
+            status,
+            created_at,
+            updated_at
+        `,
+        [
+          licenseNumber,
+          location || null,
+          breweryName,
+          businessAddressDetail || null,
+          phoneNumber,
+          uploadedDocumentUrl,
+          uploadedDocumentKey,
+          originalName,
+          mimeType,
+          fileSize,
+          existing.application_id,
+        ],
+      );
+
+      const userResult = await client.query(
+        `
+          UPDATE users
+          SET
+            role = 'BREWERY',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = $1
+            AND deleted_at IS NULL
+          RETURNING
+            user_id,
+            email,
+            nickname,
+            phone_number,
+            provider,
+            role,
+            profile_image
+        `,
+        [userId],
+      );
+
+      if (userResult.rows.length === 0) {
+        throw createServiceError(404, '?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎.', `user_id=${userId}`);
+      }
+
+      await client.query('COMMIT');
+
+      return {
+        ...mapApplication(rows[0]),
+        user: mapUserResponse(userResult.rows[0]),
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   const client = await pool.connect();
