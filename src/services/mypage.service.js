@@ -558,11 +558,19 @@ const getLatestSulbti = async (userId) => {
     };
   }
 
+  const normalizedBtiCode = normalizeSulbtiBtiCode(latestResult.bti_code || latestResult.type_code);
+  const characterName = latestResult.character_name || latestResult.type_name || null;
+  const alcoholLabel = latestResult.alcohol_label || latestResult.description || null;
+
   return {
     hasResult: true,
-    type: latestResult.type_code || latestResult.bti_code || null,
-    title: latestResult.type_name || latestResult.character_name || null,
-    summary: latestResult.description || latestResult.alcohol_label || null,
+    type: normalizedBtiCode,
+    btiCode: normalizedBtiCode,
+    title: characterName,
+    description: alcoholLabel,
+    summary: alcoholLabel,
+    characterName,
+    alcoholLabel,
     tags: [],
   };
 };
@@ -597,6 +605,20 @@ const getEmptySulbtiResponse = () => ({
   updatedAt: null,
 });
 
+const normalizeSulbtiBtiCode = (btiCode) => {
+  if (btiCode === undefined || btiCode === null) {
+    return null;
+  }
+
+  const normalized = String(btiCode).trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.length >= 5 ? normalized.slice(0, 4) : normalized;
+};
+
 const hasSulbtiScoreColumns = (row) => [
   'sweetness_score',
   'body_score',
@@ -616,14 +638,17 @@ const mapSulbtiResponse = (row) => {
     }
     : null;
 
+  const normalizedType = normalizeSulbtiBtiCode(row.bti_code || row.type_code);
+  const tasteVector = row.taste_vector || null;
+
   return {
     hasResult: true,
-    type: row.type_code || row.bti_code || null,
-    title: row.type_name || row.character_name || null,
-    description: row.description || row.alcohol_label || null,
-    scores,
-    tasteVector: row.taste_vector || null,
-    btiCode: row.bti_code || row.type_code || null,
+    type: normalizedType,
+    title: row.character_name || row.type_name || null,
+    description: row.alcohol_label || row.description || null,
+    scores: scores || tasteVector,
+    tasteVector,
+    btiCode: normalizedType,
     characterName: row.character_name || row.type_name || null,
     alcoholLabel: row.alcohol_label || null,
     tags: [],
@@ -864,7 +889,7 @@ const normalizeSulbtiSurveyAnswers = (payload) => {
 const extractSulbtiSurveyResult = (aiResponse) => {
   const result = aiResponse?.data || aiResponse?.result || aiResponse || {};
   const tasteVector = result.taste_vector || result.tasteVector;
-  const btiCode = result.bti_code || result.btiCode;
+  const btiCode = normalizeSulbtiBtiCode(result.bti_code || result.btiCode);
   const characterName = result.character_name || result.characterName;
   const alcoholLabel = result.alcohol_label || result.alcoholLabel;
 
@@ -880,12 +905,22 @@ const extractSulbtiSurveyResult = (aiResponse) => {
   };
 };
 
-const mapSulbtiSurveySaveResponse = (row) => ({
-  tasteVector: row.taste_vector,
-  btiCode: row.bti_code,
-  characterName: row.character_name,
-  alcoholLabel: row.alcohol_label,
-});
+const mapSulbtiSurveySaveResponse = (row) => {
+  const normalizedBtiCode = normalizeSulbtiBtiCode(row.bti_code);
+  const tasteVector = row.taste_vector || null;
+
+  return {
+    hasResult: true,
+    type: normalizedBtiCode,
+    title: row.character_name || null,
+    description: row.alcohol_label || null,
+    scores: tasteVector,
+    tasteVector,
+    btiCode: normalizedBtiCode,
+    characterName: row.character_name,
+    alcoholLabel: row.alcohol_label,
+  };
+};
 
 const saveSulbtiSurveyResult = async (userId, surveyResult) => {
   const { rows } = await pool.query(
@@ -2231,6 +2266,7 @@ module.exports = {
   getUserBadgeRows,
   getMySulbti,
   saveMySulbti,
+  convertAndSaveMySulbtiSurvey,
   findSulbtiTypeByCode,
   mapSulbtiResponse,
   getEmptySulbtiResponse,
