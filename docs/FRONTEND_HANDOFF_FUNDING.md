@@ -1,6 +1,6 @@
 # Funding Frontend Handoff
 
-Last updated: 2026-05-24
+Last updated: 2026-05-26
 
 ## S3 Permission Request
 
@@ -164,6 +164,26 @@ const images = draft.basicInfo.allImageUrls;
 
 `thumbnailUrl`과 `allImageUrls`를 단순 합치면 중복 표시될 수 있으므로, 화면 갤러리는 `allImageUrls` 기준 사용을 권장합니다.
 
+### Public Funding Detail Image Fields
+
+```http
+GET /api/fundings/:fundingId
+```
+
+Image fields are normalized as arrays:
+
+```json
+{
+  "thumbnailUrl": "https://example.com/main.png",
+  "imageUrls": ["https://example.com/sub.png"],
+  "allImageUrls": ["https://example.com/main.png", "https://example.com/sub.png"]
+}
+```
+
+- `imageUrls`: array only; additional images excluding `thumbnailUrl`
+- `allImageUrls`: array only; representative image plus additional images, de-duplicated
+- The backend now also handles legacy DB values that were stored as one plain string or one JSON string.
+
 ### Submit Draft And Open Created Funding
 
 ```http
@@ -236,6 +256,138 @@ Recent shipping address:
 ```http
 GET /api/users/me/recent-shipping-address
 ```
+
+## Bank Account Verification APIs
+
+These APIs are for the funding project creation > brewery info tab > deposit account verification flow.
+
+### Request Verification
+
+```http
+POST /api/fundings/bank-account/verification
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "bankName": "국민은행",
+  "accountNumber": "123-456-7890",
+  "accountHolder": "홍길동"
+}
+```
+
+Response:
+
+```json
+{
+  "verificationId": 1,
+  "bankName": "국민은행",
+  "accountNumber": "123-456-7890",
+  "accountHolder": "홍길동",
+  "verified": false,
+  "accountVerified": false,
+  "bankVerificationToken": null,
+  "status": "PENDING",
+  "requestedAt": "2026-05-25T00:00:00.000Z",
+  "expiresAt": "2026-05-25T00:10:00.000Z",
+  "message": "계좌 인증 요청이 생성되었습니다."
+}
+```
+
+Local/dev can include this extra field unless `NODE_ENV=production`:
+
+```json
+{
+  "verificationCode": "1234"
+}
+```
+
+Production note: the real 1-won transfer/provider must send the code to the user's bank account. Until that provider is wired, local/dev uses the returned `verificationCode` only for integration testing.
+
+### Confirm Verification
+
+```http
+POST /api/fundings/bank-account/verification/confirm
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "verificationId": 1,
+  "bankName": "국민은행",
+  "accountNumber": "1234567890",
+  "accountHolder": "홍길동",
+  "verificationCode": "1234"
+}
+```
+
+Aliases accepted for code:
+
+- `verificationCode`
+- `verification_code`
+- `code`
+- `senderCode`
+- `sender_code`
+
+Response:
+
+```json
+{
+  "verificationId": 1,
+  "bankName": "국민은행",
+  "accountNumber": "123-456-7890",
+  "accountHolder": "홍길동",
+  "verified": true,
+  "accountVerified": true,
+  "bankVerificationToken": "token-string",
+  "status": "VERIFIED",
+  "confirmedAt": "2026-05-25T00:03:00.000Z",
+  "message": "계좌 인증이 완료되었습니다."
+}
+```
+
+When saving brewery info, send the returned token together with the account fields:
+
+```http
+PATCH /api/fundings/drafts/:draftId/brewery-info
+Content-Type: application/json
+```
+
+```json
+{
+  "bankName": "국민은행",
+  "accountNumber": "1234567890",
+  "accountHolder": "홍길동",
+  "bankVerificationToken": "token-string",
+  "accountVerified": true
+}
+```
+
+If `bankVerificationToken` is present, backend validates the token and stores `accountVerified: true`.
+
+Optional direct draft update endpoint:
+
+```http
+POST /api/fundings/drafts/:draftId/account-verification
+Content-Type: application/json
+```
+
+This endpoint now also requires a confirmed `bankVerificationToken`.
+
+```json
+{
+  "bankName": "국민은행",
+  "accountNumber": "1234567890",
+  "accountHolder": "홍길동",
+  "bankVerificationToken": "token-string"
+}
+```
+
+Do not use the old immediate-complete behavior. Frontend should request verification first, confirm it, then save/update the draft with the returned token.
 
 ## Upload APIs
 
@@ -328,13 +480,25 @@ Response:
 ```json
 {
   "questionId": 1,
+  "writerId": 2,
+  "userId": 2,
+  "writerNickname": "테스트소비자",
+  "writerRole": "USER",
+  "role": "USER",
+  "isBrewery": false,
+  "writerIsBrewery": false,
   "likeCount": 3,
   "liked": true,
   "replies": [
     {
       "replyId": 1,
-      "writerId": 1,
-      "writerNickname": "닉네임",
+      "writerId": 2,
+      "userId": 2,
+      "writerNickname": "테스트소비자",
+      "writerRole": "USER",
+      "role": "USER",
+      "isBrewery": false,
+      "writerIsBrewery": false,
       "content": "답글",
       "likeCount": 1,
       "liked": true,
@@ -343,6 +507,12 @@ Response:
   ]
 }
 ```
+
+Writer fields are always the actual author from `users`, not the funding project's brewery name.
+
+- General user question/reply: `writerRole: "USER"`, `isBrewery: false`
+- Brewery account question/reply: `writerRole: "BREWERY"`, `isBrewery: true`
+- Aliases also included where applicable: `writer_id`, `userId`, `user_id`, `role`, `writerIsBrewery`
 
 ## Brewery Log Comment/Reply Likes
 
@@ -374,7 +544,36 @@ Response:
 }
 ```
 
-`GET /api/fundings/:fundingId/brewery-logs/:breweryLogId/comments` returns `likeCount` and `liked` for both comments and replies.
+`GET /api/fundings/:fundingId/brewery-logs/:breweryLogId/comments` returns `likeCount`, `liked`, and actual writer fields for both comments and replies.
+
+Writer fields:
+
+```json
+{
+  "commentId": 1,
+  "writerId": 2,
+  "userId": 2,
+  "writerNickname": "테스트소비자",
+  "writerRole": "USER",
+  "role": "USER",
+  "isBrewery": false,
+  "writerIsBrewery": false,
+  "replies": [
+    {
+      "replyId": 2,
+      "writerId": 2,
+      "userId": 2,
+      "writerNickname": "테스트소비자",
+      "writerRole": "USER",
+      "role": "USER",
+      "isBrewery": false,
+      "writerIsBrewery": false
+    }
+  ]
+}
+```
+
+General user comment/reply returns `role=USER` and `isBrewery=false`. Brewery account comment/reply returns `role=BREWERY` and `isBrewery=true`.
 
 ## Review APIs
 
@@ -667,7 +866,14 @@ Comment response includes:
 - `commentId`
 - `breweryLogId`
 - `writerId`
+- `writer_id`
+- `userId`
+- `user_id`
 - `writerNickname`
+- `writerRole`
+- `role`
+- `isBrewery`
+- `writerIsBrewery`
 - `content`
 - `likeCount`
 - `liked`
@@ -755,4 +961,140 @@ Current calculation:
 - Configure S3 bucket/IAM/read URL policy for production.
 - Set `PUBLIC_WEB_BASE_URL` to deployed frontend/web URL for real share links.
 - Define a future AI-based SulBTI recommendation source if the deterministic taste-axis score is not enough.
-- Remove test fallback user id `1` after auth is fully enforced on funding endpoints.
+- Deploy/restart the backend after the auth fallback removal so the running server uses the updated writer identity logic.
+
+## 2026-05-25 Post-Merge Verification
+
+- Confirmed the connected DB is `judam`.
+- Confirmed these migrations are already applied on the connected DB:
+  - `database/20260524_funding_review_comments.sql`
+  - `database/20260525_funding_review_likes.sql`
+- Confirmed these review persistence tables exist:
+  - `funding_review_comments`
+  - `funding_review_comment_likes`
+  - `funding_review_likes`
+- Confirmed the required indexes for review comments/comment likes/review likes exist.
+- Confirmed `GET /api/fundings/drafts/by-funding/:fundingId` is routed and returns the same preview-shaped payload used by manage/edit.
+- Confirmed `basicInfo.allImageUrls` is built with duplicate removal and should be used as the manage/edit gallery source.
+- Confirmed review like/unlike routes are available:
+  - `POST /api/fundings/:fundingId/reviews/:reviewId/likes`
+  - `DELETE /api/fundings/:fundingId/reviews/:reviewId/likes`
+- Confirmed review like/unlike responses include `liked` and `likeCount` through the review response mapper.
+- Deleted remaining exact-title `test` funding rows from `judam`: funding projects 3 rows and linked drafts 2 rows. Remaining exact-title `test` count is 0.
+- Added and applied `database/20260525_funding_bank_account_verifications.sql`.
+- Added account verification request/confirm APIs:
+  - `POST /api/fundings/bank-account/verification`
+  - `POST /api/fundings/bank-account/verification/confirm`
+- Updated legacy draft account verification so it requires a confirmed `bankVerificationToken` instead of immediately marking the account verified.
+- Confirmed funding detail `imageUrls` and `allImageUrls` are returned as arrays.
+- Added actual writer fields to Q&A question/reply responses and brewery log comment/reply responses: `writerId`, `userId`, `writerNickname`, `writerRole`, `role`, `isBrewery`, `writerIsBrewery`.
+- Verified with a normal `USER` account that Q&A and brewery log comments/replies return the user's nickname/role and `isBrewery=false`.
+- `node --check src/controllers/funding.controller.js` and `node --check src/routes/fundingRoutes.js` passed after merge.
+
+## 2026-05-26 Funding Flow Recheck
+
+### Auth And Liked
+
+- Funding routes now use optional auth.
+- If `Authorization: Bearer {token}` is present and valid, `req.user.userId` is used.
+- If no `Authorization` header is present, public GET APIs still work, but user-specific `liked` returns `false`.
+- Comment/reply/like/review/order write APIs no longer use the old `userId=1` fallback.
+- Write APIs that need a user return `401 로그인이 필요합니다.` when no valid token/user is present.
+
+### Manage/Edit Load
+
+Verified with temporary linked `funding_project + funding_draft + documents 5종` data and cleaned it up afterward.
+
+```http
+GET /api/fundings/drafts/by-funding/:fundingId
+```
+
+Confirmed response includes DB values for:
+
+- `basicInfo.thumbnailUrl`
+- `basicInfo.imageUrls`
+- `basicInfo.allImageUrls`
+- `plan.videoUrl`
+- `plan.budgetPlan`
+- `plan.schedulePlan`
+- `breweryInfo.bankName`
+- `breweryInfo.accountNumber`
+- `breweryInfo.accountHolder`
+- `breweryInfo.representativeName`
+- `breweryInfo.businessType`
+- `breweryInfo.businessName`
+- `breweryInfo.businessCategory`
+- `breweryInfo.businessItem`
+- `documents` 5 required types
+
+Confirmed image policy:
+
+- `basicInfo.imageUrls`: array, representative image excluded
+- `basicInfo.allImageUrls`: array, representative image included, duplicates removed
+
+Confirmed document types:
+
+- `ID_CARD`
+- `BUSINESS_LICENSE`
+- `SALES_PERMIT`
+- `ALCOHOL_PERMIT`
+- `MANUFACTURING_LICENSE`
+
+### Public Detail
+
+```http
+GET /api/fundings/:fundingId
+```
+
+Confirmed registered draft-backed values are returned in public detail:
+
+- `category`
+- `mainIngredient`
+- `legalInfo`
+- `tasteProfile`
+- `plan`
+- `breweryInfo`
+- `notices`
+- `documents`
+- `allImageUrls`
+
+Public detail now falls back to linked draft values where the public funding row is missing draft-only fields.
+
+### Writer Identity
+
+Q&A question/reply, brewery log comment/reply, and review comment responses include actual writer fields from `users`:
+
+```json
+{
+  "writerId": 2,
+  "userId": 2,
+  "writerNickname": "테스트소비자",
+  "writerProfileImage": null,
+  "writerRole": "USER",
+  "role": "USER",
+  "isBrewery": false,
+  "writerIsBrewery": false
+}
+```
+
+- General users return `role=USER`, `isBrewery=false`.
+- Brewery-role users return `isBrewery=true` when `role` starts with `BREWERY`.
+- Writer nickname/profile comes from `users.nickname` and `users.profile_image`, not from the project brewery name.
+- Writer nickname fallback is now only `users.nickname -> "사용자"`. It does not fall back to `funding_projects.brewery_user_id`, `brewery_auth.brewery_name`, or the project brewery name.
+- Existing old rows that were already saved with the wrong `user_id` will still display that saved user. New writes save `req.user.userId`.
+
+### Rechecked APIs
+
+- `POST /api/fundings/:fundingId/questions`
+- `POST /api/fundings/:fundingId/questions/:questionId/replies`
+- `GET /api/fundings/:fundingId/questions`
+- `POST /api/fundings/:fundingId/brewery-logs/:breweryLogId/comments`
+- `POST /api/fundings/:fundingId/brewery-logs/:breweryLogId/comments/:commentId/replies`
+- `GET /api/fundings/:fundingId/brewery-logs/:breweryLogId/comments`
+- `POST /api/fundings/:fundingId/reviews/:reviewId/comments`
+- `GET /api/fundings/:fundingId/reviews/:reviewId/comments`
+- `POST /api/fundings/:fundingId/reports`
+- `POST /api/fundings/:fundingId/likes`
+- `DELETE /api/fundings/:fundingId/likes`
+
+Smoke test data cleanup confirmed 0 rows remaining for the temporary test markers.

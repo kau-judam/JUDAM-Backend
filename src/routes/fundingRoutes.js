@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const optionalAuthMiddleware = require('../middlewares/optionalAuthMiddleware');
 
 // 서류/이미지 업로드 관련
 const multer = require('multer');
@@ -24,6 +25,8 @@ const {
   uploadFundingDraftFile,
   verifyPhoneForFundingDraft,
   verifyAccountForFundingDraft,
+  requestBankAccountVerification,
+  confirmBankAccountVerification,
   saveNotices,
   submitFundingDraft,
   uploadDocument,
@@ -76,6 +79,8 @@ const {
   unlikeBreweryLogComment,
 } = require('../controllers/funding.controller');
 
+router.use(optionalAuthMiddleware);
+
 router.post('/agreements', saveAgreement);
 
 router.post('/drafts', createFundingDraft);
@@ -97,6 +102,8 @@ router.get('/drafts/:draftId/brewery-info/load', loadBreweryInfo);
 router.post('/drafts/:draftId/files', upload.single('file'), uploadFundingDraftFile);
 router.post('/drafts/:draftId/phone-verification', verifyPhoneForFundingDraft);
 router.post('/drafts/:draftId/account-verification', verifyAccountForFundingDraft);
+router.post('/bank-account/verification', requestBankAccountVerification);
+router.post('/bank-account/verification/confirm', confirmBankAccountVerification);
 
 router.post('/drafts/:draftId/documents', upload.single('file'), uploadDocument);
 router.post('/drafts/:draftId/submit', submitFundingDraft);

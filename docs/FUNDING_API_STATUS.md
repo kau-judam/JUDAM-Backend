@@ -94,7 +94,7 @@ Checked on 2026-05-22 from repository code, SQL files, and the `judam` DB throug
 | 13 | Support options | Partial | GET exists. No create/update option API found. Migration adds volume/alcohol columns used by controller. |
 | 14 | Support order | Partial | Order creation exists with major fields. Some requested agreement fields are missing or simplified. |
 | 15 | Payment/Toss | Partial | Payment request returns `paymentUrl`/`checkoutUrl`; Toss confirm updates payment/order/funding amount. Request URL is still mocked in `order.controller.js`. |
-| 16 | Likes | Partial | Like/unlike and liked list exist. Many endpoints still use fallback user id `1` when auth is absent. |
+| 16 | Likes | Improved | Like/unlike and liked list exist. Funding routes use optional auth; public GET returns `liked=false` when unauthenticated, and write APIs now require an authenticated user instead of falling back to user id `1`. |
 | 17 | Brewery logs | Improved | CRUD, like, comments, replies exist with unique `log_id`. Image upload now stores a usable URL fallback. No `videoUrl` handling in controller yet. |
 | 18 | Q&A | Improved | List/create/reply, question like/unlike, and reply like/unlike exist. Replies include writer, `likeCount`, and `liked`. |
 | 19 | Reviews | Improved | List/detail/create/update/delete exist. Responses include writer id aliases plus `detailReview`/`showRecord`. Review like/unlike exist. Detail comments list/create/like/unlike exist. Update supports multipart images, JSON-string `tags`, and `deleteImageUrls`. Eligibility checks are still missing. |
@@ -104,7 +104,7 @@ Checked on 2026-05-22 from repository code, SQL files, and the `judam` DB throug
 ## Main Gaps
 
 - Repository `database/schema.sql` is older than the funding controller. The applied DB patch is tracked in `database/20260522_funding_project_flow.sql`.
-- Several funding controllers still use `req.user?.userId || 1`; auth should be enforced before production.
+- Auth/ownership hardening is still needed for production, but funding write APIs no longer use the old `req.user?.userId || 1` fallback.
 - `createFundingInquiry` is still a mock response.
 - Old drafts without `funding_id` still fall back to admin approval's `recipeId = 3` path.
 - S3 upload requires correct bucket/IAM configuration. Local/test fallback stores data URLs unless `FILE_UPLOAD_STRICT_S3=true`.
