@@ -143,6 +143,55 @@ const requestAiChat = async ({ message, userId, history }) => {
   }
 };
 
+const requestAiChatStream = async ({
+  message,
+  userId,
+  history,
+  signal,
+}) => {
+  const baseUrl = getAiServerBaseUrl();
+  const body = {
+    message,
+    history,
+  };
+
+  if (userId !== undefined && userId !== null) {
+    body.user_id = userId;
+  }
+
+  try {
+    return await axios.post(`${baseUrl}/api/chat/stream`, body, {
+      responseType: 'stream',
+      timeout: 30000,
+      signal,
+      headers: {
+        Accept: 'text/event-stream',
+      },
+    });
+  } catch (error) {
+    if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError') {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
 const requestAiRecommend = async ({ userId, tasteVector, pool }) => {
   const baseUrl = getAiServerBaseUrl();
 
@@ -338,6 +387,7 @@ const generateAiImageAndUpload = async ({ payload, userId }) => {
 module.exports = {
   checkAiServerHealth,
   requestAiChat,
+  requestAiChatStream,
   requestAiRecommend,
   registerFundingToAiPool,
   requestLawFilter,
