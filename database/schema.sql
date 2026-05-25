@@ -10,6 +10,16 @@ CREATE TABLE IF NOT EXISTS users (
   provider VARCHAR(20) NOT NULL DEFAULT 'kakao',
   kakao_id BIGINT UNIQUE,
   profile_image TEXT,
+  terms_agreed BOOLEAN NOT NULL DEFAULT false,
+  privacy_agreed BOOLEAN NOT NULL DEFAULT false,
+  marketing_agreed BOOLEAN NOT NULL DEFAULT false,
+  terms_agreed_at TIMESTAMP,
+  privacy_agreed_at TIMESTAMP,
+  marketing_agreed_at TIMESTAMP,
+  taste_vector JSONB,
+  bti_code VARCHAR(20),
+  character_name VARCHAR(100),
+  alcohol_label VARCHAR(100),
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_login_at TIMESTAMP,
   deleted_at TIMESTAMP,
@@ -24,6 +34,48 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   revoked_at TIMESTAMP,
   CONSTRAINT fk_refresh_tokens_user
+    FOREIGN KEY (user_id)
+    REFERENCES users(user_id)
+    ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS password_reset_verifications (
+  verification_id BIGSERIAL PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  code VARCHAR(10) NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  verified_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_email
+ON password_reset_verifications(email);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_expires_at
+ON password_reset_verifications(expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_phone_verifications (
+  verification_id BIGSERIAL PRIMARY KEY,
+  phone_number VARCHAR(30) NOT NULL,
+  code VARCHAR(30) NOT NULL,
+  verification_token VARCHAR(255),
+  expires_at TIMESTAMP NOT NULL,
+  verified_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_phone_verifications_phone
+ON auth_phone_verifications(phone_number);
+
+CREATE INDEX IF NOT EXISTS idx_auth_phone_verifications_token
+ON auth_phone_verifications(verification_token);
+
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id BIGINT NOT NULL,
+  badge_id VARCHAR(50) NOT NULL,
+  earned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, badge_id),
+  CONSTRAINT fk_user_badges_user
     FOREIGN KEY (user_id)
     REFERENCES users(user_id)
     ON DELETE CASCADE
@@ -50,6 +102,7 @@ CREATE TABLE IF NOT EXISTS post_comments (
   user_id BIGINT NOT NULL,
   content TEXT NOT NULL,
   like_count INT NOT NULL DEFAULT 0,
+  parent_comment_id BIGINT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP,
   CONSTRAINT fk_post_comments_post
@@ -59,6 +112,10 @@ CREATE TABLE IF NOT EXISTS post_comments (
   CONSTRAINT fk_post_comments_user
     FOREIGN KEY (user_id)
     REFERENCES users(user_id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_post_comments_parent
+    FOREIGN KEY (parent_comment_id)
+    REFERENCES post_comments(comment_id)
     ON DELETE CASCADE
 );
 
@@ -279,8 +336,13 @@ CREATE TABLE IF NOT EXISTS brewery_auth (
   status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
   location VARCHAR(255),
   brewery_name VARCHAR(100),
+  business_address_detail VARCHAR(255),
+  phone_number VARCHAR(30),
   document_url TEXT,
   document_key TEXT,
+  original_name VARCHAR(255),
+  mime_type VARCHAR(100),
+  file_size BIGINT,
   reject_reason TEXT,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -452,6 +514,8 @@ CREATE TABLE IF NOT EXISTS user_archives (
   abv DECIMAL(4,1),
   tasting_note TEXT,
   record_date DATE,
+  mood VARCHAR(50),
+  pairing VARCHAR(100),
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_archives_user
     FOREIGN KEY (user_id)

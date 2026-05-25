@@ -5,6 +5,7 @@ const { findUserById } = require('./user.service');
 const ACCESS_TOKEN_EXPIRES_IN = '7d';
 const REFRESH_TOKEN_EXPIRES_IN = '14d';
 const REFRESH_TOKEN_EXPIRES_IN_MS = 14 * 24 * 60 * 60 * 1000;
+const KAKAO_SIGNUP_TOKEN_EXPIRES_IN = '10m';
 
 const createServiceError = (statusCode, message, detail) => {
   const error = new Error(message);
@@ -45,6 +46,46 @@ const generateRefreshToken = (userId) => {
       expiresIn: REFRESH_TOKEN_EXPIRES_IN,
     },
   );
+};
+
+const generateKakaoSignupToken = (kakaoProfile) => {
+  const payload = {
+    purpose: 'kakao_signup',
+    kakaoId: String(kakaoProfile.kakaoId),
+    email: kakaoProfile.email,
+    nickname: kakaoProfile.nickname,
+    profileImage: kakaoProfile.profileImage,
+  };
+
+  if (kakaoProfile.existingUserId) {
+    payload.existingUserId = String(kakaoProfile.existingUserId);
+  }
+
+  return jwt.sign(
+    payload,
+    getJwtSecret(),
+    {
+      expiresIn: KAKAO_SIGNUP_TOKEN_EXPIRES_IN,
+    },
+  );
+};
+
+const verifyKakaoSignupToken = (kakaoSignupToken) => {
+  try {
+    const decoded = jwt.verify(kakaoSignupToken, getJwtSecret());
+
+    if (decoded.purpose !== 'kakao_signup' || !decoded.kakaoId) {
+      throw createServiceError(401, '유효하지 않은 카카오 회원가입 토큰입니다.');
+    }
+
+    return decoded;
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    throw createServiceError(401, '유효하지 않거나 만료된 카카오 회원가입 토큰입니다.', error.message);
+  }
 };
 
 const saveRefreshToken = async ({ userId, refreshToken, expiresAt }) => {
@@ -142,6 +183,8 @@ const revokeRefreshToken = async (refreshToken) => {
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
+  generateKakaoSignupToken,
+  verifyKakaoSignupToken,
   saveRefreshToken,
   issueRefreshToken,
   refreshAccessToken,

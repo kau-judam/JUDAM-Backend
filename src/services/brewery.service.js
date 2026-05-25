@@ -1,17 +1,44 @@
+const path = require('path');
 const pool = require('../config/db');
+const { uploadFileToS3 } = require('./s3.service');
+
+const MAX_BUSINESS_LICENSE_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_BUSINESS_LICENSE_EXTENSIONS = new Set(['.pdf', '.jpg', '.jpeg', '.png']);
+const ALLOWED_BUSINESS_LICENSE_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+]);
 
 const mapApplication = (row) => ({
   applicationId: row.application_id,
   userId: row.user_id,
   breweryName: row.brewery_name,
+  businessNumber: row.license_number,
   licenseNumber: row.license_number,
+  businessAddress: row.location ?? null,
   location: row.location ?? null,
+  businessAddressDetail: row.business_address_detail ?? null,
+  phoneNumber: row.phone_number ?? null,
   documentUrl: row.document_url,
   documentKey: row.document_key,
+  originalName: row.original_name ?? null,
+  mimeType: row.mime_type ?? null,
+  fileSize: row.file_size === null || row.file_size === undefined ? null : Number(row.file_size),
   rejectReason: row.reject_reason,
   status: row.status,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+});
+
+const mapUserResponse = (row) => ({
+  userId: String(row.user_id),
+  email: row.email,
+  nickname: row.nickname,
+  phoneNumber: row.phone_number,
+  provider: row.provider,
+  role: row.role,
+  profileImage: row.profile_image,
 });
 
 const createServiceError = (statusCode, message, detail) => {
@@ -21,7 +48,59 @@ const createServiceError = (statusCode, message, detail) => {
   return error;
 };
 
-const createApplication = async ({ userId, breweryName, licenseNumber, location, documentUrl, documentKey }) => {
+const validateBusinessLicenseFile = (file) => {
+  if (!file) {
+    return;
+  }
+
+  const extension = path.extname(file.originalname || '').toLowerCase();
+
+  if (
+    !ALLOWED_BUSINESS_LICENSE_EXTENSIONS.has(extension)
+    || !ALLOWED_BUSINESS_LICENSE_MIME_TYPES.has(file.mimetype)
+  ) {
+    throw createServiceError(
+      400,
+      '사업자등록증 파일 형식이 올바르지 않습니다.',
+      'businessLicense는 pdf, jpg, jpeg, png 파일만 업로드할 수 있습니다.',
+    );
+  }
+
+  if (file.size > MAX_BUSINESS_LICENSE_FILE_SIZE) {
+    throw createServiceError(
+      400,
+      '사업자등록증 파일은 최대 10MB까지 업로드할 수 있습니다.',
+      `file_size=${file.size}`,
+    );
+  }
+};
+
+const extractS3KeyFromUrl = (fileUrl) => {
+  if (!fileUrl) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(new URL(fileUrl).pathname.replace(/^\/+/, ''));
+  } catch (error) {
+    const marker = '.amazonaws.com/';
+    return fileUrl.includes(marker) ? fileUrl.split(marker)[1] : null;
+  }
+};
+
+const createApplication = async ({
+  userId,
+  breweryName,
+  licenseNumber,
+  location,
+  businessAddressDetail,
+  phoneNumber,
+  businessLicenseFile,
+  documentUrl,
+  documentKey,
+}) => {
+  validateBusinessLicenseFile(businessLicenseFile);
+
   const existingApplication = await pool.query(
     `
       SELECT application_id, status
@@ -41,37 +120,133 @@ const createApplication = async ({ userId, breweryName, licenseNumber, location,
     );
   }
 
-  const { rows } = await pool.query(
-    `
-      INSERT INTO brewery_auth (
-        user_id,
-        license_number,
-        status,
-        location,
-        brewery_name,
-        document_url,
-        document_key,
-        created_at,
-        updated_at
-      )
-      VALUES ($1, $2, 'PENDING', $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      RETURNING
-        application_id,
-        user_id,
-        brewery_name,
-        license_number,
-        location AS location,
-        document_url,
-        document_key,
-        reject_reason,
-        status,
-        created_at,
-        updated_at
-    `,
-    [userId, licenseNumber, location || null, breweryName, documentUrl, documentKey || null],
-  );
+  let uploadedDocumentUrl = documentUrl || null;
+  let uploadedDocumentKey = documentKey || null;
+  let originalName = null;
+  let mimeType = null;
+  let fileSize = null;
 
-  return mapApplication(rows[0]);
+  if (businessLicenseFile) {
+    uploadedDocumentUrl = await uploadFileToS3(
+      businessLicenseFile.buffer,
+      businessLicenseFile.originalname,
+      businessLicenseFile.mimetype,
+      userId,
+    );
+    uploadedDocumentKey = extractS3KeyFromUrl(uploadedDocumentUrl);
+    originalName = businessLicenseFile.originalname;
+    mimeType = businessLicenseFile.mimetype;
+    fileSize = businessLicenseFile.size;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `
+        INSERT INTO brewery_auth (
+          user_id,
+          license_number,
+          status,
+          location,
+          brewery_name,
+          business_address_detail,
+          phone_number,
+          document_url,
+          document_key,
+          original_name,
+          mime_type,
+          file_size,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          'PENDING',
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP
+        )
+        RETURNING
+          application_id,
+          user_id,
+          brewery_name,
+          license_number,
+          location,
+          business_address_detail,
+          phone_number,
+          document_url,
+          document_key,
+          original_name,
+          mime_type,
+          file_size,
+          reject_reason,
+          status,
+          created_at,
+          updated_at
+      `,
+      [
+        userId,
+        licenseNumber,
+        location || null,
+        breweryName,
+        businessAddressDetail || null,
+        phoneNumber,
+        uploadedDocumentUrl,
+        uploadedDocumentKey,
+        originalName,
+        mimeType,
+        fileSize,
+      ],
+    );
+
+    const userResult = await client.query(
+      `
+        UPDATE users
+        SET
+          role = 'BREWERY_PENDING',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+          AND deleted_at IS NULL
+        RETURNING
+          user_id,
+          email,
+          nickname,
+          phone_number,
+          provider,
+          role,
+          profile_image
+      `,
+      [userId],
+    );
+
+    if (userResult.rows.length === 0) {
+      throw createServiceError(404, '사용자를 찾을 수 없습니다.', `user_id=${userId}`);
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      ...mapApplication(rows[0]),
+      user: mapUserResponse(userResult.rows[0]),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 const getApplications = async ({ status } = {}) => {
@@ -89,9 +264,14 @@ const getApplications = async ({ status } = {}) => {
         user_id,
         brewery_name,
         license_number,
-        location AS location,
+        location,
+        business_address_detail,
+        phone_number,
         document_url,
         document_key,
+        original_name,
+        mime_type,
+        file_size,
         reject_reason,
         status,
         created_at,
@@ -114,9 +294,14 @@ const getApplicationByUserId = async (userId) => {
         user_id,
         brewery_name,
         license_number,
-        location AS location,
+        location,
+        business_address_detail,
+        phone_number,
         document_url,
         document_key,
+        original_name,
+        mime_type,
+        file_size,
         reject_reason,
         status,
         created_at,
@@ -171,7 +356,9 @@ const approveApplication = async (applicationId) => {
     const userResult = await client.query(
       `
         UPDATE users
-        SET role = 'BREWERY'
+        SET
+          role = 'BREWERY',
+          updated_at = CURRENT_TIMESTAMP
         WHERE user_id = $1
         RETURNING user_id, role
       `,
@@ -216,9 +403,14 @@ const rejectApplication = async ({ applicationId, rejectReason }) => {
         user_id,
         brewery_name,
         license_number,
-        location AS location,
+        location,
+        business_address_detail,
+        phone_number,
         document_url,
         document_key,
+        original_name,
+        mime_type,
+        file_size,
         reject_reason,
         status,
         created_at,
@@ -230,7 +422,7 @@ const rejectApplication = async ({ applicationId, rejectReason }) => {
   if (rows.length === 0) {
     throw createServiceError(
       404,
-      '?묒“???몄쬆 ?좎껌??李얠쓣 ???놁뒿?덈떎.',
+      '양조장 인증 신청을 찾을 수 없습니다.',
       `application_id=${applicationId}`,
     );
   }

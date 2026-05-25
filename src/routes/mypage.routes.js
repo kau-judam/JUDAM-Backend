@@ -5,6 +5,7 @@ const authMiddleware = require('../middlewares/authMiddleware');
 const {
   getMyProfileController,
   getMyPageSummaryController,
+  getMyBadgesController,
   getMySulbtiController,
   saveMySulbtiController,
   checkNicknameController,
@@ -18,6 +19,7 @@ const {
   createMyArchiveController,
   createMyArchiveWithImagesController,
   updateMyArchiveController,
+  updateMyArchiveWithImagesController,
   deleteMyArchiveController,
   getArchiveTagsController,
   uploadArchiveImagesController,
@@ -28,11 +30,13 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/summary', authMiddleware, getMyPageSummaryController);
+router.get('/badges', authMiddleware, getMyBadgesController);
 router.get('/sulbti', authMiddleware, getMySulbtiController);
 router.post('/sulbti', authMiddleware, saveMySulbtiController);
 router.get('/archives/tags', authMiddleware, getArchiveTagsController);
 router.get('/archives', authMiddleware, getMyArchivesController);
 router.post('/archives/with-images', authMiddleware, upload.array('images', 3), createMyArchiveWithImagesController);
+router.patch('/archives/:archiveId/with-images', authMiddleware, upload.array('images', 3), updateMyArchiveWithImagesController);
 router.post('/archives/:archiveId/images', authMiddleware, upload.array('images', 3), uploadArchiveImagesController);
 router.delete('/archives/:archiveId/images/:imageId', authMiddleware, deleteArchiveImageController);
 router.get('/archives/:archiveId', authMiddleware, getMyArchiveDetailController);

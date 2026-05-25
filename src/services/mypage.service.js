@@ -6,6 +6,7 @@ const {
   isNicknameExists,
 } = require('./user.service');
 const { uploadFileToS3 } = require('./s3.service');
+const { convertSurvey } = require('./aiSurvey.service');
 const pool = require('../config/db');
 
 const createServiceError = (statusCode, message) => {
@@ -15,8 +16,9 @@ const createServiceError = (statusCode, message) => {
 };
 
 const PASSWORD_SALT_ROUNDS = 10;
+const DEFAULT_OCTOMO_API_URL = 'https://api.octoverse.kr/octomo/v1/public/message/exists';
 const OCTOMO_API_URL = process.env.OCTOMO_API_URL
-  || 'https://api.octoverse.kr/octomo/v1/public/message/exists';
+  || DEFAULT_OCTOMO_API_URL;
 const OCTOMO_RECEIVE_NUMBER = process.env.OCTOMO_RECEIVE_NUMBER || '1666-3538';
 
 const mapProfileResponse = (user) => ({
@@ -89,6 +91,20 @@ const generatePhoneVerificationCode = () => {
   return `JUDAM${randomNumber}`;
 };
 
+const getOctomoMessageExistsUrl = () => {
+  const trimmedUrl = (OCTOMO_API_URL || DEFAULT_OCTOMO_API_URL).trim().replace(/\/+$/, '');
+
+  if (trimmedUrl.endsWith('/public/message/exists')) {
+    return trimmedUrl;
+  }
+
+  if (trimmedUrl.endsWith('/public')) {
+    return `${trimmedUrl}/message/exists`;
+  }
+
+  return `${trimmedUrl}/public/message/exists`;
+};
+
 const requestPhoneVerification = async (userId, phoneNumber) => {
   const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
   const verificationCode = generatePhoneVerificationCode();
@@ -120,23 +136,34 @@ const checkOctomoMessageExists = async (phoneNumber, verificationCode) => {
     throw createServiceError(500, '전화번호 인증 서비스 설정이 누락되었습니다.');
   }
 
+  const octomoMessageExistsUrl = getOctomoMessageExistsUrl();
+
   try {
     const response = await axios.post(
-      OCTOMO_API_URL,
+      octomoMessageExistsUrl,
       {
         mobileNum: phoneNumber,
         text: verificationCode,
       },
       {
         headers: {
+          Accept: 'application/json',
           'Content-Type': 'application/json',
           Authorization: `Octomo ${process.env.OCTOMO_API_KEY}`,
         },
       },
     );
 
-    return response.data?.exists === true;
+    return response.data?.verified === true || response.data?.exists === true;
   } catch (error) {
+    console.error('Octomo API request failed', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      data: error.response?.data,
+      url: octomoMessageExistsUrl,
+    });
+
     throw createServiceError(502, '전화번호 인증 서비스와 통신할 수 없습니다.');
   }
 };
@@ -307,19 +334,205 @@ const getArchiveCount = async (userId) => {
   return Number(rows[0]?.count || 0);
 };
 
+const BADGES = [
+  {
+    badgeId: 'welcome',
+    name: '반가워요!',
+    displayOrder: 1,
+  },
+  {
+    badgeId: 'communicate',
+    name: '주담과 소통하기',
+    displayOrder: 2,
+  },
+  {
+    badgeId: 'funding-beginner',
+    name: '펀딩 입문자',
+    displayOrder: 3,
+  },
+  {
+    badgeId: 'funding-intermediate',
+    name: '펀딩 중급자',
+    displayOrder: 4,
+  },
+  {
+    badgeId: 'funding-expert',
+    name: '펀딩 숙련가',
+    displayOrder: 5,
+  },
+  {
+    badgeId: 'co-creator',
+    name: '공동 제작자',
+    displayOrder: 6,
+  },
+];
+
+const evaluateBadgeConditions = async (userId) => {
+  const [
+    userRowsResult,
+    postCountResult,
+    fundingSupportCountResult,
+    coCreatorCountResult,
+  ] = await Promise.all([
+    pool.query(
+      `
+        SELECT user_id
+        FROM users
+        WHERE user_id = $1
+          AND deleted_at IS NULL
+        LIMIT 1
+      `,
+      [userId],
+    ),
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM posts
+        WHERE user_id = $1
+      `,
+      [userId],
+    ),
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM orders
+        WHERE user_id = $1
+          AND order_status = 'PAID'
+          AND funding_id IS NOT NULL
+      `,
+      [userId],
+    ),
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM recipes
+        WHERE user_id = $1
+          AND (
+            is_fundable = true
+            OR status IN ('ADOPTED', 'SELECTED', 'FUNDED')
+          )
+      `,
+      [userId],
+    ),
+  ]);
+
+  const userExists = userRowsResult.rows.length > 0;
+  const postCount = Number(postCountResult.rows[0]?.count || 0);
+  const fundingSupportCount = Number(fundingSupportCountResult.rows[0]?.count || 0);
+  const coCreatorCount = Number(coCreatorCountResult.rows[0]?.count || 0);
+  const earnedBadgeIds = [];
+
+  if (userExists) {
+    earnedBadgeIds.push('welcome');
+  }
+
+  if (postCount >= 1) {
+    earnedBadgeIds.push('communicate');
+  }
+
+  if (fundingSupportCount >= 1) {
+    earnedBadgeIds.push('funding-beginner');
+  }
+
+  if (fundingSupportCount >= 5) {
+    earnedBadgeIds.push('funding-intermediate');
+  }
+
+  if (fundingSupportCount >= 10) {
+    earnedBadgeIds.push('funding-expert');
+  }
+
+  if (coCreatorCount >= 1) {
+    earnedBadgeIds.push('co-creator');
+  }
+
+  return earnedBadgeIds;
+};
+
+const grantEarnedBadges = async (userId, earnedBadgeIds) => {
+  if (!earnedBadgeIds || earnedBadgeIds.length === 0) {
+    return;
+  }
+
+  await pool.query(
+    `
+      INSERT INTO user_badges (
+        user_id,
+        badge_id,
+        earned_at
+      )
+      SELECT $1, unnest($2::text[]), CURRENT_TIMESTAMP
+      ON CONFLICT (user_id, badge_id) DO NOTHING
+    `,
+    [userId, earnedBadgeIds],
+  );
+};
+
+const getUserBadgeRows = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        badge_id,
+        earned_at
+      FROM user_badges
+      WHERE user_id = $1
+    `,
+    [userId],
+  );
+
+  return rows;
+};
+
+const getMyBadges = async (userId) => {
+  const earnedBadgeIds = await evaluateBadgeConditions(userId);
+  await grantEarnedBadges(userId, earnedBadgeIds);
+
+  const badgeRows = await getUserBadgeRows(userId);
+  const earnedAtByBadgeId = new Map(
+    badgeRows.map((row) => [row.badge_id, row.earned_at]),
+  );
+
+  return {
+    badges: BADGES.map((badge) => {
+      const earnedAt = earnedAtByBadgeId.get(badge.badgeId) || null;
+
+      return {
+        ...badge,
+        earned: Boolean(earnedAt),
+        earnedAt,
+      };
+    }),
+  };
+};
+
 const getLatestSulbti = async (userId) => {
   const { rows } = await pool.query(
     `
       SELECT
+        u.taste_vector,
+        u.bti_code,
+        u.character_name,
+        u.alcohol_label,
+        u.updated_at AS user_updated_at,
         r.result_id,
         r.created_at,
         t.type_code,
         t.type_name,
         t.description
-      FROM sul_bti_results r
+      FROM users u
+      LEFT JOIN LATERAL (
+        SELECT
+          result_id,
+          type_id,
+          created_at
+        FROM sul_bti_results
+        WHERE user_id = u.user_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) r ON TRUE
       LEFT JOIN sul_bti_types t ON r.type_id = t.type_id
-      WHERE r.user_id = $1
-      ORDER BY r.created_at DESC
+      WHERE u.user_id = $1
+        AND u.deleted_at IS NULL
       LIMIT 1
     `,
     [userId],
@@ -327,7 +540,15 @@ const getLatestSulbti = async (userId) => {
 
   const latestResult = rows[0];
 
-  if (!latestResult) {
+  const hasResult = Boolean(
+    latestResult?.result_id
+    || latestResult?.bti_code
+    || latestResult?.character_name
+    || latestResult?.alcohol_label
+    || latestResult?.taste_vector,
+  );
+
+  if (!hasResult) {
     return {
       hasResult: false,
       type: null,
@@ -339,9 +560,9 @@ const getLatestSulbti = async (userId) => {
 
   return {
     hasResult: true,
-    type: latestResult.type_code || null,
-    title: latestResult.type_name || null,
-    summary: latestResult.description || null,
+    type: latestResult.type_code || latestResult.bti_code || null,
+    title: latestResult.type_name || latestResult.character_name || null,
+    summary: latestResult.description || latestResult.alcohol_label || null,
     tags: [],
   };
 };
@@ -367,27 +588,49 @@ const getEmptySulbtiResponse = () => ({
   title: null,
   description: null,
   scores: null,
+  tasteVector: null,
+  btiCode: null,
+  characterName: null,
+  alcoholLabel: null,
   tags: [],
   createdAt: null,
   updatedAt: null,
 });
 
-const mapSulbtiResponse = (row) => ({
-  hasResult: true,
-  type: row.type_code || null,
-  title: row.type_name || null,
-  description: row.description || null,
-  scores: {
-    sweetness: Number(row.sweetness_score),
-    body: Number(row.body_score),
-    carbonation: Number(row.carbonation_score),
-    flavor: Number(row.flavor_score),
-    abv: Number(row.abv_score),
-  },
-  tags: [],
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
+const hasSulbtiScoreColumns = (row) => [
+  'sweetness_score',
+  'body_score',
+  'carbonation_score',
+  'flavor_score',
+  'abv_score',
+].every((field) => row[field] !== null && row[field] !== undefined);
+
+const mapSulbtiResponse = (row) => {
+  const scores = hasSulbtiScoreColumns(row)
+    ? {
+      sweetness: Number(row.sweetness_score),
+      body: Number(row.body_score),
+      carbonation: Number(row.carbonation_score),
+      flavor: Number(row.flavor_score),
+      abv: Number(row.abv_score),
+    }
+    : null;
+
+  return {
+    hasResult: true,
+    type: row.type_code || row.bti_code || null,
+    title: row.type_name || row.character_name || null,
+    description: row.description || row.alcohol_label || null,
+    scores,
+    tasteVector: row.taste_vector || null,
+    btiCode: row.bti_code || row.type_code || null,
+    characterName: row.character_name || row.type_name || null,
+    alcoholLabel: row.alcohol_label || null,
+    tags: [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.user_updated_at || null,
+  };
+};
 
 const findSulbtiTypeByCode = async (typeCode) => {
   const { rows } = await pool.query(
@@ -411,6 +654,11 @@ const getMySulbti = async (userId) => {
   const { rows } = await pool.query(
     `
       SELECT
+        u.taste_vector,
+        u.bti_code,
+        u.character_name,
+        u.alcohol_label,
+        u.updated_at AS user_updated_at,
         r.result_id,
         r.user_id,
         r.type_id,
@@ -424,19 +672,30 @@ const getMySulbti = async (userId) => {
         t.type_code,
         t.type_name,
         t.description
-      FROM sul_bti_results r
+      FROM users u
+      LEFT JOIN sul_bti_results r ON r.user_id = u.user_id
       LEFT JOIN sul_bti_types t ON r.type_id = t.type_id
-      WHERE r.user_id = $1
+      WHERE u.user_id = $1
+        AND u.deleted_at IS NULL
       LIMIT 1
     `,
     [userId],
   );
 
-  if (!rows[0]) {
+  const row = rows[0];
+  const hasResult = Boolean(
+    row?.result_id
+    || row?.bti_code
+    || row?.character_name
+    || row?.alcohol_label
+    || row?.taste_vector,
+  );
+
+  if (!hasResult) {
     return getEmptySulbtiResponse();
   }
 
-  return mapSulbtiResponse(rows[0]);
+  return mapSulbtiResponse(row);
 };
 
 const validateSulbtiScore = (score) => (
@@ -476,7 +735,205 @@ const validateSulbtiPayload = (payload) => {
   };
 };
 
+const SULBTI_SURVEY_QUESTION_KEYS = Array.from({ length: 25 }, (_, index) => `q${index + 1}`);
+const SULBTI_SURVEY_MULTI_SCORE_KEYS = ['q24', 'q25'];
+const SULBTI_SURVEY_FORMAT_ERROR_MESSAGE = '술BTI 설문 답변 형식이 올바르지 않습니다.';
+
+const hasSulbtiSurveyQuestionKeys = (payload) => (
+  payload
+  && typeof payload === 'object'
+  && !Array.isArray(payload)
+  && SULBTI_SURVEY_QUESTION_KEYS.some((key) => Object.prototype.hasOwnProperty.call(payload, key))
+);
+
+const isSurveyConvertPayload = (payload) => {
+  if (Array.isArray(payload)) {
+    return true;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+
+  if (payload.type !== undefined) {
+    return false;
+  }
+
+  if (hasSulbtiSurveyQuestionKeys(payload)) {
+    return true;
+  }
+
+  return Object.prototype.hasOwnProperty.call(payload, 'answers')
+    || Object.prototype.hasOwnProperty.call(payload, 'surveyResponses')
+    || Object.prototype.hasOwnProperty.call(payload, 'responses');
+};
+
+const normalizeSulbtiSurveyScore = (value) => {
+  const score = typeof value === 'string' && value.trim() !== ''
+    ? Number(value)
+    : value;
+
+  if (
+    typeof score !== 'number'
+    || !Number.isFinite(score)
+    || !Number.isInteger(score)
+    || score < 1
+    || score > 5
+  ) {
+    throw createServiceError(400, SULBTI_SURVEY_FORMAT_ERROR_MESSAGE);
+  }
+
+  return score;
+};
+
+const normalizeSulbtiSurveyMultiScore = (value) => {
+  const values = Array.isArray(value) ? value : [value];
+
+  if (values.length === 0) {
+    throw createServiceError(400, SULBTI_SURVEY_FORMAT_ERROR_MESSAGE);
+  }
+
+  return values.map(normalizeSulbtiSurveyScore);
+};
+
+const assertCompleteSulbtiSurveyAnswers = (normalizedPayload) => {
+  const hasAllAnswers = SULBTI_SURVEY_QUESTION_KEYS.every(
+    (key) => Object.prototype.hasOwnProperty.call(normalizedPayload, key),
+  );
+
+  if (!hasAllAnswers) {
+    throw createServiceError(400, SULBTI_SURVEY_FORMAT_ERROR_MESSAGE);
+  }
+};
+
+const normalizeSulbtiSurveyQuestionValue = (questionKey, value) => {
+  if (SULBTI_SURVEY_MULTI_SCORE_KEYS.includes(questionKey)) {
+    return normalizeSulbtiSurveyMultiScore(value);
+  }
+
+  return normalizeSulbtiSurveyScore(value);
+};
+
+const normalizeSulbtiSurveyAnswers = (payload) => {
+  if (hasSulbtiSurveyQuestionKeys(payload)) {
+    const normalizedPayload = SULBTI_SURVEY_QUESTION_KEYS.reduce((acc, key) => {
+      if (Object.prototype.hasOwnProperty.call(payload, key)) {
+        acc[key] = normalizeSulbtiSurveyQuestionValue(key, payload[key]);
+      }
+
+      return acc;
+    }, {});
+
+    assertCompleteSulbtiSurveyAnswers(normalizedPayload);
+    return normalizedPayload;
+  }
+
+  const answerItems = Array.isArray(payload)
+    ? payload
+    : payload?.answers || payload?.surveyResponses || payload?.responses;
+
+  if (!Array.isArray(answerItems)) {
+    throw createServiceError(400, SULBTI_SURVEY_FORMAT_ERROR_MESSAGE);
+  }
+
+  const normalizedPayload = {};
+
+  answerItems.forEach((item) => {
+    if (!item || typeof item !== 'object') {
+      return;
+    }
+
+    const questionNumber = Number(item.questionId);
+
+    if (!Number.isInteger(questionNumber) || questionNumber < 1 || questionNumber > 25) {
+      return;
+    }
+
+    const questionKey = `q${questionNumber}`;
+    const answerValue = Object.prototype.hasOwnProperty.call(item, 'score')
+      ? item.score
+      : item.answer;
+
+    normalizedPayload[questionKey] = normalizeSulbtiSurveyQuestionValue(questionKey, answerValue);
+  });
+
+  assertCompleteSulbtiSurveyAnswers(normalizedPayload);
+  return normalizedPayload;
+};
+
+const extractSulbtiSurveyResult = (aiResponse) => {
+  const result = aiResponse?.data || aiResponse?.result || aiResponse || {};
+  const tasteVector = result.taste_vector || result.tasteVector;
+  const btiCode = result.bti_code || result.btiCode;
+  const characterName = result.character_name || result.characterName;
+  const alcoholLabel = result.alcohol_label || result.alcoholLabel;
+
+  if (!tasteVector || !btiCode || !characterName || !alcoholLabel) {
+    throw createServiceError(502, 'AI 술BTI 변환 결과가 올바르지 않습니다.');
+  }
+
+  return {
+    tasteVector,
+    btiCode,
+    characterName,
+    alcoholLabel,
+  };
+};
+
+const mapSulbtiSurveySaveResponse = (row) => ({
+  tasteVector: row.taste_vector,
+  btiCode: row.bti_code,
+  characterName: row.character_name,
+  alcoholLabel: row.alcohol_label,
+});
+
+const saveSulbtiSurveyResult = async (userId, surveyResult) => {
+  const { rows } = await pool.query(
+    `
+      UPDATE users
+      SET
+        taste_vector = $1::jsonb,
+        bti_code = $2,
+        character_name = $3,
+        alcohol_label = $4,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $5
+        AND deleted_at IS NULL
+      RETURNING
+        taste_vector,
+        bti_code,
+        character_name,
+        alcohol_label
+    `,
+    [
+      JSON.stringify(surveyResult.tasteVector),
+      surveyResult.btiCode,
+      surveyResult.characterName,
+      surveyResult.alcoholLabel,
+      userId,
+    ],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+  }
+
+  return mapSulbtiSurveySaveResponse(rows[0]);
+};
+
+const convertAndSaveMySulbtiSurvey = async (userId, payload) => {
+  const normalizedPayload = normalizeSulbtiSurveyAnswers(payload);
+  const aiResponse = await convertSurvey(normalizedPayload, userId);
+  const surveyResult = extractSulbtiSurveyResult(aiResponse);
+
+  return saveSulbtiSurveyResult(userId, surveyResult);
+};
+
 const saveMySulbti = async (userId, payload) => {
+  if (isSurveyConvertPayload(payload)) {
+    return convertAndSaveMySulbtiSurvey(userId, payload);
+  }
+
   const {
     typeCode,
     sweetnessScore,
@@ -669,6 +1126,8 @@ const mapArchiveResponse = (row, tags = [], images = []) => ({
   rating: toNullableNumber(row.rating),
   tastingNote: row.tasting_note,
   recordDate: formatDateOnly(row.record_date),
+  mood: row.mood,
+  pairing: row.pairing,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   tags,
@@ -687,6 +1146,8 @@ const archiveSelectSql = `
     ua.abv,
     ua.tasting_note,
     ua.record_date,
+    ua.mood,
+    ua.pairing,
     ua.funding_id,
     ua.order_id,
     ua.review_id,
@@ -956,6 +1417,8 @@ const validateArchivePayload = (payload = {}, isPartial = false) => {
     rating: () => normalizeOptionalNumber(body.rating, 'rating', 0, 5),
     tastingNote: () => normalizeOptionalString(body.tastingNote, 'tastingNote'),
     recordDate: () => normalizeOptionalRecordDate(body.recordDate),
+    mood: () => normalizeOptionalString(body.mood, 'mood'),
+    pairing: () => normalizeOptionalString(body.pairing, 'pairing'),
     fundingId: () => normalizeOptionalId(body.fundingId, 'fundingId'),
     orderId: () => normalizeOptionalId(body.orderId, 'orderId'),
     reviewId: () => normalizeOptionalId(body.reviewId, 'reviewId'),
@@ -1208,6 +1671,58 @@ const parseArchiveFormCustomTags = (customTags) => {
   return normalizeCustomTags(stringValue.split(','));
 };
 
+const normalizeArchiveDeleteImageIds = (deleteImageIds) => {
+  if (deleteImageIds === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(deleteImageIds)) {
+    return [...new Set(
+      deleteImageIds.flatMap((imageId) => normalizeArchiveDeleteImageIds(imageId) || []),
+    )];
+  }
+
+  if (deleteImageIds === null) {
+    return [];
+  }
+
+  const stringValue = String(deleteImageIds).trim();
+
+  if (!stringValue) {
+    return [];
+  }
+
+  let parsedValues;
+
+  if (stringValue.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(stringValue);
+
+      if (!Array.isArray(parsed)) {
+        throw new Error('deleteImageIds must be an array');
+      }
+
+      parsedValues = parsed;
+    } catch (error) {
+      throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
+    }
+  } else {
+    parsedValues = stringValue.split(',');
+  }
+
+  const imageIds = parsedValues.map((imageId) => Number(String(imageId).trim()));
+
+  if (
+    imageIds.some(
+      (imageId) => !Number.isInteger(imageId) || imageId < 1,
+    )
+  ) {
+    throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
+  }
+
+  return [...new Set(imageIds)];
+};
+
 const normalizeArchiveFormValue = (fieldName, value) => {
   if (value === undefined) {
     return undefined;
@@ -1248,6 +1763,8 @@ const normalizeArchiveFormPayload = (body = {}) => {
     'rating',
     'tastingNote',
     'recordDate',
+    'mood',
+    'pairing',
     'fundingId',
     'orderId',
     'reviewId',
@@ -1357,6 +1874,8 @@ const createMyArchive = async (userId, payload) => {
           abv,
           tasting_note,
           record_date,
+          mood,
+          pairing,
           funding_id,
           order_id,
           review_id,
@@ -1376,6 +1895,8 @@ const createMyArchive = async (userId, payload) => {
           $10,
           $11,
           $12,
+          $13,
+          $14,
           CURRENT_TIMESTAMP,
           CURRENT_TIMESTAMP
         )
@@ -1391,6 +1912,8 @@ const createMyArchive = async (userId, payload) => {
         archiveData.abv ?? null,
         archiveData.tastingNote ?? null,
         archiveData.recordDate ?? null,
+        archiveData.mood ?? null,
+        archiveData.pairing ?? null,
         archiveData.fundingId ?? null,
         archiveData.orderId ?? null,
         archiveData.reviewId ?? null,
@@ -1439,6 +1962,8 @@ const updateMyArchive = async (userId, archiveId, payload) => {
       ['rating', 'rating'],
       ['tastingNote', 'tasting_note'],
       ['recordDate', 'record_date'],
+      ['mood', 'mood'],
+      ['pairing', 'pairing'],
       ['fundingId', 'funding_id'],
       ['orderId', 'order_id'],
       ['reviewId', 'review_id'],
@@ -1700,6 +2225,10 @@ module.exports = {
   generatePhoneVerificationCode,
   checkOctomoMessageExists,
   getMyPageSummary,
+  getMyBadges,
+  evaluateBadgeConditions,
+  grantEarnedBadges,
+  getUserBadgeRows,
   getMySulbti,
   saveMySulbti,
   findSulbtiTypeByCode,
@@ -1716,6 +2245,7 @@ module.exports = {
   findMyArchiveForImage,
   mapArchiveImageResponse,
   normalizeArchiveFormPayload,
+  normalizeArchiveDeleteImageIds,
   mapArchiveResponse,
   validateArchivePayload,
   validateTagIds,

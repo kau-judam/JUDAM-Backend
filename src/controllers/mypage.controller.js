@@ -7,6 +7,7 @@ const {
   requestPhoneVerification,
   updatePhoneNumberWithVerification,
   getMyPageSummary,
+  getMyBadges,
   getMySulbti,
   saveMySulbti,
   getMyArchives,
@@ -18,6 +19,7 @@ const {
   uploadArchiveImages,
   deleteArchiveImage,
   normalizeArchiveFormPayload,
+  normalizeArchiveDeleteImageIds,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -128,6 +130,29 @@ const getMyPageSummaryController = async (req, res) => {
   }
 };
 
+const getMyBadgesController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMyBadges(userId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '마이페이지 뱃지 목록 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '마이페이지 뱃지 목록 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 const getMySulbtiController = async (req, res) => {
   const userId = getAuthenticatedUserId(req, res);
 
@@ -159,19 +184,27 @@ const saveMySulbtiController = async (req, res) => {
   }
 
   try {
+    const isSurveyConvertRequest = req.body?.type === undefined && (
+      Array.isArray(req.body)
+      || Object.keys(req.body || {}).some((key) => /^q(?:[1-9]|1[0-3])$/.test(key))
+      || Object.prototype.hasOwnProperty.call(req.body || {}, 'answers')
+      || Object.prototype.hasOwnProperty.call(req.body || {}, 'surveyResponses')
+      || Object.prototype.hasOwnProperty.call(req.body || {}, 'responses')
+    );
     const data = await saveMySulbti(userId, req.body);
+    const status = isSurveyConvertRequest ? 200 : 201;
 
-    return res.status(201).json({
-      status: 201,
+    return res.status(status).json({
+      status,
       message: '술BTI 결과 저장 성공',
       data,
     });
   } catch (error) {
     const status = getErrorStatus(error);
 
-    if (status === 400) {
-      return res.status(400).json({
-        status: 400,
+    if ([400, 500, 502, 504].includes(status)) {
+      return res.status(status).json({
+        status,
         message: error.message,
       });
     }
@@ -305,6 +338,47 @@ const updateMyArchiveController = async (req, res) => {
 
   try {
     const data = await updateMyArchive(userId, req.params.archiveId, req.body);
+
+    return res.status(200).json({
+      status: 200,
+      message: '아카이브 수정 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '아카이브 수정 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const updateMyArchiveWithImagesController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const payload = normalizeArchiveFormPayload(req.body);
+    const deleteImageIds = normalizeArchiveDeleteImageIds(req.body?.deleteImageIds);
+
+    if (Object.keys(payload).length > 0) {
+      await updateMyArchive(userId, req.params.archiveId, payload);
+    }
+
+    if (Array.isArray(deleteImageIds) && deleteImageIds.length > 0) {
+      for (const imageId of deleteImageIds) {
+        await deleteArchiveImage(userId, req.params.archiveId, imageId);
+      }
+    }
+
+    if (Array.isArray(req.files) && req.files.length > 0) {
+      await uploadArchiveImages(userId, req.params.archiveId, req.files);
+    }
+
+    const data = await getMyArchiveDetail(userId, req.params.archiveId);
 
     return res.status(200).json({
       status: 200,
@@ -660,6 +734,7 @@ const changeMyPasswordController = async (req, res) => {
 module.exports = {
   getMyProfileController,
   getMyPageSummaryController,
+  getMyBadgesController,
   getMySulbtiController,
   saveMySulbtiController,
   getMyArchivesController,
@@ -667,6 +742,7 @@ module.exports = {
   createMyArchiveController,
   createMyArchiveWithImagesController,
   updateMyArchiveController,
+  updateMyArchiveWithImagesController,
   deleteMyArchiveController,
   uploadArchiveImagesController,
   deleteArchiveImageController,

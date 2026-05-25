@@ -97,6 +97,9 @@ jobs:
           KAKAO_REDIRECT_URI=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['KAKAO_REDIRECT_URI'])")
           KAKAO_CLIENT_SECRET=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['KAKAO_CLIENT_SECRET'])")
           JWT_SECRET=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['JWT_SECRET'])")
+          OCTOMO_API_KEY=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON'])['OCTOMO_API_KEY'])")
+          OCTOMO_API_URL=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('OCTOMO_API_URL', 'https://api.octoverse.kr/octomo/v1/public/message/exists'))")
+          OCTOMO_RECEIVE_NUMBER=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('OCTOMO_RECEIVE_NUMBER', '1666-3538'))")
 
           ENV_TMP=$(mktemp .env.XXXXXX)
 
@@ -115,6 +118,9 @@ jobs:
             echo "KAKAO_REDIRECT_URI=$KAKAO_REDIRECT_URI"
             echo "KAKAO_CLIENT_SECRET=$KAKAO_CLIENT_SECRET"
             echo "JWT_SECRET=$JWT_SECRET"
+            echo "OCTOMO_API_KEY=$OCTOMO_API_KEY"
+            echo "OCTOMO_API_URL=$OCTOMO_API_URL"
+            echo "OCTOMO_RECEIVE_NUMBER=$OCTOMO_RECEIVE_NUMBER"
           } > "$ENV_TMP"
 
           chmod 600 "$ENV_TMP"

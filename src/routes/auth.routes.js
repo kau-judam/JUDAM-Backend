@@ -1,23 +1,42 @@
 const express = require('express');
+const authMiddleware = require('../middlewares/authMiddleware');
 const {
+  checkEmail,
+  checkNickname,
   signup,
   login,
+  updateMyRole,
+  requestAuthPhoneVerificationController,
+  confirmAuthPhoneVerificationController,
+  requestPasswordReset,
+  verifyPasswordReset,
+  resetPassword,
   kakaoLoginUrl,
   kakaoLogin,
   kakaoCallback,
   kakaoLoginByCode,
+  completeKakaoSignup,
   refreshAccessToken,
   logout,
 } = require('../controllers/auth.controller');
 
 const router = express.Router();
 
+router.get('/email/check', checkEmail);
+router.get('/nickname/check', checkNickname);
 router.post('/signup', signup);
 router.post('/login', login);
+router.patch('/me/role', authMiddleware, updateMyRole);
+router.post('/phone/verification', requestAuthPhoneVerificationController);
+router.post('/phone/verification/confirm', confirmAuthPhoneVerificationController);
+router.post('/password/reset/request', requestPasswordReset);
+router.post('/password/reset/verify', verifyPasswordReset);
+router.patch('/password/reset', resetPassword);
 router.get('/kakao/url', kakaoLoginUrl);
 router.get('/kakao', kakaoLogin);
 router.get('/kakao/callback', kakaoCallback);
 router.post('/kakao/login', kakaoLoginByCode);
+router.post('/kakao/signup/complete', completeKakaoSignup);
 router.post('/refresh', refreshAccessToken);
 router.post('/logout', logout);
 
