@@ -1,5 +1,9 @@
 const pool = require('../config/db');
 const { uploadFileToS3 } = require('../services/s3.service');
+const {
+  isAiFundingRegistrationStatus,
+  registerFundingProjectToAiPool,
+} = require('../services/funding.service');
 
 const getBodyValue = (body, keys) => {
   for (const key of keys) {
@@ -2536,6 +2540,9 @@ const updateFundingProject = async (req, res) => {
     }
 
     const funding = result.rows[0];
+    const aiRecommendation = isAiFundingRegistrationStatus(status)
+      ? await registerFundingProjectToAiPool(funding.funding_id)
+      : undefined;
 
     return res.status(200).json({
       fundingId: funding.funding_id,
@@ -2548,6 +2555,7 @@ const updateFundingProject = async (req, res) => {
       pricePerBottle: funding.price_per_bottle,
       shippingFee: funding.shipping_fee,
       status: funding.status,
+      ...(aiRecommendation ? { aiRecommendation } : {}),
       message: '펀딩 프로젝트가 수정되었습니다.',
     });
   } catch (error) {
