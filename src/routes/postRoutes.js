@@ -20,6 +20,10 @@ const {
   postLike,
   deleteLike,
 } = require('../controllers/postLikeController');
+const {
+  postCommentLike,
+  deleteCommentLike,
+} = require('../controllers/postCommentLikeController');
 
 // 게시글 작성 — 로그인 필수, 이미지 파일 수신(multer, 최대 5개)
 router.post('/', authMiddleware, upload.array('images'), postPost);
@@ -47,6 +51,12 @@ router.put('/:postId/comments/:commentId', authMiddleware, putCommentHandler);
 
 // 댓글 삭제 — 로그인 필수, 작성자 본인만
 router.delete('/:postId/comments/:commentId', authMiddleware, deleteCommentHandler);
+
+// 댓글 좋아요 등록 — 로그인 필수 (UNIQUE 위반 시 400)
+router.post('/:postId/comments/:commentId/likes', authMiddleware, postCommentLike);
+
+// 댓글 좋아요 취소 — 로그인 필수 (내역 없으면 400)
+router.delete('/:postId/comments/:commentId/likes', authMiddleware, deleteCommentLike);
 
 // 좋아요 등록 — 로그인 필수 (UNIQUE 위반 시 400)
 router.post('/:postId/likes', authMiddleware, postLike);
