@@ -1170,6 +1170,7 @@ const refreshAccessToken = async (req, res) => {
       message: '토큰 재발급 성공',
       data: {
         accessToken,
+        refreshToken,
       },
     });
   } catch (error) {
