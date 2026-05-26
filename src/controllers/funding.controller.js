@@ -115,6 +115,32 @@ const parseJsonFieldPreserveText = (value, fallback = null) => {
   }
 };
 
+const parseFundingListField = (value, fallback = []) => {
+  if (value === undefined || value === null || value === '') return fallback;
+
+  const normalizeList = (items) =>
+    items
+      .map((item) => toTrimmedString(item))
+      .filter(Boolean);
+
+  if (Array.isArray(value)) {
+    return normalizeList(value);
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return normalizeList(parsed);
+      if (typeof parsed === 'string') return parseFundingListField(parsed, fallback);
+      return fallback;
+    } catch (error) {
+      return normalizeList(value.split(','));
+    }
+  }
+
+  return fallback;
+};
+
 const stringifyJsonField = (value, fallback = []) => {
   if (value === undefined || value === null) {
     return JSON.stringify(fallback);
@@ -4462,9 +4488,8 @@ const getFundingDetail = async (req, res) => {
       JOIN users u ON u.user_id = fp.brewery_user_id
       LEFT JOIN LATERAL (
         SELECT *
-        FROM funding_drafts
-        WHERE funding_id = fp.funding_id
-          AND brewery_id = fp.brewery_user_id
+        FROM funding_drafts fd_inner
+        WHERE fd_inner.funding_id = fp.funding_id
         ORDER BY updated_at DESC
         LIMIT 1
       ) fd ON TRUE
@@ -4503,11 +4528,10 @@ const getFundingDetail = async (req, res) => {
 
     const funding = fundingResult.rows[0];
     const imageFields = buildImageFields(funding.thumbnail_url, funding.image_urls);
-    const subIngredients = parseJsonArrayField(funding.sub_ingredients);
     const mainIngredient = funding.main_ingredient || null;
+    const subIngredients = parseFundingListField(funding.sub_ingredients);
+    const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
     const rawMaterials = parseJsonField(funding.raw_materials);
-    const budgetPlan = parseJsonFieldPreserveText(funding.budget_plan);
-    const schedulePlan = parseJsonFieldPreserveText(funding.schedule_plan);
 
     const optionResult = await pool.query(
       `
@@ -4610,7 +4634,11 @@ const getFundingDetail = async (req, res) => {
             (Number(funding.current_amount) / Number(funding.target_amount)) * 100
           )
         : 0;
-    const projectPolicy = parseJsonFieldPreserveText(funding.refund_policy || funding.exchange_policy);
+    const budgetPlan = parseJsonFieldPreserveText(funding.budget_plan);
+    const schedulePlan = parseJsonFieldPreserveText(funding.schedule_plan);
+    const refundPolicy = parseJsonFieldPreserveText(funding.refund_policy);
+    const exchangePolicy = parseJsonFieldPreserveText(funding.exchange_policy);
+    const projectPolicy = refundPolicy ?? exchangePolicy;
     const tasteProfile = taste
       ? buildTasteProfileResponse({
           ...taste,
@@ -4629,7 +4657,7 @@ const getFundingDetail = async (req, res) => {
       primaryIngredient: mainIngredient,
       subIngredient: subIngredients[0] || null,
       subIngredients,
-      ingredients: [mainIngredient, ...subIngredients].filter(Boolean),
+      ingredients,
       tags: parseJsonField(funding.tags),
       thumbnailUrl: imageFields.thumbnailUrl,
       imageUrls: imageFields.imageUrls,
@@ -4664,8 +4692,10 @@ const getFundingDetail = async (req, res) => {
         volume: funding.volume,
         alcoholPercentage: funding.alcohol_percentage,
         mainIngredient,
+        primaryIngredient: mainIngredient,
         subIngredient: subIngredients[0] || null,
         subIngredients,
+        ingredients,
         rawMaterials,
         businessNumber: funding.business_registration_number,
         licenseNumber: funding.business_registration_number,
@@ -4673,7 +4703,8 @@ const getFundingDetail = async (req, res) => {
         businessAddressDetail: funding.business_address_detail,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
         policy: projectPolicy,
-        refundPolicy: projectPolicy,
+        refundPolicy,
+        exchangePolicy,
       },
       plan: {
         introduction: funding.introduction,
@@ -4718,8 +4749,8 @@ const getFundingDetail = async (req, res) => {
         businessRegistrationFileUrl: funding.business_registration_file_url,
       },
       notices: {
-        refundPolicy: projectPolicy,
-        exchangePolicy: projectPolicy,
+        refundPolicy,
+        exchangePolicy,
         adultVerificationNotice: funding.adult_verification_notice,
         riskNotice: funding.risk_notice,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
@@ -4795,9 +4826,8 @@ const getFundingIntro = async (req, res) => {
           schedule_plan,
           refund_policy,
           exchange_policy
-        FROM funding_drafts
-        WHERE funding_id = fp.funding_id
-          AND brewery_id = fp.brewery_user_id
+        FROM funding_drafts fd_inner
+        WHERE fd_inner.funding_id = fp.funding_id
         ORDER BY updated_at DESC
         LIMIT 1
       ) fd ON TRUE
@@ -4814,10 +4844,12 @@ const getFundingIntro = async (req, res) => {
     }
 
     const funding = result.rows[0];
-    const subIngredients = parseJsonArrayField(funding.sub_ingredients);
+    const subIngredients = parseFundingListField(funding.sub_ingredients);
     const budgetPlan = parseJsonFieldPreserveText(funding.budget_plan);
     const schedulePlan = parseJsonFieldPreserveText(funding.schedule_plan);
-    const projectPolicy = parseJsonFieldPreserveText(funding.refund_policy || funding.exchange_policy);
+    const projectPolicy =
+      parseJsonFieldPreserveText(funding.refund_policy)
+      ?? parseJsonFieldPreserveText(funding.exchange_policy);
 
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
