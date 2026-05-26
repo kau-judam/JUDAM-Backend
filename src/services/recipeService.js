@@ -42,6 +42,23 @@ const parseIngredientList = (value) => {
   return [normalizeString(value)].filter(Boolean);
 };
 
+const normalizePublicImageUrl = (imageUrl) => {
+  const normalizedImageUrl = normalizeString(imageUrl);
+
+  if (!normalizedImageUrl) {
+    return null;
+  }
+
+  if (
+    normalizedImageUrl.startsWith('file://') ||
+    normalizedImageUrl.startsWith('content://')
+  ) {
+    return null;
+  }
+
+  return /^https?:\/\//i.test(normalizedImageUrl) ? normalizedImageUrl : null;
+};
+
 const buildRecipeLawFilterPayload = (recipeData = {}) => {
   const title = normalizeString(recipeData.title || recipeData.recipeTitle || 'recipe');
   const description = [
@@ -239,7 +256,7 @@ const getPopularRecipesForHome = async () => {
     title: recipe.title,
     summary: recipe.summary,
     content: recipe.content,
-    imageUrl: recipe.image_url,
+    imageUrl: normalizePublicImageUrl(recipe.image_url),
     authorType: recipe.author_type,
     status: recipe.status,
     isFundable: recipe.is_fundable,
