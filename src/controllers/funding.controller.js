@@ -555,6 +555,106 @@ const buildFundingDraftPayload = (draft, documents = []) => {
   };
 };
 
+const getFundingDraftDocuments = async (draftId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      document_id,
+      draft_id,
+      document_type,
+      file_name,
+      file_url,
+      mime_type,
+      file_size,
+      created_at
+    FROM funding_documents
+    WHERE draft_id = $1
+    ORDER BY document_id ASC
+    `,
+    [Number(draftId)]
+  );
+
+  return rows;
+};
+
+const findDirectFundingDraftByFundingId = async (fundingId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT *
+    FROM funding_drafts
+    WHERE funding_id = $1
+    ORDER BY updated_at DESC
+    LIMIT 1
+    `,
+    [Number(fundingId)]
+  );
+
+  return rows[0] || null;
+};
+
+const findFallbackFundingDraftByFundingId = async (fundingId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT fd.*
+    FROM funding_projects fp
+    JOIN funding_drafts fd
+      ON fd.funding_id IS NULL
+      AND NULLIF(BTRIM(fd.title), '') = NULLIF(BTRIM(fp.title), '')
+      AND (
+        fd.brewery_id IS NULL
+        OR fd.brewery_id = fp.brewery_user_id
+      )
+    WHERE fp.funding_id = $1
+    ORDER BY
+      CASE
+        WHEN fd.status IN ('APPROVED', 'SUBMITTED', 'REVIEWING') THEN 0
+        ELSE 1
+      END,
+      ABS(EXTRACT(EPOCH FROM (
+        COALESCE(fd.submitted_at, fd.updated_at, fd.created_at)
+        - fp.created_at
+      ))) ASC NULLS LAST,
+      fd.updated_at DESC
+    LIMIT 1
+    `,
+    [Number(fundingId)]
+  );
+
+  return rows[0] || null;
+};
+
+const findAndLinkFundingDraftByFundingId = async (fundingId) => {
+  const directDraft = await findDirectFundingDraftByFundingId(fundingId);
+
+  if (directDraft) {
+    return directDraft;
+  }
+
+  const fallbackDraft = await findFallbackFundingDraftByFundingId(fundingId);
+
+  if (!fallbackDraft) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+    UPDATE funding_drafts
+    SET
+      funding_id = $1,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE draft_id = $2
+      AND funding_id IS NULL
+    RETURNING *
+    `,
+    [Number(fundingId), Number(fallbackDraft.draft_id)]
+  );
+
+  return rows[0] || {
+    ...fallbackDraft,
+    funding_id: Number(fundingId),
+  };
+};
+
 const storeUploadedFile = async (file, folder, ownerId = 'anonymous') => {
   if (!file) {
     return null;
@@ -3042,43 +3142,17 @@ const getFundingDraftByFundingId = async (req, res) => {
   }
 
   try {
-    const draftResult = await pool.query(
-      `
-      SELECT *
-      FROM funding_drafts
-      WHERE funding_id = $1
-      ORDER BY updated_at DESC
-      LIMIT 1
-      `,
-      [resolvedFundingId]
-    );
+    const draft = await findAndLinkFundingDraftByFundingId(resolvedFundingId);
 
-    if (draftResult.rows.length === 0) {
+    if (!draft) {
       return res.status(404).json({
         status: 404,
         message: '연결된 임시저장 프로젝트를 찾을 수 없습니다.',
       });
     }
 
-    const draft = draftResult.rows[0];
-    const documentResult = await pool.query(
-      `
-      SELECT
-        document_id,
-        draft_id,
-        document_type,
-        file_name,
-        file_url,
-        mime_type,
-        file_size,
-        created_at
-      FROM funding_documents
-      WHERE draft_id = $1
-      ORDER BY document_id ASC
-      `,
-      [Number(draft.draft_id)]
-    );
-    const payload = buildFundingDraftPayload(draft, documentResult.rows);
+    const documents = await getFundingDraftDocuments(draft.draft_id);
+    const payload = buildFundingDraftPayload(draft, documents);
 
     return res.status(200).json({
       draft,
@@ -3681,6 +3755,8 @@ const getFundingDetail = async (req, res) => {
   const userId = getUserId(req);
 
   try {
+    await findAndLinkFundingDraftByFundingId(resolvedFundingId);
+
     const fundingResult = await pool.query(
       `
       SELECT
