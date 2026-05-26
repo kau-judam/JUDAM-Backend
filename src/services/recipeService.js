@@ -223,6 +223,8 @@ const getPopularRecipesForHome = async () => {
       r.content,
       r.image_url,
       r.author_type,
+      r.user_id AS author_user_id,
+      u.nickname AS author_nickname,
       r.status,
       r.is_fundable,
       GREATEST(
@@ -233,19 +235,27 @@ const getPopularRecipesForHome = async () => {
         COALESCE(r.interest_count, 0),
         COALESCE(interest_counts.interest_count, 0)
       )::INT AS like_count,
+      COALESCE(comment_counts.comment_count, 0)::INT AS comment_count,
       r.created_at
     FROM recipes r
+    LEFT JOIN users u ON u.user_id = r.user_id
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::INT AS interest_count
       FROM recipe_interests ri
       WHERE ri.recipe_id = r.recipe_id
     ) interest_counts ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::INT AS comment_count
+      FROM recipe_comments rc
+      WHERE rc.recipe_id = r.recipe_id
+    ) comment_counts ON TRUE
     WHERE r.status = 'PUBLISHED'
     ORDER BY
       GREATEST(
         COALESCE(r.interest_count, 0),
         COALESCE(interest_counts.interest_count, 0)
       ) DESC,
+      COALESCE(comment_counts.comment_count, 0) DESC,
       r.created_at DESC
     LIMIT 3
     `
@@ -258,10 +268,15 @@ const getPopularRecipesForHome = async () => {
     content: recipe.content,
     imageUrl: normalizePublicImageUrl(recipe.image_url),
     authorType: recipe.author_type,
+    authorUserId: recipe.author_user_id !== null && recipe.author_user_id !== undefined
+      ? String(recipe.author_user_id)
+      : null,
+    authorNickname: recipe.author_nickname,
     status: recipe.status,
     isFundable: recipe.is_fundable,
     interestCount: Number(recipe.interest_count || 0),
     likeCount: Number(recipe.like_count || 0),
+    commentCount: Number(recipe.comment_count || 0),
     createdAt: recipe.created_at,
   }));
 };
