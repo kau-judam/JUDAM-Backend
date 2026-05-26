@@ -454,6 +454,13 @@ const resolveFundingId = async (id) => {
 
 const buildFundingDraftPayload = (draft, documents = []) => {
   const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
+  const subIngredients = parseJsonField(draft.sub_ingredients);
+  const rawMaterials = parseJsonField(draft.raw_materials);
+  const tags = parseJsonField(draft.tags);
+  const flavorNotes = parseJsonField(draft.flavor_notes);
+  const budgetPlan = parseJsonField(draft.budget_plan);
+  const schedulePlan = parseJsonField(draft.schedule_plan);
+  const businessNumber = draft.business_registration_number || draft.license_number || null;
 
   return {
     draftId: Number(draft.draft_id),
@@ -473,54 +480,108 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       title: draft.title,
       shortTitle: draft.short_title,
       category: draft.category,
+      description: draft.summary || draft.introduction || null,
       mainIngredient: draft.main_ingredient,
-      subIngredients: parseJsonField(draft.sub_ingredients),
+      subIngredient: Array.isArray(subIngredients) ? subIngredients[0] || null : subIngredients,
+      subIngredients,
       alcoholPercentage: draft.alcohol_percentage,
       summary: draft.summary,
       thumbnailUrl: imageFields.thumbnailUrl,
+      imageUrl: imageFields.thumbnailUrl,
       imageUrls: imageFields.imageUrls,
       allImageUrls: imageFields.allImageUrls,
-      tags: parseJsonField(draft.tags),
+      tags,
+      recipeId: draft.recipe_id === null || draft.recipe_id === undefined
+        ? null
+        : Number(draft.recipe_id),
     },
 
     schedule: {
       pricePerBottle: draft.price_per_bottle,
       totalQuantity: draft.total_quantity,
       targetAmount: draft.target_amount,
+      goalAmount: draft.target_amount,
       fundingStartDate: draft.funding_start_date,
+      startDate: draft.funding_start_date,
       fundingPeriodDays: draft.funding_period_days,
       fundingEndDate: draft.funding_end_date,
+      endDate: draft.funding_end_date,
       expectedDeliveryDate: draft.expected_delivery_date,
       platformFeeRate: draft.platform_fee_rate,
       platformFeeAmount: draft.platform_fee_amount,
       shippingFee: draft.shipping_fee,
+      maxSupportAmount: draft.max_support_amount ?? null,
+      minSupportAmount: draft.min_support_amount ?? null,
     },
 
     legalInfo: {
       productType: draft.product_type,
       volume: draft.volume,
       alcoholPercentage: draft.alcohol_percentage,
-      rawMaterials: parseJsonField(draft.raw_materials),
+      rawMaterials,
+      businessNumber,
+      licenseNumber: businessNumber,
+      businessAddress: draft.business_address || null,
+      businessAddressDetail: draft.business_address_detail || null,
+      notice: draft.adult_verification_notice || draft.risk_notice || null,
+      policy: draft.refund_policy || draft.exchange_policy || null,
+      refundPolicy: draft.refund_policy || null,
+      adultOnly: draft.adult_only ?? null,
+      termsAgreed: draft.all_required_terms_agreed ?? null,
+      privacyAgreed: draft.privacy_agreed ?? null,
     },
 
     tasteProfile: {
+      abv: draft.alcohol_percentage,
+      alcohol: draft.alcohol_intensity,
+      alcoholPercentage: draft.alcohol_percentage,
       sweetness: draft.sweetness,
       acidity: draft.acidity,
       body: draft.body,
       carbonation: draft.carbonation,
       alcoholIntensity: draft.alcohol_intensity,
-      flavorNotes: parseJsonField(draft.flavor_notes),
+      flavor: draft.flavor ?? null,
+      aromaIntensity: draft.aroma_intensity ?? null,
+      finish: draft.finish ?? null,
+      flavorNotes,
+      flavorTags: flavorNotes,
+      tasteInput: {
+        sweetness: draft.sweetness,
+        body: draft.body,
+        carbonation: draft.carbonation,
+        flavor: draft.flavor ?? null,
+        alcohol: draft.alcohol_intensity,
+        acidity: draft.acidity,
+        aroma_intensity: draft.aroma_intensity ?? null,
+        finish: draft.finish ?? null,
+      },
+      tasteVector: draft.taste_vector ?? null,
     },
 
     plan: {
       introduction: draft.introduction,
       videoUrl: draft.video_url,
-      budgetPlan: parseJsonField(draft.budget_plan),
-      schedulePlan: parseJsonField(draft.schedule_plan),
+      productionPlan: draft.production_plan || draft.introduction || null,
+      deliveryPlan: draft.delivery_plan || draft.expected_delivery_date || null,
+      fundingPurpose: draft.funding_purpose || draft.introduction || null,
+      budgetPlan,
+      riskPlan: draft.risk_plan || draft.risk_notice || null,
+      schedulePlan,
     },
 
     breweryInfo: {
+      breweryId: draft.brewery_id === null || draft.brewery_id === undefined
+        ? null
+        : Number(draft.brewery_id),
+      breweryUserId: draft.brewery_id === null || draft.brewery_id === undefined
+        ? null
+        : Number(draft.brewery_id),
       breweryName: draft.brewery_name,
+      breweryDescription: draft.creator_introduction,
+      breweryLocation: draft.business_address,
+      breweryAddress: draft.business_address,
+      breweryPhone: draft.contact_phone,
+      breweryImageUrl: draft.profile_image_url,
       creatorName: draft.creator_name,
       profileImageUrl: draft.profile_image_url,
       creatorIntroduction: draft.creator_introduction,
@@ -549,6 +610,8 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       exchangePolicy: draft.exchange_policy,
       adultVerificationNotice: draft.adult_verification_notice,
       riskNotice: draft.risk_notice,
+      notice: draft.adult_verification_notice || draft.risk_notice || null,
+      policy: draft.refund_policy || draft.exchange_policy || null,
     },
 
     documents: documents.map(mapFundingDocument),
@@ -3155,9 +3218,12 @@ const getFundingDraftByFundingId = async (req, res) => {
     const payload = buildFundingDraftPayload(draft, documents);
 
     return res.status(200).json({
-      draft,
-      ...payload,
-      message: '펀딩 프로젝트 관리용 임시저장 데이터를 불러왔습니다.',
+      status: 200,
+      message: '연결된 임시저장 프로젝트 조회 성공',
+      data: {
+        ...payload,
+        draft,
+      },
     });
   } catch (error) {
     return res.status(500).json({
