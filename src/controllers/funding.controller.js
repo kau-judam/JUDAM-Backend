@@ -1033,7 +1033,43 @@ const normalizeManagementDraftStatus = (fundingStatus) => {
   return 'SUBMITTED';
 };
 
+const FUNDING_PROJECT_MANAGEMENT_COLUMNS = [
+  'budget_plan',
+  'schedule_plan',
+  'refund_policy',
+  'exchange_policy',
+  'creator_introduction',
+];
+
+let fundingProjectManagementColumnsCache = null;
+
+const getFundingProjectManagementColumns = async () => {
+  if (fundingProjectManagementColumnsCache) {
+    return fundingProjectManagementColumnsCache;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'funding_projects'
+      AND column_name = ANY($1::text[])
+    `,
+    [FUNDING_PROJECT_MANAGEMENT_COLUMNS]
+  );
+
+  fundingProjectManagementColumnsCache = new Set(rows.map((row) => row.column_name));
+  return fundingProjectManagementColumnsCache;
+};
+
+const projectManagementColumnSelect = (columns, columnName, alias) =>
+  columns.has(columnName)
+    ? `fp.${columnName} AS ${alias}`
+    : `NULL::text AS ${alias}`;
+
 const recoverFundingDraftFromProject = async (fundingId) => {
+  const managementColumns = await getFundingProjectManagementColumns();
   const { rows } = await pool.query(
     `
     SELECT
@@ -1078,7 +1114,12 @@ const recoverFundingDraftFromProject = async (fundingId) => {
       tp.carbonation,
       tp.alcohol_intensity,
       tp.flavor_notes,
-      support_options.total_stock
+      support_options.total_stock,
+      ${projectManagementColumnSelect(managementColumns, 'budget_plan', 'project_budget_plan')},
+      ${projectManagementColumnSelect(managementColumns, 'schedule_plan', 'project_schedule_plan')},
+      ${projectManagementColumnSelect(managementColumns, 'refund_policy', 'project_refund_policy')},
+      ${projectManagementColumnSelect(managementColumns, 'exchange_policy', 'project_exchange_policy')},
+      ${projectManagementColumnSelect(managementColumns, 'creator_introduction', 'project_creator_introduction')}
     FROM funding_projects fp
     LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
     LEFT JOIN users u ON u.user_id = fp.brewery_user_id
@@ -1171,6 +1212,10 @@ const recoverFundingDraftFromProject = async (fundingId) => {
       alcohol_intensity,
       flavor_notes,
       introduction,
+      budget_plan,
+      schedule_plan,
+      refund_policy,
+      exchange_policy,
       brewery_name,
       creator_name,
       profile_image_url,
@@ -1190,7 +1235,8 @@ const recoverFundingDraftFromProject = async (fundingId) => {
       $5, $6, $7, $8, $9, $10, $11, $12, $13,
       $14, $15, $16, $17, $18, $19, $20, $21, $22,
       $23, $24, $25, $26, $27, $28,
-      $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
+      $29, $30, $31, $32, $33,
+      $34, $35, $36, $37, $38, $39, $40, $41, $42, $43,
       CURRENT_TIMESTAMP,
       CURRENT_TIMESTAMP,
       CURRENT_TIMESTAMP
@@ -1231,10 +1277,14 @@ const recoverFundingDraftFromProject = async (fundingId) => {
       toNullableNumber(funding.alcohol_intensity),
       normalizeJsonStorageValue(funding.flavor_notes || funding.recipe_target_flavor, []),
       funding.description || funding.recipe_content || funding.summary || null,
+      funding.project_budget_plan || null,
+      funding.project_schedule_plan || null,
+      funding.project_refund_policy || null,
+      funding.project_exchange_policy || null,
       funding.auth_brewery_name || funding.user_nickname || null,
       funding.user_nickname || null,
       funding.user_profile_image || null,
-      null,
+      funding.project_creator_introduction || null,
       funding.auth_license_number || null,
       funding.auth_business_address || null,
       funding.auth_business_address_detail || null,
@@ -1247,11 +1297,103 @@ const recoverFundingDraftFromProject = async (fundingId) => {
   return result.rows[0] || null;
 };
 
+const hydrateFundingDraftManagementFieldsFromProject = async (draft) => {
+  if (!draft?.draft_id || !draft?.funding_id) {
+    return draft;
+  }
+
+  const managementColumns = await getFundingProjectManagementColumns();
+  const assignments = [];
+
+  FUNDING_PROJECT_MANAGEMENT_COLUMNS.forEach((columnName) => {
+    if (managementColumns.has(columnName)) {
+      assignments.push(`${columnName} = COALESCE(fd.${columnName}, fp.${columnName})`);
+    }
+  });
+
+  if (assignments.length === 0) {
+    return draft;
+  }
+
+  const { rows } = await pool.query(
+    `
+    UPDATE funding_drafts fd
+    SET
+      ${assignments.join(',\n      ')},
+      updated_at = CASE
+        WHEN ${assignments
+          .map((assignment) => {
+            const columnName = assignment.split(' = ')[0];
+            return `fd.${columnName} IS NULL AND fp.${columnName} IS NOT NULL`;
+          })
+          .join(' OR ')}
+          THEN CURRENT_TIMESTAMP
+        ELSE fd.updated_at
+      END
+    FROM funding_projects fp
+    WHERE fd.draft_id = $1
+      AND fd.funding_id = fp.funding_id
+    RETURNING fd.*
+    `,
+    [Number(draft.draft_id)]
+  );
+
+  return rows[0] || draft;
+};
+
+const mergeFundingDraftManagementFieldsFromSource = async (targetDraftId, sourceDraftId) => {
+  if (!targetDraftId || !sourceDraftId || Number(targetDraftId) === Number(sourceDraftId)) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+    UPDATE funding_drafts target
+    SET
+      budget_plan = COALESCE(target.budget_plan, source.budget_plan),
+      schedule_plan = COALESCE(target.schedule_plan, source.schedule_plan),
+      refund_policy = COALESCE(target.refund_policy, source.refund_policy),
+      exchange_policy = COALESCE(target.exchange_policy, source.exchange_policy),
+      creator_introduction = COALESCE(target.creator_introduction, source.creator_introduction),
+      adult_verification_notice = COALESCE(target.adult_verification_notice, source.adult_verification_notice),
+      risk_notice = COALESCE(target.risk_notice, source.risk_notice),
+      updated_at = CASE
+        WHEN
+          (target.budget_plan IS NULL AND source.budget_plan IS NOT NULL) OR
+          (target.schedule_plan IS NULL AND source.schedule_plan IS NOT NULL) OR
+          (target.refund_policy IS NULL AND source.refund_policy IS NOT NULL) OR
+          (target.exchange_policy IS NULL AND source.exchange_policy IS NOT NULL) OR
+          (target.creator_introduction IS NULL AND source.creator_introduction IS NOT NULL) OR
+          (target.adult_verification_notice IS NULL AND source.adult_verification_notice IS NOT NULL) OR
+          (target.risk_notice IS NULL AND source.risk_notice IS NOT NULL)
+          THEN CURRENT_TIMESTAMP
+        ELSE target.updated_at
+      END
+    FROM funding_drafts source
+    WHERE target.draft_id = $1
+      AND source.draft_id = $2
+      AND target.brewery_id = source.brewery_id
+    RETURNING target.*
+    `,
+    [Number(targetDraftId), Number(sourceDraftId)]
+  );
+
+  return rows[0] || null;
+};
+
 const findAndLinkFundingDraftByFundingId = async (fundingId) => {
   const directDraft = await findDirectFundingDraftByFundingId(fundingId);
 
   if (directDraft) {
-    return directDraft;
+    const fallbackDraft = await findFallbackFundingDraftByFundingId(fundingId);
+    const mergedDraft = fallbackDraft
+      ? await mergeFundingDraftManagementFieldsFromSource(
+        directDraft.draft_id,
+        fallbackDraft.draft_id
+      )
+      : null;
+
+    return hydrateFundingDraftManagementFieldsFromProject(mergedDraft || directDraft);
   }
 
   const fallbackDraft = await findFallbackFundingDraftByFundingId(fundingId);
@@ -1273,10 +1415,12 @@ const findAndLinkFundingDraftByFundingId = async (fundingId) => {
     [Number(fundingId), Number(fallbackDraft.draft_id)]
   );
 
-  return rows[0] || {
+  const linkedDraft = rows[0] || {
     ...fallbackDraft,
     funding_id: Number(fundingId),
   };
+
+  return hydrateFundingDraftManagementFieldsFromProject(linkedDraft);
 };
 
 const syncFundingProjectFieldsFromDraft = async (draftId) => {
@@ -1335,6 +1479,30 @@ const syncFundingProjectFieldsFromDraft = async (draftId) => {
         normalizeJsonStorageValue(draft.image_urls, []),
         Number(draft.funding_id),
       ]
+    );
+  }
+
+  const managementColumns = await getFundingProjectManagementColumns();
+  const managementAssignments = [];
+
+  FUNDING_PROJECT_MANAGEMENT_COLUMNS.forEach((columnName) => {
+    if (managementColumns.has(columnName)) {
+      managementAssignments.push(`${columnName} = COALESCE(fd.${columnName}, fp.${columnName})`);
+    }
+  });
+
+  if (managementAssignments.length > 0) {
+    await pool.query(
+      `
+      UPDATE funding_projects fp
+      SET
+        ${managementAssignments.join(',\n        ')},
+        updated_at = CURRENT_TIMESTAMP
+      FROM funding_drafts fd
+      WHERE fd.draft_id = $1
+        AND fd.funding_id = fp.funding_id
+      `,
+      [Number(draftId)]
     );
   }
 };
@@ -2649,6 +2817,7 @@ const savePlan = async (req, res) => {
     }
 
     const draft = result.rows[0];
+    await syncFundingProjectFieldsFromDraft(draft.draft_id);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -2855,6 +3024,7 @@ const saveBreweryInfo = async (req, res) => {
     }
 
     const draft = result.rows[0];
+    await syncFundingProjectFieldsFromDraft(draft.draft_id);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -3160,6 +3330,7 @@ const verifyPhoneForFundingDraft = async (req, res) => {
     }
 
     const draft = result.rows[0];
+    await syncFundingProjectFieldsFromDraft(draft.draft_id);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -4021,6 +4192,15 @@ const submitFundingDraft = async (req, res) => {
       await client.query('COMMIT');
 
       const submittedDraft = submitResult.rows[0];
+      try {
+        await syncFundingProjectFieldsFromDraft(submittedDraft.draft_id);
+      } catch (syncError) {
+        console.warn('Failed to sync submitted funding management fields', {
+          draftId: submittedDraft.draft_id,
+          fundingId: funding.funding_id,
+          message: syncError.message,
+        });
+      }
 
       return res.status(200).json({
         draftId: submittedDraft.draft_id,
