@@ -1,6 +1,6 @@
 const multer = require('multer');
 const { uploadFileToS3 } = require('../services/s3.service');
-const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, createBreweryRecipe, getConsumerRecipes, convertRecipeToFunding, deleteRecipe } = require('../services/recipeService');
+const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, getConsumerRecipes, convertRecipeToFunding, deleteRecipe } = require('../services/recipeService');
 const { sendAiTaskMessage } = require('../services/sqs.service');
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -149,29 +149,6 @@ const deleteInterest = async (req, res) => {
   }
 };
 
-// 양조장 레시피 등록 핸들러 (POST /api/recipes/brewery)
-const postBreweryRecipe = async (req, res) => {
-  const missing = REQUIRED_FIELDS.filter((f) => !req.body[f]);
-  if (missing.length > 0) {
-    return res.status(400).json({ status: 400, message: '필수 항목이 누락되었습니다.' });
-  }
-
-  try {
-    const recipe = await createBreweryRecipe(req.body, req.user);
-    publishRecipeAiReviewRequest(recipe, req.user);
-    return res.status(201).json({ status: 201, message: '레시피가 등록되었습니다.', recipe });
-  } catch (error) {
-    if (error.statusCode) {
-      return res.status(error.statusCode).json({
-        status: error.statusCode,
-        message: error.message,
-        ...(error.data ? { data: error.data } : {}),
-      });
-    }
-    return res.status(500).json({ status: 500, message: '서버 내부 오류' });
-  }
-};
-
 // 양조장 소비자 레시피 확인 핸들러 (GET /api/recipes/brewery)
 const getBreweryRecipes = async (req, res) => {
   const status = req.query.status || 'ALL';
@@ -234,4 +211,4 @@ const deleteRecipeHandler = async (req, res) => {
   }
 };
 
-module.exports = { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, postBreweryRecipe, getBreweryRecipes, postRecipeFunding, deleteRecipeHandler };
+module.exports = { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, getBreweryRecipes, postRecipeFunding, deleteRecipeHandler };
