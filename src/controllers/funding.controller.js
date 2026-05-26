@@ -590,6 +590,7 @@ const buildFundingDraftPayload = (draft, documents = []) => {
   const schedulePlan = parseJsonFieldPreserveText(draft.schedule_plan);
   const businessNumber = draft.business_registration_number || draft.license_number || null;
   const tasteProfile = buildTasteProfileResponse(draft);
+  const projectPolicy = parseJsonFieldPreserveText(draft.refund_policy || draft.exchange_policy);
 
   return {
     draftId: Number(draft.draft_id),
@@ -654,8 +655,8 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       businessAddress: draft.business_address || null,
       businessAddressDetail: draft.business_address_detail || null,
       notice: draft.adult_verification_notice || draft.risk_notice || null,
-      policy: draft.refund_policy || draft.exchange_policy || null,
-      refundPolicy: draft.refund_policy || null,
+      policy: projectPolicy,
+      refundPolicy: projectPolicy,
       adultOnly: draft.adult_only ?? null,
       termsAgreed: draft.all_required_terms_agreed ?? null,
       privacyAgreed: draft.privacy_agreed ?? null,
@@ -672,7 +673,7 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       budgetPlan,
       riskPlan: draft.risk_plan || draft.risk_notice || null,
       schedulePlan,
-      policy: draft.refund_policy || draft.exchange_policy || null,
+      policy: projectPolicy,
       ...PLAN_GUIDES,
     },
 
@@ -713,12 +714,12 @@ const buildFundingDraftPayload = (draft, documents = []) => {
     },
 
     notices: {
-      refundPolicy: draft.refund_policy,
-      exchangePolicy: draft.exchange_policy,
+      refundPolicy: projectPolicy,
+      exchangePolicy: projectPolicy,
       adultVerificationNotice: draft.adult_verification_notice,
       riskNotice: draft.risk_notice,
       notice: draft.adult_verification_notice || draft.risk_notice || null,
-      policy: draft.refund_policy || draft.exchange_policy || null,
+      policy: projectPolicy,
     },
 
     documents: documents.map(mapFundingDocument),
@@ -1874,6 +1875,7 @@ const savePlan = async (req, res) => {
     videoUrl,
     budgetPlan,
     schedulePlan,
+    policy,
   } = req.body;
 
   if (
@@ -1896,15 +1898,19 @@ const savePlan = async (req, res) => {
         budget_plan = $2,
         schedule_plan = $3,
         video_url = $4,
+        refund_policy = CASE WHEN $5::text IS NULL THEN refund_policy ELSE $5 END,
+        exchange_policy = CASE WHEN $5::text IS NULL THEN exchange_policy ELSE $5 END,
         progress_rate = GREATEST(progress_rate, 78),
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $5
+      WHERE draft_id = $6
       RETURNING
         draft_id,
         introduction,
         video_url,
         budget_plan,
         schedule_plan,
+        refund_policy,
+        exchange_policy,
         progress_rate,
         updated_at
       `,
@@ -1913,6 +1919,7 @@ const savePlan = async (req, res) => {
         stringifyJsonField(budgetPlan),
         stringifyJsonField(schedulePlan),
         videoUrl || null,
+        policy === undefined ? null : stringifyJsonField(policy, null),
         Number(draftId),
       ]
     );
@@ -1934,6 +1941,7 @@ const savePlan = async (req, res) => {
         videoUrl: draft.video_url,
         budgetPlan: parseJsonFieldPreserveText(draft.budget_plan),
         schedulePlan: parseJsonFieldPreserveText(draft.schedule_plan),
+        policy: parseJsonFieldPreserveText(draft.refund_policy || draft.exchange_policy),
         ...PLAN_GUIDES,
       },
       progressRate: draft.progress_rate,
@@ -4290,6 +4298,7 @@ const getFundingDetail = async (req, res) => {
             (Number(funding.current_amount) / Number(funding.target_amount)) * 100
           )
         : 0;
+    const projectPolicy = parseJsonFieldPreserveText(funding.refund_policy || funding.exchange_policy);
 
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
@@ -4340,8 +4349,8 @@ const getFundingDetail = async (req, res) => {
         licenseNumber: funding.business_registration_number,
         businessAddress: funding.business_address,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
-        policy: funding.refund_policy || funding.exchange_policy || null,
-        refundPolicy: funding.refund_policy || null,
+        policy: projectPolicy,
+        refundPolicy: projectPolicy,
       },
       plan: {
         introduction: funding.introduction,
@@ -4352,7 +4361,7 @@ const getFundingDetail = async (req, res) => {
         budgetPlan: parseJsonFieldPreserveText(funding.budget_plan),
         schedulePlan: parseJsonFieldPreserveText(funding.schedule_plan),
         riskPlan: funding.risk_notice,
-        policy: funding.refund_policy || funding.exchange_policy || null,
+        policy: projectPolicy,
         ...PLAN_GUIDES,
       },
       breweryInfo: {
@@ -4380,12 +4389,12 @@ const getFundingDetail = async (req, res) => {
         businessRegistrationFileUrl: funding.business_registration_file_url,
       },
       notices: {
-        refundPolicy: funding.refund_policy,
-        exchangePolicy: funding.exchange_policy,
+        refundPolicy: projectPolicy,
+        exchangePolicy: projectPolicy,
         adultVerificationNotice: funding.adult_verification_notice,
         riskNotice: funding.risk_notice,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
-        policy: funding.refund_policy || funding.exchange_policy || null,
+        policy: projectPolicy,
       },
       documents: documentResult.rows.map(mapFundingDocument),
       supportOptions: optionResult.rows.map((option) => ({
