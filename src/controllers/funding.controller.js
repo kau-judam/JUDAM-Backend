@@ -104,6 +104,17 @@ const parseJsonField = (value, fallback = []) => {
   }
 };
 
+const parseJsonFieldPreserveText = (value, fallback = null) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return value;
+  }
+};
+
 const stringifyJsonField = (value, fallback = []) => {
   if (value === undefined || value === null) {
     return JSON.stringify(fallback);
@@ -271,15 +282,133 @@ const updateFundingReviewAiTasteProfile = async ({
 };
 
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
-  const parsedImageUrls = uniqueValues(parseJsonArrayField(imageUrlsValue));
+  const parsedImageUrls = uniqueValues(parseJsonArrayField(imageUrlsValue)).slice(0, 5);
   const normalizedThumbnailUrl = toTrimmedString(thumbnailUrl) || parsedImageUrls[0] || null;
   const imageUrls = parsedImageUrls.filter((imageUrl) => imageUrl !== normalizedThumbnailUrl);
-  const allImageUrls = uniqueValues([normalizedThumbnailUrl, ...imageUrls].filter(Boolean));
+  const allImageUrls = uniqueValues([normalizedThumbnailUrl, ...imageUrls].filter(Boolean)).slice(0, 5);
 
   return {
     thumbnailUrl: normalizedThumbnailUrl,
     imageUrls,
     allImageUrls,
+  };
+};
+
+const mapFundingImageUrls = (imageUrls = []) =>
+  (imageUrls || []).slice(0, 5).map((imageUrl, index) => ({
+    imageId: index + 1,
+    imageUrl,
+    displayOrder: index + 1,
+  }));
+
+const PLAN_GUIDES = {
+  budgetPlanGuide: '- 프로젝트 예산임: 25만원 형식으로 작성하면 UI에 잘 반영됩니다.',
+  schedulePlanGuide: '- 프로젝트 일정: 일정내용 형식으로 작성하면 UI에 잘 반영됩니다.',
+};
+
+const parseTasteProfileExtras = (flavorNotesValue) => {
+  const parsed = parseJsonFieldPreserveText(flavorNotesValue, []);
+
+  if (Array.isArray(parsed)) {
+    return {
+      flavorNotes: parsed,
+      flavorTags: parsed,
+      flavor: null,
+      aromaIntensity: null,
+      finish: null,
+      tasteInput: null,
+      tasteVector: null,
+    };
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    const flavorTags = parseJsonArrayField(parsed.flavorTags || parsed.flavor_tags || parsed.flavorNotes);
+
+    return {
+      flavorNotes: parseJsonArrayField(parsed.flavorNotes || parsed.flavor_notes || flavorTags),
+      flavorTags,
+      flavor: toNullableNumber(parsed.flavor),
+      aromaIntensity: toNullableNumber(parsed.aromaIntensity ?? parsed.aroma_intensity),
+      finish: toNullableNumber(parsed.finish ?? parsed.aftertaste),
+      tasteInput: parsed.tasteInput || parsed.taste_input || null,
+      tasteVector: parsed.tasteVector || parsed.taste_vector || null,
+    };
+  }
+
+  const text = toTrimmedString(parsed);
+  const values = text ? [text] : [];
+
+  return {
+    flavorNotes: values,
+    flavorTags: values,
+    flavor: null,
+    aromaIntensity: null,
+    finish: null,
+    tasteInput: null,
+    tasteVector: null,
+  };
+};
+
+const buildTasteProfileStorage = ({
+  flavorNotes,
+  flavorTags,
+  flavor,
+  aromaIntensity,
+  finish,
+  tasteInput,
+  tasteVector,
+}) => {
+  const tags = uniqueValues([
+    ...parseJsonArrayField(flavorNotes),
+    ...parseJsonArrayField(flavorTags),
+  ]);
+  const hasExtraTasteFields = [flavor, aromaIntensity, finish, tasteInput, tasteVector]
+    .some((value) => value !== undefined && value !== null && value !== '');
+
+  if (!hasExtraTasteFields) {
+    return JSON.stringify(tags);
+  }
+
+  return JSON.stringify({
+    flavorTags: tags,
+    flavor: toNullableNumber(flavor),
+    aromaIntensity: toNullableNumber(aromaIntensity),
+    finish: toNullableNumber(finish),
+    tasteInput: tasteInput || null,
+    tasteVector: tasteVector || null,
+  });
+};
+
+const buildTasteProfileResponse = (source = {}) => {
+  const extras = parseTasteProfileExtras(source.flavor_notes);
+  const alcoholIntensity = source.alcohol_intensity ?? source.alcoholIntensity ?? null;
+
+  return {
+    abv: source.alcohol_percentage ?? source.abv ?? null,
+    alcohol: alcoholIntensity,
+    alcoholPercentage: source.alcohol_percentage ?? source.alcoholPercentage ?? null,
+    sweetness: source.sweetness,
+    acidity: source.acidity,
+    body: source.body,
+    carbonation: source.carbonation,
+    alcoholIntensity,
+    flavor: source.flavor ?? extras.flavor,
+    aromaIntensity: source.aroma_intensity ?? source.aromaIntensity ?? extras.aromaIntensity,
+    finish: source.finish ?? source.aftertaste ?? extras.finish,
+    aftertaste: source.aftertaste ?? source.finish ?? extras.finish,
+    flavorNotes: extras.flavorNotes,
+    flavorTags: extras.flavorTags,
+    tasteInput: extras.tasteInput || {
+      sweetness: source.sweetness,
+      body: source.body,
+      carbonation: source.carbonation,
+      flavor: source.flavor ?? extras.flavor,
+      alcohol: alcoholIntensity,
+      acidity: source.acidity,
+      aroma_intensity: source.aroma_intensity ?? source.aromaIntensity ?? extras.aromaIntensity,
+      finish: source.finish ?? extras.finish,
+    },
+    tasteVector: source.taste_vector ?? source.tasteVector ?? extras.tasteVector,
   };
 };
 
@@ -457,10 +586,10 @@ const buildFundingDraftPayload = (draft, documents = []) => {
   const subIngredients = parseJsonField(draft.sub_ingredients);
   const rawMaterials = parseJsonField(draft.raw_materials);
   const tags = parseJsonField(draft.tags);
-  const flavorNotes = parseJsonField(draft.flavor_notes);
-  const budgetPlan = parseJsonField(draft.budget_plan);
-  const schedulePlan = parseJsonField(draft.schedule_plan);
+  const budgetPlan = parseJsonFieldPreserveText(draft.budget_plan);
+  const schedulePlan = parseJsonFieldPreserveText(draft.schedule_plan);
   const businessNumber = draft.business_registration_number || draft.license_number || null;
+  const tasteProfile = buildTasteProfileResponse(draft);
 
   return {
     draftId: Number(draft.draft_id),
@@ -490,6 +619,7 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       imageUrl: imageFields.thumbnailUrl,
       imageUrls: imageFields.imageUrls,
       allImageUrls: imageFields.allImageUrls,
+      images: mapFundingImageUrls(imageFields.allImageUrls),
       tags,
       recipeId: draft.recipe_id === null || draft.recipe_id === undefined
         ? null
@@ -531,32 +661,7 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       privacyAgreed: draft.privacy_agreed ?? null,
     },
 
-    tasteProfile: {
-      abv: draft.alcohol_percentage,
-      alcohol: draft.alcohol_intensity,
-      alcoholPercentage: draft.alcohol_percentage,
-      sweetness: draft.sweetness,
-      acidity: draft.acidity,
-      body: draft.body,
-      carbonation: draft.carbonation,
-      alcoholIntensity: draft.alcohol_intensity,
-      flavor: draft.flavor ?? null,
-      aromaIntensity: draft.aroma_intensity ?? null,
-      finish: draft.finish ?? null,
-      flavorNotes,
-      flavorTags: flavorNotes,
-      tasteInput: {
-        sweetness: draft.sweetness,
-        body: draft.body,
-        carbonation: draft.carbonation,
-        flavor: draft.flavor ?? null,
-        alcohol: draft.alcohol_intensity,
-        acidity: draft.acidity,
-        aroma_intensity: draft.aroma_intensity ?? null,
-        finish: draft.finish ?? null,
-      },
-      tasteVector: draft.taste_vector ?? null,
-    },
+    tasteProfile,
 
     plan: {
       introduction: draft.introduction,
@@ -567,6 +672,8 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       budgetPlan,
       riskPlan: draft.risk_plan || draft.risk_notice || null,
       schedulePlan,
+      policy: draft.refund_policy || draft.exchange_policy || null,
+      ...PLAN_GUIDES,
     },
 
     breweryInfo: {
@@ -615,6 +722,7 @@ const buildFundingDraftPayload = (draft, documents = []) => {
     },
 
     documents: documents.map(mapFundingDocument),
+    images: mapFundingImageUrls(imageFields.allImageUrls),
   };
 };
 
@@ -991,6 +1099,7 @@ const createFundingDraft = async (req, res) => {
     );
 
     const draft = result.rows[0];
+    const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
 
     return res.status(201).json({
       draftId: draft.draft_id,
@@ -998,8 +1107,10 @@ const createFundingDraft = async (req, res) => {
       status: draft.status,
       progressRate: draft.progress_rate,
       createdAt: draft.created_at,
-      thumbnailUrl: draft.thumbnail_url,
-      imageUrls: draft.image_urls,
+      thumbnailUrl: imageFields.thumbnailUrl,
+      imageUrls: imageFields.imageUrls,
+      allImageUrls: imageFields.allImageUrls,
+      images: mapFundingImageUrls(imageFields.allImageUrls),
       tags: draft.tags,
       message: '펀딩 프로젝트가 임시저장되었습니다.',
     });
@@ -1276,6 +1387,7 @@ const saveBasicInfo = async (req, res) => {
         thumbnailUrl: imageFields.thumbnailUrl,
         imageUrls: imageFields.imageUrls,
         allImageUrls: imageFields.allImageUrls,
+        images: mapFundingImageUrls(imageFields.allImageUrls),
         tags: parseJsonField(draft.tags),
       },
       progressRate: draft.progress_rate,
@@ -1608,8 +1720,20 @@ const saveTasteProfile = async (req, res) => {
     body,
     carbonation,
     alcoholIntensity,
+    alcohol,
+    flavor,
+    aromaIntensity,
+    aroma_intensity: aromaIntensitySnake,
+    finish,
+    aftertaste,
     flavorNotes,
+    flavorTags,
+    tasteInput,
+    tasteVector,
   } = req.body;
+  const normalizedAlcoholIntensity = alcoholIntensity ?? alcohol;
+  const normalizedAromaIntensity = aromaIntensity ?? aromaIntensitySnake;
+  const normalizedFinish = finish ?? aftertaste;
 
   if (
     !draftId ||
@@ -1618,7 +1742,7 @@ const saveTasteProfile = async (req, res) => {
     acidity === undefined ||
     body === undefined ||
     carbonation === undefined ||
-    alcoholIntensity === undefined
+    normalizedAlcoholIntensity === undefined
   ) {
     return res.status(400).json({
       status: 400,
@@ -1631,7 +1755,10 @@ const saveTasteProfile = async (req, res) => {
     acidity,
     body,
     carbonation,
-    alcoholIntensity,
+    normalizedAlcoholIntensity,
+    ...(flavor !== undefined ? [flavor] : []),
+    ...(normalizedAromaIntensity !== undefined ? [normalizedAromaIntensity] : []),
+    ...(normalizedFinish !== undefined ? [normalizedFinish] : []),
   ];
 
   const isOutOfRange = tasteValues.some((value) => {
@@ -1650,12 +1777,29 @@ const saveTasteProfile = async (req, res) => {
     });
   }
 
-  if (flavorNotes && !Array.isArray(flavorNotes)) {
+  if (flavorNotes && !Array.isArray(flavorNotes) && typeof flavorNotes !== 'string') {
     return res.status(400).json({
       status: 400,
       message: '맛지표 입력값이 올바르지 않습니다.',
     });
   }
+
+  if (flavorTags && !Array.isArray(flavorTags) && typeof flavorTags !== 'string') {
+    return res.status(400).json({
+      status: 400,
+      message: '留쏆????낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+    });
+  }
+
+  const flavorNotesPayload = buildTasteProfileStorage({
+    flavorNotes,
+    flavorTags,
+    flavor,
+    aromaIntensity: normalizedAromaIntensity,
+    finish: normalizedFinish,
+    tasteInput,
+    tasteVector,
+  });
 
   try {
     const result = await pool.query(
@@ -1687,8 +1831,8 @@ const saveTasteProfile = async (req, res) => {
         Number(acidity),
         Number(body),
         Number(carbonation),
-        Number(alcoholIntensity),
-        JSON.stringify(flavorNotes || []),
+        Number(normalizedAlcoholIntensity),
+        flavorNotesPayload,
         Number(draftId),
       ]
     );
@@ -1705,17 +1849,7 @@ const saveTasteProfile = async (req, res) => {
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'TASTE_PROFILE',
-      tasteProfile: {
-        sweetness: Number(draft.sweetness),
-        acidity: Number(draft.acidity),
-        body: Number(draft.body),
-        carbonation: Number(draft.carbonation),
-        alcoholIntensity: Number(draft.alcohol_intensity),
-        flavorNotes:
-          typeof draft.flavor_notes === 'string'
-            ? JSON.parse(draft.flavor_notes)
-            : draft.flavor_notes,
-      },
+      tasteProfile: buildTasteProfileResponse(draft),
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '맛지표 정보가 저장되었습니다.',
@@ -1798,8 +1932,9 @@ const savePlan = async (req, res) => {
       plan: {
         introduction: draft.introduction,
         videoUrl: draft.video_url,
-        budgetPlan: parseJsonField(draft.budget_plan),
-        schedulePlan: parseJsonField(draft.schedule_plan),
+        budgetPlan: parseJsonFieldPreserveText(draft.budget_plan),
+        schedulePlan: parseJsonFieldPreserveText(draft.schedule_plan),
+        ...PLAN_GUIDES,
       },
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
@@ -2063,6 +2198,15 @@ const loadBreweryInfo = async (req, res) => {
         business_registration_file_url,
         ba.brewery_name AS approved_brewery_name,
         ba.location AS approved_brewery_location,
+        ba.license_number AS approved_license_number,
+        ba.business_address_detail AS approved_business_address_detail,
+        ba.phone_number AS approved_phone_number,
+        ba.document_url AS approved_document_url,
+        ba.document_key AS approved_document_key,
+        ba.original_name AS approved_document_original_name,
+        ba.mime_type AS approved_document_mime_type,
+        ba.file_size AS approved_document_file_size,
+        ba.status AS approved_application_status,
         u.nickname AS user_nickname,
         u.email AS user_email,
         u.phone_number AS user_phone_number,
@@ -2070,7 +2214,18 @@ const loadBreweryInfo = async (req, res) => {
       FROM funding_drafts fd
       LEFT JOIN users u ON u.user_id = fd.brewery_id
       LEFT JOIN LATERAL (
-        SELECT brewery_name, location
+        SELECT
+          brewery_name,
+          location,
+          license_number,
+          business_address_detail,
+          phone_number,
+          document_url,
+          document_key,
+          original_name,
+          mime_type,
+          file_size,
+          status
         FROM brewery_auth
         WHERE user_id = fd.brewery_id
         ORDER BY
@@ -2102,11 +2257,12 @@ const loadBreweryInfo = async (req, res) => {
         creatorIntroduction: info.creator_introduction,
         breweryBio: info.creator_introduction,
         businessName: info.business_name || info.brewery_name || info.approved_brewery_name,
-        businessRegistrationNumber: info.business_registration_number,
+        businessRegistrationNumber: info.business_registration_number || info.approved_license_number,
         representativeName: info.representative_name,
         businessAddress: info.business_address || info.approved_brewery_location,
+        businessAddressDetail: info.approved_business_address_detail || null,
         contactEmail: info.contact_email || info.user_email,
-        contactPhone: info.contact_phone || info.user_phone_number,
+        contactPhone: info.contact_phone || info.approved_phone_number || info.user_phone_number,
         bankName: info.bank_name,
         accountNumber: info.account_number,
         accountHolder: info.account_holder,
@@ -2117,8 +2273,29 @@ const loadBreweryInfo = async (req, res) => {
         businessItem: info.business_item,
         taxEmail: info.tax_email,
         identityDocumentUrl: info.identity_document_url,
-        businessRegistrationFileUrl: info.business_registration_file_url,
+        businessRegistrationFileUrl: info.business_registration_file_url || info.approved_document_url,
+        businessLicense: info.approved_document_url
+          ? {
+              documentUrl: info.approved_document_url,
+              documentKey: info.approved_document_key,
+              originalName: info.approved_document_original_name,
+              mimeType: info.approved_document_mime_type,
+              fileSize: info.approved_document_file_size === null || info.approved_document_file_size === undefined
+                ? null
+                : Number(info.approved_document_file_size),
+            }
+          : null,
+        applicationStatus: info.approved_application_status || null,
       },
+      missingFields: [
+        ...(!(info.creator_name || info.brewery_name || info.approved_brewery_name || info.user_nickname) ? ['creatorName'] : []),
+        ...(!(info.contact_phone || info.approved_phone_number || info.user_phone_number) ? ['phoneNumber'] : []),
+        ...(!(info.business_registration_number || info.approved_license_number) ? ['businessNumber'] : []),
+        ...(!(info.business_address || info.approved_brewery_location) ? ['businessAddress'] : []),
+        ...(!info.representative_name ? ['representativeName'] : []),
+        ...(!(info.business_registration_file_url || info.approved_document_url) ? ['businessLicense'] : []),
+        ...(!info.creator_introduction ? ['creatorIntroduction'] : []),
+      ],
       message: '양조장 정보를 불러왔습니다. 본인 인증과 입금 계좌는 직접 입력해주세요.',
     });
   } catch (error) {
@@ -2952,13 +3129,13 @@ const submitFundingDraft = async (req, res) => {
         `,
         [
           breweryUserId,
-          draft.title || '제목 없는 프로젝트',
+          draft.title,
           draft.introduction || draft.summary || '',
           `${draft.alcohol_percentage || 0}%`,
-          draft.main_ingredient || '미입력',
+          draft.main_ingredient || null,
           draft.sub_ingredients || '[]',
           draft.flavor_notes || '[]',
-          draft.category || '막걸리',
+          draft.category || null,
           draft.summary || '',
           draft.thumbnail_url || null,
         ]
@@ -3395,6 +3572,7 @@ const updateFundingProject = async (req, res) => {
     title,
     description,
     thumbnailUrl,
+    imageUrls,
     goalAmount,
     startDate,
     endDate,
@@ -3449,6 +3627,24 @@ const updateFundingProject = async (req, res) => {
     });
   }
 
+  if (imageUrls !== undefined && !Array.isArray(imageUrls)) {
+    return res.status(400).json({
+      status: 400,
+      message: '????대?吏 紐⑸줉 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+    });
+  }
+
+  if (imageUrls && imageUrls.length > 5) {
+    return res.status(400).json({
+      status: 400,
+      message: '????대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
+    });
+  }
+
+  const normalizedImageFields = imageUrls !== undefined || thumbnailUrl !== undefined
+    ? buildImageFields(thumbnailUrl, imageUrls || [])
+    : null;
+
   try {
     const result = await pool.query(
       `
@@ -3461,8 +3657,10 @@ const updateFundingProject = async (req, res) => {
         end_date = COALESCE($5, end_date),
         price_per_bottle = COALESCE($6, price_per_bottle),
         shipping_fee = COALESCE($7, shipping_fee),
-        status = COALESCE($8, status)
-      WHERE funding_id = $9
+        status = COALESCE($8, status),
+        thumbnail_url = COALESCE($9, thumbnail_url),
+        image_urls = COALESCE($10, image_urls)
+      WHERE funding_id = $11
       RETURNING
         funding_id,
         title,
@@ -3473,6 +3671,8 @@ const updateFundingProject = async (req, res) => {
         end_date,
         price_per_bottle,
         shipping_fee,
+        thumbnail_url,
+        image_urls,
         status
       `,
       [
@@ -3484,6 +3684,8 @@ const updateFundingProject = async (req, res) => {
         pricePerBottle !== undefined ? Number(pricePerBottle) : null,
         shippingFee !== undefined ? Number(shippingFee) : null,
         status || null,
+        normalizedImageFields ? normalizedImageFields.thumbnailUrl : null,
+        normalizedImageFields ? JSON.stringify(normalizedImageFields.allImageUrls) : null,
         Number(fundingId),
       ]
     );
@@ -3510,6 +3712,10 @@ const updateFundingProject = async (req, res) => {
       endDate: funding.end_date,
       pricePerBottle: funding.price_per_bottle,
       shippingFee: funding.shipping_fee,
+      thumbnailUrl: funding.thumbnail_url,
+      imageUrls: buildImageFields(funding.thumbnail_url, funding.image_urls).imageUrls,
+      allImageUrls: buildImageFields(funding.thumbnail_url, funding.image_urls).allImageUrls,
+      images: mapFundingImageUrls(buildImageFields(funding.thumbnail_url, funding.image_urls).allImageUrls),
       status: funding.status,
       ...(aiRecommendation ? { aiRecommendation } : {}),
       message: '펀딩 프로젝트가 수정되었습니다.',
@@ -3540,6 +3746,7 @@ const mapFundingListRow = (row) => {
     thumbnailUrl: imageFields.thumbnailUrl,
     imageUrls: imageFields.imageUrls,
     allImageUrls: imageFields.allImageUrls,
+    images: mapFundingImageUrls(imageFields.allImageUrls),
     status: row.status,
     currentAmount,
     targetAmount,
@@ -3554,6 +3761,8 @@ const mapFundingListRow = (row) => {
     sulbtiMatchScore: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
     matchScore: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
     tasteMatchScore: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
+    recommendationScore: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
+    matchPercent: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
     liked: row.liked,
     likeCount: Number(row.like_count || 0),
   };
@@ -3562,10 +3771,21 @@ const mapFundingListRow = (row) => {
 const getFundingList = async (req, res) => {
   const { status, sort, page = 0, size = 10, keyword } = req.query;
 
-  const validFundingSorts = ['RECOMMENDED', 'RECOMMEND', 'POPULAR', 'LATEST', 'DEADLINE', 'ID_ASC'];
-  const normalizedSort = typeof sort === 'string' && sort.trim()
-    ? sort.trim().toUpperCase()
+  const validFundingSorts = ['RECOMMENDED', 'POPULAR', 'LATEST', 'DEADLINE', 'ID_ASC'];
+  const sortAliasMap = {
+    RECOMMEND: 'RECOMMENDED',
+    RECOMMENDED: 'RECOMMENDED',
+    POPULAR: 'POPULAR',
+    LATEST: 'LATEST',
+    DEADLINE: 'DEADLINE',
+    ENDINGSOON: 'DEADLINE',
+    ENDING_SOON: 'DEADLINE',
+    ID_ASC: 'ID_ASC',
+  };
+  const requestedSort = typeof sort === 'string' && sort.trim()
+    ? sort.trim().replace(/-/g, '_').toUpperCase()
     : 'ID_ASC';
+  const normalizedSort = sortAliasMap[requestedSort] || requestedSort;
   const normalizedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
   const normalizedStatus =
     typeof status === 'string' && status.trim()
@@ -3656,6 +3876,7 @@ const getFundingList = async (req, res) => {
         SELECT
           taste_profile_id,
           sweetness,
+          acidity,
           body,
           carbonation,
           alcohol_intensity
@@ -3676,13 +3897,13 @@ const getFundingList = async (req, res) => {
         ORDER BY created_at DESC
         LIMIT 1
       ) sb_match ON TRUE
+      LEFT JOIN users requester ON requester.user_id = ${userIdParam}
     `;
     const orderBy = {
       RECOMMENDED: 'ORDER BY match_rate DESC NULLS LAST, fp.created_at DESC',
-      RECOMMEND: 'ORDER BY match_rate DESC NULLS LAST, fp.created_at DESC',
       POPULAR: 'ORDER BY like_counts.like_count DESC, fp.created_at DESC',
       LATEST: 'ORDER BY fp.created_at DESC',
-      DEADLINE: 'ORDER BY fp.end_date ASC, fp.created_at DESC',
+      DEADLINE: 'ORDER BY CASE WHEN fp.end_date >= CURRENT_DATE THEN 0 ELSE 1 END, fp.end_date ASC, fp.created_at DESC',
       ID_ASC: 'ORDER BY fp.funding_id ASC',
     }[normalizedSort];
 
@@ -3706,13 +3927,50 @@ const getFundingList = async (req, res) => {
         fp.shipping_fee,
         COALESCE(like_counts.like_count, 0) AS like_count,
         CASE
-          WHEN sb_match.result_id IS NULL OR tp_match.taste_profile_id IS NULL THEN NULL
-          ELSE ROUND((
+          WHEN requester.taste_vector IS NOT NULL AND tp_match.taste_profile_id IS NOT NULL THEN ROUND((
+            (100 - ABS((
+              CASE
+                WHEN ((requester.taste_vector->>'sweetness')::numeric) <= 10
+                  THEN ((requester.taste_vector->>'sweetness')::numeric) * 10
+                ELSE ((requester.taste_vector->>'sweetness')::numeric)
+              END
+            ) - COALESCE(tp_match.sweetness, 50))) +
+            (100 - ABS((
+              CASE
+                WHEN ((requester.taste_vector->>'body')::numeric) <= 10
+                  THEN ((requester.taste_vector->>'body')::numeric) * 10
+                ELSE ((requester.taste_vector->>'body')::numeric)
+              END
+            ) - COALESCE(tp_match.body, 50))) +
+            (100 - ABS((
+              CASE
+                WHEN ((requester.taste_vector->>'carbonation')::numeric) <= 10
+                  THEN ((requester.taste_vector->>'carbonation')::numeric) * 10
+                ELSE ((requester.taste_vector->>'carbonation')::numeric)
+              END
+            ) - COALESCE(tp_match.carbonation, 50))) +
+            (100 - ABS((
+              CASE
+                WHEN ((requester.taste_vector->>'alcohol')::numeric) <= 10
+                  THEN ((requester.taste_vector->>'alcohol')::numeric) * 10
+                ELSE ((requester.taste_vector->>'alcohol')::numeric)
+              END
+            ) - COALESCE(tp_match.alcohol_intensity, 50))) +
+            (100 - ABS((
+              CASE
+                WHEN ((requester.taste_vector->>'acidity')::numeric) <= 10
+                  THEN ((requester.taste_vector->>'acidity')::numeric) * 10
+                ELSE ((requester.taste_vector->>'acidity')::numeric)
+              END
+            ) - COALESCE(tp_match.acidity, 50)))
+          ) / 5.0)::int
+          WHEN sb_match.result_id IS NOT NULL AND tp_match.taste_profile_id IS NOT NULL THEN ROUND((
             (100 - ABS(((sb_match.sweetness_score - 1) * 25) - COALESCE(tp_match.sweetness, 50))) +
             (100 - ABS(((sb_match.body_score - 1) * 25) - COALESCE(tp_match.body, 50))) +
             (100 - ABS(((sb_match.carbonation_score - 1) * 25) - COALESCE(tp_match.carbonation, 50))) +
             (100 - ABS(((sb_match.abv_score - 1) * 25) - COALESCE(tp_match.alcohol_intensity, 50)))
           ) / 4.0)::int
+          ELSE NULL
         END AS match_rate,
         EXISTS (
           SELECT 1
@@ -3831,7 +4089,7 @@ const getFundingDetail = async (req, res) => {
         fp.description,
         COALESCE(fp.summary, fd.summary) AS summary,
         COALESCE(fp.category, fd.category) AS category,
-        COALESCE(fp.image_urls::text, fd.image_urls::text) AS image_urls,
+        COALESCE(NULLIF(fp.image_urls::text, '[]'), fd.image_urls::text) AS image_urls,
         fp.status,
         fp.current_amount,
         fp.goal_amount AS target_amount,
@@ -3840,6 +4098,7 @@ const getFundingDetail = async (req, res) => {
         fp.expected_delivery_date,
         fp.price_per_bottle,
         fp.shipping_fee,
+        fd.total_quantity,
         fp.volume,
         fp.alcohol_percentage,
         fp.bottle_size,
@@ -3888,7 +4147,7 @@ const getFundingDetail = async (req, res) => {
         fd.business_registration_file_url,
         COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
         r.title AS recipe_title,
-        COALESCE(fp.thumbnail_url, fd.thumbnail_url, r.image_url) AS thumbnail_url,
+        COALESCE(NULLIF(fp.thumbnail_url, ''), NULLIF(fd.thumbnail_url, ''), r.image_url) AS thumbnail_url,
         COALESCE(like_counts.like_count, 0) AS like_count,
         EXISTS (
           SELECT 1
@@ -4045,6 +4304,7 @@ const getFundingDetail = async (req, res) => {
       thumbnailUrl: imageFields.thumbnailUrl,
       imageUrls: imageFields.imageUrls,
       allImageUrls: imageFields.allImageUrls,
+      images: mapFundingImageUrls(imageFields.allImageUrls),
       breweryName: funding.draft_brewery_name || funding.brewery_name,
       status: funding.status,
       currentAmount: Number(funding.current_amount),
@@ -4054,6 +4314,7 @@ const getFundingDetail = async (req, res) => {
       endDate: funding.end_date,
       expectedDeliveryDate: funding.expected_delivery_date,
       pricePerBottle: funding.price_per_bottle,
+      totalQuantity: funding.total_quantity,
       shippingFee: funding.shipping_fee,
       volume: funding.volume,
       alcoholPercentage: funding.alcohol_percentage,
@@ -4065,32 +4326,41 @@ const getFundingDetail = async (req, res) => {
       liked: funding.liked,
       likeCount: Number(funding.like_count || 0),
       tasteProfile: taste
-        ? {
-            sweetness: taste.sweetness,
-            acidity: taste.acidity,
-            body: taste.body,
-            carbonation: taste.carbonation,
-            alcoholIntensity: taste.alcohol_intensity,
-            flavorNotes: parseJsonField(taste.flavor_notes),
-          }
+        ? buildTasteProfileResponse({
+            ...taste,
+            alcohol_percentage: funding.alcohol_percentage,
+          })
         : null,
       legalInfo: {
         productType: funding.product_type,
         volume: funding.volume,
         alcoholPercentage: funding.alcohol_percentage,
         rawMaterials: parseJsonField(funding.raw_materials),
+        businessNumber: funding.business_registration_number,
+        licenseNumber: funding.business_registration_number,
+        businessAddress: funding.business_address,
+        notice: funding.adult_verification_notice || funding.risk_notice || null,
+        policy: funding.refund_policy || funding.exchange_policy || null,
+        refundPolicy: funding.refund_policy || null,
       },
       plan: {
         introduction: funding.introduction,
         videoUrl: funding.video_url,
-        budgetPlan: parseJsonField(funding.budget_plan),
-        schedulePlan: parseJsonField(funding.schedule_plan),
+        productionPlan: funding.introduction || null,
+        deliveryPlan: funding.expected_delivery_date || null,
+        fundingPurpose: funding.introduction || null,
+        budgetPlan: parseJsonFieldPreserveText(funding.budget_plan),
+        schedulePlan: parseJsonFieldPreserveText(funding.schedule_plan),
+        riskPlan: funding.risk_notice,
+        policy: funding.refund_policy || funding.exchange_policy || null,
+        ...PLAN_GUIDES,
       },
       breweryInfo: {
         breweryName: funding.draft_brewery_name || funding.brewery_name,
         creatorName: funding.creator_name,
         profileImageUrl: funding.profile_image_url,
         creatorIntroduction: funding.creator_introduction,
+        breweryBio: funding.creator_introduction,
         representativeName: funding.representative_name,
         businessRegistrationNumber: funding.business_registration_number,
         businessAddress: funding.business_address,
@@ -4114,6 +4384,8 @@ const getFundingDetail = async (req, res) => {
         exchangePolicy: funding.exchange_policy,
         adultVerificationNotice: funding.adult_verification_notice,
         riskNotice: funding.risk_notice,
+        notice: funding.adult_verification_notice || funding.risk_notice || null,
+        policy: funding.refund_policy || funding.exchange_policy || null,
       },
       documents: documentResult.rows.map(mapFundingDocument),
       supportOptions: optionResult.rows.map((option) => ({
@@ -4196,9 +4468,10 @@ const getFundingIntro = async (req, res) => {
       introduction: funding.draft_introduction || funding.summary || funding.description || funding.recipe_content || '',
       story: funding.description || funding.recipe_content || funding.concept || '',
       videoUrl: funding.video_url,
-      budgetPlan: parseJsonField(funding.budget_plan),
-      schedulePlan: parseJsonField(funding.schedule_plan),
-      images: parseJsonField(funding.image_urls),
+      budgetPlan: parseJsonFieldPreserveText(funding.budget_plan),
+      schedulePlan: parseJsonFieldPreserveText(funding.schedule_plan),
+      ...PLAN_GUIDES,
+      images: mapFundingImageUrls(buildImageFields(null, funding.image_urls).allImageUrls),
     });
   } catch (error) {
     return res.status(500).json({
