@@ -4068,11 +4068,18 @@ const mapFundingListRow = (row) => {
   const currentAmount = Number(row.current_amount || 0);
   const targetAmount = Number(row.target_amount || 0);
   const imageFields = buildImageFields(row.thumbnail_url, row.image_urls);
+  const breweryUserId =
+    row.brewery_user_id === null || row.brewery_user_id === undefined
+      ? null
+      : Number(row.brewery_user_id);
 
   return {
     fundingId: Number(row.funding_id),
     title: row.title,
     description: row.description,
+    breweryUserId,
+    ownerUserId: breweryUserId,
+    isMine: row.is_mine === true,
     breweryName: row.brewery_name,
     recipeTitle: row.recipe_title,
     thumbnailUrl: imageFields.thumbnailUrl,
@@ -4100,8 +4107,36 @@ const mapFundingListRow = (row) => {
   };
 };
 
+const isTruthyQueryValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.some(isTruthyQueryValue);
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  return ['true', '1', 'yes', 'y', 'on'].includes(String(value).trim().toLowerCase());
+};
+
 const getFundingList = async (req, res) => {
-  const { status, sort, page = 0, size = 10, keyword, mine } = req.query;
+  const {
+    status,
+    sort,
+    page = 0,
+    size = 10,
+    keyword,
+    mine,
+    isMine,
+    my,
+    ownerOnly,
+    ownedOnly,
+    management,
+  } = req.query;
 
   const validFundingSorts = ['RECOMMENDED', 'POPULAR', 'LATEST', 'DEADLINE', 'ID_ASC'];
   const sortAliasMap = {
@@ -4141,7 +4176,14 @@ const getFundingList = async (req, res) => {
   }
 
   const userId = getUserId(req);
-  const mineRequested = String(mine || '').toLowerCase() === 'true';
+  const mineRequested = [
+    mine,
+    isMine,
+    my,
+    ownerOnly,
+    ownedOnly,
+    management,
+  ].some(isTruthyQueryValue);
 
   if (mineRequested && !userId) {
     return res.status(401).json({
@@ -4256,6 +4298,7 @@ const getFundingList = async (req, res) => {
       `
       SELECT
         fp.funding_id,
+        fp.brewery_user_id,
         fp.title,
         fp.description,
         COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
@@ -4322,7 +4365,12 @@ const getFundingList = async (req, res) => {
           FROM funding_likes my_like
           WHERE my_like.funding_id = fp.funding_id
           AND my_like.user_id = ${userIdParam}
-        ) AS liked
+        ) AS liked,
+        CASE
+          WHEN ${userIdParam} IS NOT NULL AND fp.brewery_user_id = ${userIdParam}
+            THEN true
+          ELSE false
+        END AS is_mine
       ${listFromClause}
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS like_count
@@ -4337,10 +4385,14 @@ const getFundingList = async (req, res) => {
       listValues
     );
 
+    const fundings = rows
+      .map(mapFundingListRow)
+      .filter((funding) => !mineRequested || funding.breweryUserId === userId);
+
     return res.status(200).json({
       status: 200,
       message: '펀딩 목록 조회 성공',
-      data: rows.map(mapFundingListRow),
+      data: fundings,
       page: requestedPageNumber,
       size: requestedSizeNumber,
       totalElements,
