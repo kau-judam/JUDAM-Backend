@@ -6,18 +6,26 @@ const {
 
 const suggestSubIngredientsController = async (req, res) => {
   try {
-    const { main_ingredient, region } = req.body;
+    const {
+      main_ingredient,
+      mainIngredient,
+      region,
+      location,
+      area,
+    } = req.body;
+    const normalizedMainIngredient = main_ingredient || mainIngredient;
+    const normalizedRegion = region || location || area || null;
 
-    if (!main_ingredient || !region) {
+    if (!normalizedMainIngredient) {
       return res.status(400).json({
         status: 400,
-        message: 'main_ingredient와 region은 필수입니다.',
+        message: 'main_ingredient는 필수입니다.',
       });
     }
 
     const data = await suggestSubIngredients({
-      main_ingredient,
-      region,
+      main_ingredient: normalizedMainIngredient,
+      region: normalizedRegion,
     });
 
     return res.status(200).json({
