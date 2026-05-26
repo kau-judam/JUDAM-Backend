@@ -142,6 +142,143 @@ const requireUserId = (req, res) => {
   return userId;
 };
 
+const FUNDING_OWNER_FORBIDDEN_MESSAGE = '해당 펀딩 프로젝트에 대한 권한이 없습니다.';
+const AUTH_REQUIRED_MESSAGE = '유효하지 않거나 만료된 토큰입니다.';
+
+const createHttpError = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
+
+const getAuthUserId = (user) => {
+  const userId = Number(user?.userId || user?.id);
+  return Number.isInteger(userId) && userId > 0 ? userId : null;
+};
+
+const getAuthUserRole = (user) =>
+  toTrimmedString(user?.role || user?.userRole || user?.type).toUpperCase();
+
+const isAdminUser = (user) => getAuthUserRole(user) === 'ADMIN';
+
+const handleAuthorizationError = (res, error) => {
+  if (![401, 403, 404].includes(error.status)) {
+    return false;
+  }
+
+  res.status(error.status).json({
+    status: error.status,
+    message: error.message,
+  });
+  return true;
+};
+
+const assertFundingProjectOwner = async (fundingId, user) => {
+  const userId = getAuthUserId(user);
+
+  if (!userId) {
+    throw createHttpError(401, AUTH_REQUIRED_MESSAGE);
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT funding_id, brewery_user_id
+    FROM funding_projects
+    WHERE funding_id = $1
+    `,
+    [Number(fundingId)]
+  );
+
+  if (rows.length === 0) {
+    throw createHttpError(404, '펀딩 프로젝트를 찾을 수 없습니다.');
+  }
+
+  const funding = rows[0];
+
+  if (isAdminUser(user) || Number(funding.brewery_user_id) === userId) {
+    return funding;
+  }
+
+  throw createHttpError(403, FUNDING_OWNER_FORBIDDEN_MESSAGE);
+};
+
+const assertFundingDraftOwner = async (draftId, user) => {
+  const userId = getAuthUserId(user);
+
+  if (!userId) {
+    throw createHttpError(401, AUTH_REQUIRED_MESSAGE);
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT draft_id, brewery_id, funding_id
+    FROM funding_drafts
+    WHERE draft_id = $1
+    `,
+    [Number(draftId)]
+  );
+
+  if (rows.length === 0) {
+    throw createHttpError(404, '임시저장 프로젝트를 찾을 수 없습니다.');
+  }
+
+  const draft = rows[0];
+
+  if (isAdminUser(user) || Number(draft.brewery_id) === userId) {
+    return draft;
+  }
+
+  throw createHttpError(403, FUNDING_OWNER_FORBIDDEN_MESSAGE);
+};
+
+const authorizeFundingProjectOwner = async (fundingId, user, res) => {
+  try {
+    await assertFundingProjectOwner(fundingId, user);
+    return true;
+  } catch (error) {
+    if (handleAuthorizationError(res, error)) {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
+const authorizeFundingDraftOwner = async (draftId, user, res) => {
+  try {
+    await assertFundingDraftOwner(draftId, user);
+    return true;
+  } catch (error) {
+    if (handleAuthorizationError(res, error)) {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
+const authorizeBreweryUserId = (breweryId, user, res) => {
+  const userId = getAuthUserId(user);
+
+  if (!userId) {
+    res.status(401).json({
+      status: 401,
+      message: AUTH_REQUIRED_MESSAGE,
+    });
+    return false;
+  }
+
+  if (isAdminUser(user) || Number(breweryId) === userId) {
+    return true;
+  }
+
+  res.status(403).json({
+    status: 403,
+    message: FUNDING_OWNER_FORBIDDEN_MESSAGE,
+  });
+  return false;
+};
+
 const uniqueValues = (values) => [
   ...new Set(
     (values || [])
@@ -752,10 +889,12 @@ const getFundingDraftDocuments = async (draftId) => {
 const findDirectFundingDraftByFundingId = async (fundingId) => {
   const { rows } = await pool.query(
     `
-    SELECT *
-    FROM funding_drafts
-    WHERE funding_id = $1
-    ORDER BY updated_at DESC
+    SELECT fd.*
+    FROM funding_drafts fd
+    JOIN funding_projects fp ON fp.funding_id = fd.funding_id
+    WHERE fd.funding_id = $1
+      AND fd.brewery_id = fp.brewery_user_id
+    ORDER BY fd.updated_at DESC
     LIMIT 1
     `,
     [Number(fundingId)]
@@ -772,10 +911,7 @@ const findFallbackFundingDraftByFundingId = async (fundingId) => {
     JOIN funding_drafts fd
       ON fd.funding_id IS NULL
       AND NULLIF(BTRIM(fd.title), '') = NULLIF(BTRIM(fp.title), '')
-      AND (
-        fd.brewery_id IS NULL
-        OR fd.brewery_id = fp.brewery_user_id
-      )
+      AND fd.brewery_id = fp.brewery_user_id
     WHERE fp.funding_id = $1
     ORDER BY
       CASE
@@ -934,6 +1070,8 @@ const saveAgreement = async (req, res) => {
     });
   }
 
+  if (!authorizeBreweryUserId(breweryId, req.user, res)) return;
+
   try {
     const result = await pool.query(
       `
@@ -1016,6 +1154,8 @@ const createFundingDraft = async (req, res) => {
       message: '양조장 ID는 필수입니다.',
     });
   }
+
+  if (!authorizeBreweryUserId(breweryId, req.user, res)) return;
 
     if (imageUrls && !Array.isArray(imageUrls)) {
       return res.status(400).json({
@@ -1172,6 +1312,8 @@ const updateFundingDraft = async (req, res) => {
   const progressRate = Math.round((filledCount / progressFields.length) * 33);
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -1317,6 +1459,8 @@ const saveBasicInfo = async (req, res) => {
     normalizedImageUrls.length > 0 ? normalizedImageUrls[0] : thumbnailUrl || null;
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -1505,6 +1649,8 @@ const saveSchedule = async (req, res) => {
   const formatDate = (date) => date.toISOString().slice(0, 10);
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -1648,6 +1794,8 @@ const saveLegalInfo = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -1803,6 +1951,8 @@ const saveTasteProfile = async (req, res) => {
   });
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -1890,6 +2040,8 @@ const savePlan = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -2044,6 +2196,8 @@ const saveBreweryInfo = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     let resolvedAccountVerified = accountVerified;
 
     if (bankVerificationToken) {
@@ -2179,6 +2333,8 @@ const loadBreweryInfo = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       SELECT
@@ -2362,6 +2518,8 @@ const uploadFundingDraftFile = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const fileUrl = await storeUploadedFile(file, `funding-drafts/${draftId}`, draftId);
 
     const result = await pool.query(
@@ -2410,6 +2568,8 @@ const verifyPhoneForFundingDraft = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -2481,6 +2641,8 @@ const verifyAccountForFundingDraft = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const verificationResult = await pool.query(
       `
       SELECT verification_id
@@ -2820,6 +2982,8 @@ const saveNotices = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -2918,6 +3082,8 @@ const uploadDocument = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const fileUrl = await storeUploadedFile(file, `funding-documents/${draftId}`, draftId);
 
     const result = await pool.query(
@@ -3032,6 +3198,8 @@ const submitFundingDraft = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const draftResult = await pool.query(
       `
       SELECT *
@@ -3329,6 +3497,8 @@ const getFundingDraft = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const result = await pool.query(
       `
       SELECT *
@@ -3390,6 +3560,8 @@ const getFundingDraftByFundingId = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingProjectOwner(resolvedFundingId, req.user, res))) return;
+
     const draft = await findAndLinkFundingDraftByFundingId(resolvedFundingId);
 
     if (!draft) {
@@ -3427,6 +3599,22 @@ const getFundingDraftList = async (req, res) => {
     return res.status(400).json({
       status: 400,
       message: '양조장 ID는 필수입니다.',
+    });
+  }
+
+  const currentUserId = getAuthUserId(req.user);
+
+  if (!currentUserId) {
+    return res.status(401).json({
+      status: 401,
+      message: AUTH_REQUIRED_MESSAGE,
+    });
+  }
+
+  if (!isAdminUser(req.user) && Number(breweryId) !== currentUserId) {
+    return res.status(403).json({
+      status: 403,
+      message: FUNDING_OWNER_FORBIDDEN_MESSAGE,
     });
   }
 
@@ -3475,6 +3663,8 @@ const deleteFundingDraft = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     await pool.query(
       `
       DELETE FROM funding_documents
@@ -3524,6 +3714,8 @@ const getFundingDraftPreview = async (req, res) => {
   }
 
   try {
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
     const draftResult = await pool.query(
       `
       SELECT *
@@ -3654,6 +3846,8 @@ const updateFundingProject = async (req, res) => {
     : null;
 
   try {
+    if (!(await authorizeFundingProjectOwner(fundingId, req.user, res))) return;
+
     const result = await pool.query(
       `
       UPDATE funding_projects
