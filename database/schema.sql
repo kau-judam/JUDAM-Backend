@@ -275,6 +275,31 @@ ADD COLUMN IF NOT EXISTS funding_id BIGINT
   REFERENCES funding_projects(funding_id)
   ON DELETE SET NULL;
 
+-- Funding management screens depend on these fields being stored as user-entered
+-- values. RDS schema changes are applied manually, so these additive statements are
+-- kept as a reference for data-integrity backfills/migrations.
+ALTER TABLE IF EXISTS funding_projects
+ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
+ADD COLUMN IF NOT EXISTS image_urls TEXT,
+ADD COLUMN IF NOT EXISTS summary TEXT,
+ADD COLUMN IF NOT EXISTS category VARCHAR(100),
+ADD COLUMN IF NOT EXISTS expected_delivery_date DATE,
+ADD COLUMN IF NOT EXISTS price_per_bottle INT,
+ADD COLUMN IF NOT EXISTS shipping_fee INT,
+ADD COLUMN IF NOT EXISTS volume INT,
+ADD COLUMN IF NOT EXISTS alcohol_percentage DECIMAL(4,1),
+ADD COLUMN IF NOT EXISTS bottle_size VARCHAR(50),
+ADD COLUMN IF NOT EXISTS short_title VARCHAR(100);
+
+ALTER TABLE IF EXISTS funding_drafts
+ADD COLUMN IF NOT EXISTS image_urls TEXT,
+ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
+ADD COLUMN IF NOT EXISTS flavor_notes TEXT,
+ADD COLUMN IF NOT EXISTS budget_plan TEXT,
+ADD COLUMN IF NOT EXISTS schedule_plan TEXT,
+ADD COLUMN IF NOT EXISTS creator_introduction TEXT,
+ADD COLUMN IF NOT EXISTS business_address_detail VARCHAR(255);
+
 -- Existing data backfill reference. Review candidates before running an UPDATE in RDS.
 -- SELECT
 --   fp.funding_id,
