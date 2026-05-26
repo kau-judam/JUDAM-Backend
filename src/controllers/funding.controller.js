@@ -3720,13 +3720,6 @@ const getFundingDraftByFundingId = async (req, res) => {
 const getFundingDraftList = async (req, res) => {
   const { breweryId } = req.query;
 
-  if (!breweryId || isNaN(Number(breweryId))) {
-    return res.status(400).json({
-      status: 400,
-      message: '양조장 ID는 필수입니다.',
-    });
-  }
-
   const currentUserId = getAuthUserId(req.user);
 
   if (!currentUserId) {
@@ -3736,7 +3729,19 @@ const getFundingDraftList = async (req, res) => {
     });
   }
 
-  if (!isAdminUser(req.user) && Number(breweryId) !== currentUserId) {
+  const requestedBreweryId =
+    breweryId === undefined || breweryId === null || breweryId === ''
+      ? currentUserId
+      : Number(breweryId);
+
+  if (!Number.isInteger(requestedBreweryId) || requestedBreweryId <= 0) {
+    return res.status(400).json({
+      status: 400,
+      message: '양조장 ID가 올바르지 않습니다.',
+    });
+  }
+
+  if (!isAdminUser(req.user) && requestedBreweryId !== currentUserId) {
     return res.status(403).json({
       status: 403,
       message: FUNDING_OWNER_FORBIDDEN_MESSAGE,
@@ -3760,7 +3765,7 @@ const getFundingDraftList = async (req, res) => {
       WHERE brewery_id = $1
       ORDER BY updated_at DESC
       `,
-      [Number(breweryId)]
+      [requestedBreweryId]
     );
 
     return res.status(200).json({
@@ -4096,7 +4101,7 @@ const mapFundingListRow = (row) => {
 };
 
 const getFundingList = async (req, res) => {
-  const { status, sort, page = 0, size = 10, keyword } = req.query;
+  const { status, sort, page = 0, size = 10, keyword, mine } = req.query;
 
   const validFundingSorts = ['RECOMMENDED', 'POPULAR', 'LATEST', 'DEADLINE', 'ID_ASC'];
   const sortAliasMap = {
@@ -4136,6 +4141,14 @@ const getFundingList = async (req, res) => {
   }
 
   const userId = getUserId(req);
+  const mineRequested = String(mine || '').toLowerCase() === 'true';
+
+  if (mineRequested && !userId) {
+    return res.status(401).json({
+      status: 401,
+      message: AUTH_REQUIRED_MESSAGE,
+    });
+  }
 
   const values = [];
   const conditions = [];
@@ -4154,6 +4167,11 @@ const getFundingList = async (req, res) => {
       OR COALESCE(ba.brewery_name, u.nickname, '') ILIKE ${keywordParam}
       OR r.title ILIKE ${keywordParam}
     )`);
+  }
+
+  if (mineRequested) {
+    values.push(userId);
+    conditions.push(`fp.brewery_user_id = $${values.length}`);
   }
 
   const whereClause =
