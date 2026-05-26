@@ -19,7 +19,8 @@ const getMyRecipes = async (userId, page, size) => {
   const totalElements = parseInt(countResult.rows[0].count, 10);
   const totalPages = Math.ceil(totalElements / size) || 1;
 
-  return { recipes: dataResult.rows, totalElements, totalPages, currentPage: page };
+  const recipes = dataResult.rows.map((r) => ({ ...r, recipe_id: Number(r.recipe_id) }));
+  return { recipes, totalElements, totalPages, currentPage: page };
 };
 
 // 내가 관심 등록한 레시피 목록 (GET /api/users/me/interests/recipes)
@@ -44,7 +45,8 @@ const getMyInterestRecipes = async (userId, page, size) => {
   const totalElements = parseInt(countResult.rows[0].count, 10);
   const totalPages = Math.ceil(totalElements / size) || 1;
 
-  return { recipes: dataResult.rows, totalElements, totalPages, currentPage: page };
+  const recipes = dataResult.rows.map((r) => ({ ...r, recipe_id: Number(r.recipe_id) }));
+  return { recipes, totalElements, totalPages, currentPage: page };
 };
 
 // 내가 작성한 레시피 댓글 목록 (GET /api/users/me/recipe-comments)
@@ -68,7 +70,12 @@ const getMyRecipeComments = async (userId, page, size) => {
   const totalElements = parseInt(countResult.rows[0].count, 10);
   const totalPages = Math.ceil(totalElements / size) || 1;
 
-  return { comments: dataResult.rows, totalElements, totalPages, currentPage: page };
+  const comments = dataResult.rows.map((c) => ({
+    ...c,
+    comment_id: Number(c.comment_id),
+    recipe: { ...c.recipe, recipe_id: Number(c.recipe.recipe_id) },
+  }));
+  return { comments, totalElements, totalPages, currentPage: page };
 };
 
 // 내가 작성한 게시글 목록 — 최근 3개 (GET /api/users/me/posts)
