@@ -4821,6 +4821,7 @@ const getFundingIntro = async (req, res) => {
         fp.title,
         fp.description,
         fp.summary,
+        COALESCE(NULLIF(fd.thumbnail_url, ''), NULLIF(fp.thumbnail_url, '')) AS thumbnail_url,
         COALESCE(NULLIF(fd.image_urls::text, '[]'), NULLIF(fp.image_urls::text, '[]')) AS image_urls,
         fd.introduction AS draft_introduction,
         fd.video_url,
@@ -4831,11 +4832,15 @@ const getFundingIntro = async (req, res) => {
         fd.refund_policy,
         fd.exchange_policy,
         r.content AS recipe_content,
-        r.concept
+        r.concept,
+        r.main_ingredient AS recipe_main_ingredient,
+        r.ai_sub_ingredient AS recipe_sub_ingredient
       FROM funding_projects fp
       LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
       LEFT JOIN LATERAL (
         SELECT
+          thumbnail_url,
+          image_urls,
           introduction,
           video_url,
           main_ingredient,
@@ -4862,7 +4867,10 @@ const getFundingIntro = async (req, res) => {
     }
 
     const funding = result.rows[0];
-    const subIngredients = parseFundingListField(funding.sub_ingredients);
+    const subIngredients = parseFundingListField(funding.sub_ingredients || funding.recipe_sub_ingredient);
+    const mainIngredient = funding.main_ingredient || funding.recipe_main_ingredient || null;
+    const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
+    const imageFields = buildImageFields(funding.thumbnail_url, funding.image_urls);
     const budgetPlan = parseJsonFieldPreserveText(funding.budget_plan);
     const schedulePlan = parseJsonFieldPreserveText(funding.schedule_plan);
     const projectPolicy =
@@ -4874,10 +4882,11 @@ const getFundingIntro = async (req, res) => {
       title: funding.title,
       introduction: funding.draft_introduction || funding.summary || funding.description || funding.recipe_content || '',
       story: funding.description || funding.recipe_content || funding.concept || '',
-      mainIngredient: funding.main_ingredient || null,
-      primaryIngredient: funding.main_ingredient || null,
+      mainIngredient,
+      primaryIngredient: mainIngredient,
       subIngredient: subIngredients[0] || null,
       subIngredients,
+      ingredients,
       videoUrl: funding.video_url,
       budgetPlan,
       projectBudget: budgetPlan,
@@ -4886,7 +4895,10 @@ const getFundingIntro = async (req, res) => {
       policy: projectPolicy,
       projectPolicy,
       ...PLAN_GUIDES,
-      images: mapFundingImageUrls(buildImageFields(null, funding.image_urls).allImageUrls),
+      thumbnailUrl: imageFields.thumbnailUrl,
+      imageUrls: imageFields.imageUrls,
+      allImageUrls: imageFields.allImageUrls,
+      images: mapFundingImageUrls(imageFields.allImageUrls),
     });
   } catch (error) {
     return res.status(500).json({
