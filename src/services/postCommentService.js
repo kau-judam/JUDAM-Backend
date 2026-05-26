@@ -193,4 +193,103 @@ const deleteComment = async (postId, commentId, userId) => {
   }
 };
 
-module.exports = { getCommentsByPostId, createComment, updateComment, deleteComment };
+// 게시글 대댓글 목록 조회 (GET /api/posts/:postId/comments/:commentId/replies)
+// - WHERE parent_comment_id = commentId — 부모 댓글의 직속 자식만
+// - created_at ASC — 오래된 대댓글 먼저
+// - 부모 댓글이 없어도 빈 배열 반환 (명세서 line 129)
+// - userId가 null이면 is_liked, is_mine은 항상 false (비로그인)
+const getRepliesByCommentId = async (postId, parentCommentId, page, size, userId) => {
+  const offset = page * size;
+
+  const dataResult = await pool.query(
+    `SELECT
+       pc.comment_id,
+       pc.user_id,
+       u.nickname        AS user_nickname,
+       u.profile_image   AS author_profile_image,
+       pc.content,
+       pc.created_at,
+       pc.updated_at,
+       CASE WHEN pcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
+       CASE WHEN pc.user_id = $4 THEN true ELSE false END         AS is_mine
+     FROM post_comments pc
+     JOIN users u ON u.user_id = pc.user_id
+     LEFT JOIN post_comment_likes pcl
+            ON pcl.comment_id = pc.comment_id AND pcl.user_id = $4
+     WHERE pc.parent_comment_id = $1
+     ORDER BY pc.created_at ASC
+     LIMIT $2 OFFSET $3`,
+    [parentCommentId, size, offset, userId]
+  );
+
+  const countResult = await pool.query(
+    'SELECT COUNT(*) FROM post_comments WHERE parent_comment_id = $1',
+    [parentCommentId]
+  );
+
+  const totalElements = parseInt(countResult.rows[0].count, 10);
+  const totalPages = Math.ceil(totalElements / size) || 1;
+
+  const replies = dataResult.rows.map((c) => ({
+    comment_id:           Number(c.comment_id),
+    user_id:              Number(c.user_id),
+    nickname:             c.user_nickname,
+    author_profile_image: c.author_profile_image,
+    content:              c.content,
+    is_liked:             c.is_liked,
+    is_mine:              c.is_mine,
+    created_at:           c.created_at,
+    updated_at:           c.updated_at,
+  }));
+
+  return { replies, totalElements, totalPages, currentPage: page };
+};
+
+// 게시글 대댓글 작성 (POST /api/posts/:postId/comments/:commentId/replies)
+// - 부모 댓글이 (postId, commentId) 쌍으로 존재해야 함 — 그렇지 않으면 404
+// - parent_comment_id를 설정해 post_comments INSERT
+// - 작성 직후 부모 댓글의 최신 대댓글 수를 함께 반환 (parent_reply_count)
+// - 레시피 대댓글 작성 패턴과 동일: posts.comment_count는 갱신하지 않음
+const createReply = async (postId, parentCommentId, content, user) => {
+  const parentResult = await pool.query(
+    'SELECT comment_id FROM post_comments WHERE comment_id = $1 AND post_id = $2',
+    [parentCommentId, postId]
+  );
+  if (parentResult.rowCount === 0) {
+    const error = new Error('부모 댓글을 찾을 수 없습니다.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const nicknameResult = await pool.query(
+    'SELECT nickname FROM users WHERE user_id = $1',
+    [user.id]
+  );
+  const nickname = nicknameResult.rows[0]?.nickname || `user_${user.id}`;
+
+  const insertResult = await pool.query(
+    `INSERT INTO post_comments (post_id, user_id, content, parent_comment_id)
+     VALUES ($1, $2, $3, $4)
+     RETURNING comment_id, content, created_at`,
+    [postId, user.id, content, parentCommentId]
+  );
+
+  const replyCountResult = await pool.query(
+    'SELECT COUNT(*)::INT AS reply_count FROM post_comments WHERE parent_comment_id = $1',
+    [parentCommentId]
+  );
+
+  const c = insertResult.rows[0];
+  return {
+    comment_id:         Number(c.comment_id),
+    post_id:            postId,
+    parent_comment_id:  parentCommentId,
+    user_id:            Number(user.id),
+    nickname:           nickname,
+    content:            c.content,
+    created_at:         c.created_at,
+    parent_reply_count: Number(replyCountResult.rows[0].reply_count),
+  };
+};
+
+module.exports = { getCommentsByPostId, createComment, updateComment, deleteComment, getRepliesByCommentId, createReply };
