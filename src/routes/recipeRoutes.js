@@ -11,7 +11,6 @@ const {
   getRecipeDetail,
   postInterest,
   deleteInterest,
-  postBreweryRecipe,
   getBreweryRecipes,
   postRecipeFunding,
   deleteRecipeHandler,
@@ -24,10 +23,7 @@ router.post('/', authMiddleware, upload.single('image'), postRecipe);
 // 레시피 목록 조회 — 로그인 선택 (is_interested 반영)
 router.get('/', optionalAuthMiddleware, getRecipeList);
 
-// 양조장 레시피 등록 — BREWERY 권한 필수 (/:recipeId보다 먼저 정의해야 충돌 방지)
-router.post('/brewery', authMiddleware, breweryMiddleware, postBreweryRecipe);
-
-// 양조장 소비자 레시피 확인 — BREWERY 권한 필수
+// 양조장 소비자 레시피 확인 — BREWERY 권한 필수 (/:recipeId보다 먼저 정의해야 충돌 방지)
 router.get('/brewery', authMiddleware, breweryMiddleware, getBreweryRecipes);
 
 // 홈 인기 레시피 3개 조회

@@ -359,34 +359,6 @@ const removeInterest = async (recipeId, userId) => {
   return { ...row, recipe_id: Number(row.recipe_id) };
 };
 
-// 양조장 레시피 등록 (POST /api/recipes/brewery)
-const createBreweryRecipe = async (recipeData, user) => {
-  const lawFilter = await runRecipeLawFilter(recipeData);
-
-  const result = await pool.query(
-    `INSERT INTO recipes
-       (user_id, title, content, abv_range, main_ingredient, ai_sub_ingredient, target_flavor, concept, summary, image_url, author_type)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-     RETURNING recipe_id, title, author_type, status, is_fundable, interest_count, image_url, created_at`,
-    [
-      user.id,
-      recipeData.title,
-      recipeData.content,
-      recipeData.abv_range,
-      recipeData.main_ingredient,
-      recipeData.sub_ingredient || null,
-      recipeData.target_flavor,
-      recipeData.concept,
-      recipeData.summary,
-      recipeData.image_url || null,
-      'BREWERY',
-    ]
-  );
-
-  const row = result.rows[0];
-  return { ...row, recipe_id: Number(row.recipe_id), lawFilter };
-};
-
 // 양조장이 소비자 레시피 확인 (GET /api/recipes/brewery)
 const getConsumerRecipes = async (status, page, size) => {
   const offset = page * size;
@@ -533,7 +505,6 @@ module.exports = {
   getRecipeById,
   addInterest,
   removeInterest,
-  createBreweryRecipe,
   getConsumerRecipes,
   convertRecipeToFunding,
   deleteRecipe,
