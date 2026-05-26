@@ -267,6 +267,33 @@ CREATE TABLE IF NOT EXISTS funding_projects (
     REFERENCES users(user_id)
 );
 
+-- Funding draft/public project linkage used by GET /api/fundings/drafts/by-funding/:fundingId.
+-- The actual funding_drafts table is managed by the funding draft migration; keep this
+-- additive statement here so existing RDS tables can be safely patched.
+ALTER TABLE IF EXISTS funding_drafts
+ADD COLUMN IF NOT EXISTS funding_id BIGINT
+  REFERENCES funding_projects(funding_id)
+  ON DELETE SET NULL;
+
+-- Existing data backfill reference. Review candidates before running an UPDATE in RDS.
+-- SELECT
+--   fp.funding_id,
+--   fp.title AS funding_title,
+--   fp.brewery_user_id,
+--   fd.draft_id,
+--   fd.title AS draft_title,
+--   fd.status,
+--   fd.submitted_at,
+--   fd.created_at
+-- FROM funding_projects fp
+-- JOIN funding_drafts fd
+--   ON fd.funding_id IS NULL
+--   AND NULLIF(BTRIM(fd.title), '') = NULLIF(BTRIM(fp.title), '')
+--   AND (fd.brewery_id IS NULL OR fd.brewery_id = fp.brewery_user_id)
+-- ORDER BY fp.funding_id, ABS(EXTRACT(EPOCH FROM (
+--   COALESCE(fd.submitted_at, fd.updated_at, fd.created_at) - fp.created_at
+-- )));
+
 CREATE TABLE IF NOT EXISTS funding_bank_account_verifications (
   verification_id BIGSERIAL PRIMARY KEY,
   user_id BIGINT,
