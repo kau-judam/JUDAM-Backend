@@ -10,7 +10,14 @@ const {
   getMyLikedFundings,
   getRecentShippingAddress,
 } = require('../controllers/user.controller');
-const { getMyRecipeList, getMyInterestRecipeList, getMyRecipeCommentList } = require('../controllers/mypageController');
+const {
+  getMyRecipeList,
+  getMyInterestRecipeList,
+  getMyRecipeCommentList,
+  getMyPostList,
+  getMyLikedPostList,
+  getMyPostCommentList,
+} = require('../controllers/mypageController');
 
 router.get('/check-nickname', checkNickname);
 router.get('/me', authMiddleware, getMe);
@@ -25,6 +32,15 @@ router.get('/me/interests/recipes', authMiddleware, getMyInterestRecipeList);
 
 // 내가 작성한 레시피 댓글 목록 — 로그인 필수
 router.get('/me/recipe-comments', authMiddleware, getMyRecipeCommentList);
+
+// 내가 작성한 게시글 목록 — 로그인 필수 (최근 3개)
+router.get('/me/posts', authMiddleware, getMyPostList);
+
+// 내가 좋아요 누른 게시글 목록 — 로그인 필수
+router.get('/me/likes/posts', authMiddleware, getMyLikedPostList);
+
+// 내가 작성한 게시글 댓글 목록 — 로그인 필수
+router.get('/me/post-comments', authMiddleware, getMyPostCommentList);
 
 //마이페이지 후원 내역 조회
 //router.get('/me/funding-orders', authMiddleware, getMyFundingOrders);
