@@ -963,6 +963,100 @@ const findAndLinkFundingDraftByFundingId = async (fundingId) => {
   };
 };
 
+const syncFundingProjectFieldsFromDraft = async (draftId) => {
+  await pool.query(
+    `
+    UPDATE funding_projects fp
+    SET
+      title = COALESCE(fd.title, fp.title),
+      short_title = COALESCE(fd.short_title, fp.short_title),
+      description = COALESCE(fd.summary, fd.introduction, fp.description),
+      summary = COALESCE(fd.summary, fp.summary),
+      category = COALESCE(fd.category, fp.category),
+      thumbnail_url = COALESCE(fd.thumbnail_url, fp.thumbnail_url),
+      image_urls = COALESCE(fd.image_urls, fp.image_urls),
+      goal_amount = COALESCE(fd.target_amount, fp.goal_amount),
+      start_date = COALESCE(fd.funding_start_date, fp.start_date),
+      end_date = COALESCE(fd.funding_end_date, fp.end_date),
+      expected_delivery_date = COALESCE(fd.expected_delivery_date, fp.expected_delivery_date),
+      price_per_bottle = COALESCE(fd.price_per_bottle, fp.price_per_bottle),
+      shipping_fee = COALESCE(fd.shipping_fee, fp.shipping_fee),
+      volume = COALESCE(fd.volume, fp.volume),
+      alcohol_percentage = COALESCE(fd.alcohol_percentage, fp.alcohol_percentage),
+      updated_at = CURRENT_TIMESTAMP
+    FROM funding_drafts fd
+    WHERE fd.draft_id = $1
+      AND fd.funding_id = fp.funding_id
+    `,
+    [Number(draftId)]
+  );
+};
+
+const syncTasteProfileFromDraft = async (draftId) => {
+  const updateResult = await pool.query(
+    `
+    WITH latest_profile AS (
+      SELECT tp.taste_profile_id
+      FROM taste_profiles tp
+      JOIN funding_drafts fd ON fd.funding_id = tp.funding_id
+      WHERE fd.draft_id = $1
+      ORDER BY tp.updated_at DESC, tp.created_at DESC
+      LIMIT 1
+    )
+    UPDATE taste_profiles tp
+    SET
+      sweetness = fd.sweetness,
+      acidity = fd.acidity,
+      body = fd.body,
+      carbonation = fd.carbonation,
+      alcohol_intensity = fd.alcohol_intensity,
+      flavor_notes = fd.flavor_notes,
+      updated_at = CURRENT_TIMESTAMP
+    FROM funding_drafts fd, latest_profile lp
+    WHERE fd.draft_id = $1
+      AND tp.taste_profile_id = lp.taste_profile_id
+    RETURNING tp.taste_profile_id
+    `,
+    [Number(draftId)]
+  );
+
+  if (updateResult.rows.length > 0) {
+    return;
+  }
+
+  await pool.query(
+    `
+    INSERT INTO taste_profiles (
+      funding_id,
+      user_id,
+      sweetness,
+      acidity,
+      body,
+      carbonation,
+      alcohol_intensity,
+      flavor_notes,
+      created_at,
+      updated_at
+    )
+    SELECT
+      funding_id,
+      brewery_id,
+      sweetness,
+      acidity,
+      body,
+      carbonation,
+      alcohol_intensity,
+      flavor_notes,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    FROM funding_drafts
+    WHERE draft_id = $1
+      AND funding_id IS NOT NULL
+    `,
+    [Number(draftId)]
+  );
+};
+
 const storeUploadedFile = async (file, folder, ownerId = 'anonymous') => {
   if (!file) {
     return null;
@@ -1367,6 +1461,7 @@ const updateFundingDraft = async (req, res) => {
     }
 
     const draft = result.rows[0];
+    await syncFundingProjectFieldsFromDraft(draft.draft_id);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -1517,6 +1612,7 @@ const saveBasicInfo = async (req, res) => {
 
     const draft = result.rows[0];
     const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
+    await syncFundingProjectFieldsFromDraft(draft.draft_id);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -1706,6 +1802,7 @@ const saveSchedule = async (req, res) => {
     }
 
     const draft = result.rows[0];
+    await syncFundingProjectFieldsFromDraft(draft.draft_id);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -1833,6 +1930,7 @@ const saveLegalInfo = async (req, res) => {
     }
 
     const draft = result.rows[0];
+    await syncFundingProjectFieldsFromDraft(draft.draft_id);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -1996,6 +2094,7 @@ const saveTasteProfile = async (req, res) => {
     }
 
     const draft = result.rows[0];
+    await syncTasteProfileFromDraft(draft.draft_id);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -4289,20 +4388,20 @@ const getFundingDetail = async (req, res) => {
         fp.funding_id,
         fp.title,
         fp.description,
-        COALESCE(fp.summary, fd.summary) AS summary,
-        COALESCE(fp.category, fd.category) AS category,
-        COALESCE(NULLIF(fp.image_urls::text, '[]'), fd.image_urls::text) AS image_urls,
+        COALESCE(fd.summary, fp.summary) AS summary,
+        COALESCE(fd.category, fp.category) AS category,
+        COALESCE(NULLIF(fd.image_urls::text, '[]'), NULLIF(fp.image_urls::text, '[]')) AS image_urls,
         fp.status,
         fp.current_amount,
-        fp.goal_amount AS target_amount,
-        fp.start_date,
-        fp.end_date,
-        fp.expected_delivery_date,
-        fp.price_per_bottle,
-        fp.shipping_fee,
+        COALESCE(fd.target_amount, fp.goal_amount) AS target_amount,
+        COALESCE(fd.funding_start_date, fp.start_date) AS start_date,
+        COALESCE(fd.funding_end_date, fp.end_date) AS end_date,
+        COALESCE(fd.expected_delivery_date, fp.expected_delivery_date) AS expected_delivery_date,
+        COALESCE(fd.price_per_bottle, fp.price_per_bottle) AS price_per_bottle,
+        COALESCE(fd.shipping_fee, fp.shipping_fee) AS shipping_fee,
         fd.total_quantity,
-        fp.volume,
-        fp.alcohol_percentage,
+        COALESCE(fd.volume, fp.volume) AS volume,
+        COALESCE(fd.alcohol_percentage, fp.alcohol_percentage) AS alcohol_percentage,
         fp.bottle_size,
         fp.created_at,
         fd.draft_id,
@@ -4331,10 +4430,11 @@ const getFundingDetail = async (req, res) => {
         fd.profile_image_url,
         fd.creator_introduction,
         fd.representative_name,
-        fd.business_registration_number,
-        fd.business_address,
+        COALESCE(NULLIF(fd.business_registration_number, ''), ba.license_number) AS business_registration_number,
+        COALESCE(NULLIF(fd.business_address, ''), ba.location) AS business_address,
+        COALESCE(NULLIF(fd.business_address_detail, ''), ba.business_address_detail) AS business_address_detail,
         fd.contact_email,
-        fd.contact_phone,
+        COALESCE(NULLIF(fd.contact_phone, ''), ba.phone_number) AS contact_phone,
         fd.bank_name,
         fd.account_number,
         fd.account_holder,
@@ -4346,10 +4446,10 @@ const getFundingDetail = async (req, res) => {
         fd.phone_verified,
         fd.account_verified,
         fd.identity_document_url,
-        fd.business_registration_file_url,
+        COALESCE(NULLIF(fd.business_registration_file_url, ''), ba.document_url) AS business_registration_file_url,
         COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
         r.title AS recipe_title,
-        COALESCE(NULLIF(fp.thumbnail_url, ''), NULLIF(fd.thumbnail_url, ''), r.image_url) AS thumbnail_url,
+        COALESCE(NULLIF(fd.thumbnail_url, ''), NULLIF(fp.thumbnail_url, ''), r.image_url) AS thumbnail_url,
         COALESCE(like_counts.like_count, 0) AS like_count,
         EXISTS (
           SELECT 1
@@ -4364,11 +4464,18 @@ const getFundingDetail = async (req, res) => {
         SELECT *
         FROM funding_drafts
         WHERE funding_id = fp.funding_id
+          AND brewery_id = fp.brewery_user_id
         ORDER BY updated_at DESC
         LIMIT 1
       ) fd ON TRUE
       LEFT JOIN LATERAL (
-        SELECT brewery_name
+        SELECT
+          brewery_name,
+          location,
+          business_address_detail,
+          license_number,
+          phone_number,
+          document_url
         FROM brewery_auth
         WHERE user_id = fp.brewery_user_id
         ORDER BY
@@ -4396,6 +4503,11 @@ const getFundingDetail = async (req, res) => {
 
     const funding = fundingResult.rows[0];
     const imageFields = buildImageFields(funding.thumbnail_url, funding.image_urls);
+    const subIngredients = parseJsonArrayField(funding.sub_ingredients);
+    const mainIngredient = funding.main_ingredient || null;
+    const rawMaterials = parseJsonField(funding.raw_materials);
+    const budgetPlan = parseJsonFieldPreserveText(funding.budget_plan);
+    const schedulePlan = parseJsonFieldPreserveText(funding.schedule_plan);
 
     const optionResult = await pool.query(
       `
@@ -4415,6 +4527,12 @@ const getFundingDetail = async (req, res) => {
       `,
       [resolvedFundingId]
     );
+    const supportOptionStockTotal = optionResult.rows.reduce(
+      (total, option) => total + Number(option.stock || 0),
+      0
+    );
+    const pricePerBottle = funding.price_per_bottle ?? optionResult.rows[0]?.price ?? null;
+    const totalQuantity = funding.total_quantity ?? (supportOptionStockTotal > 0 ? supportOptionStockTotal : null);
 
     const tasteResult = await pool.query(
       `
@@ -4450,7 +4568,7 @@ const getFundingDetail = async (req, res) => {
           flavor_notes: funding.flavor_notes,
         }
       : null;
-    const taste = tasteResult.rows[0] || draftTaste;
+    const taste = draftTaste || tasteResult.rows[0];
     const sulbtiResult = await pool.query(
       `
       SELECT
@@ -4493,6 +4611,12 @@ const getFundingDetail = async (req, res) => {
           )
         : 0;
     const projectPolicy = parseJsonFieldPreserveText(funding.refund_policy || funding.exchange_policy);
+    const tasteProfile = taste
+      ? buildTasteProfileResponse({
+          ...taste,
+          alcohol_percentage: funding.alcohol_percentage,
+        })
+      : null;
 
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
@@ -4501,8 +4625,11 @@ const getFundingDetail = async (req, res) => {
       description: funding.description,
       category: funding.category,
       shortTitle: funding.short_title,
-      mainIngredient: funding.main_ingredient,
-      subIngredients: parseJsonField(funding.sub_ingredients),
+      mainIngredient,
+      primaryIngredient: mainIngredient,
+      subIngredient: subIngredients[0] || null,
+      subIngredients,
+      ingredients: [mainIngredient, ...subIngredients].filter(Boolean),
       tags: parseJsonField(funding.tags),
       thumbnailUrl: imageFields.thumbnailUrl,
       imageUrls: imageFields.imageUrls,
@@ -4516,32 +4643,34 @@ const getFundingDetail = async (req, res) => {
       startDate: funding.start_date,
       endDate: funding.end_date,
       expectedDeliveryDate: funding.expected_delivery_date,
-      pricePerBottle: funding.price_per_bottle,
-      totalQuantity: funding.total_quantity,
+      pricePerBottle,
+      totalQuantity,
       shippingFee: funding.shipping_fee,
       volume: funding.volume,
       alcoholPercentage: funding.alcohol_percentage,
       bottleSize: funding.bottle_size,
+      businessAddress: funding.business_address,
+      breweryAddress: funding.business_address,
+      breweryLocation: funding.business_address,
       matchRate: matchScore,
       sulbtiMatchScore: matchScore,
       matchScore,
       tasteMatchScore: matchScore,
       liked: funding.liked,
       likeCount: Number(funding.like_count || 0),
-      tasteProfile: taste
-        ? buildTasteProfileResponse({
-            ...taste,
-            alcohol_percentage: funding.alcohol_percentage,
-          })
-        : null,
+      tasteProfile,
       legalInfo: {
         productType: funding.product_type,
         volume: funding.volume,
         alcoholPercentage: funding.alcohol_percentage,
-        rawMaterials: parseJsonField(funding.raw_materials),
+        mainIngredient,
+        subIngredient: subIngredients[0] || null,
+        subIngredients,
+        rawMaterials,
         businessNumber: funding.business_registration_number,
         licenseNumber: funding.business_registration_number,
         businessAddress: funding.business_address,
+        businessAddressDetail: funding.business_address_detail,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
         policy: projectPolicy,
         refundPolicy: projectPolicy,
@@ -4552,10 +4681,13 @@ const getFundingDetail = async (req, res) => {
         productionPlan: funding.introduction || null,
         deliveryPlan: funding.expected_delivery_date || null,
         fundingPurpose: funding.introduction || null,
-        budgetPlan: parseJsonFieldPreserveText(funding.budget_plan),
-        schedulePlan: parseJsonFieldPreserveText(funding.schedule_plan),
+        budgetPlan,
+        projectBudget: budgetPlan,
+        schedulePlan,
+        projectSchedule: schedulePlan,
         riskPlan: funding.risk_notice,
         policy: projectPolicy,
+        projectPolicy,
         ...PLAN_GUIDES,
       },
       breweryInfo: {
@@ -4567,6 +4699,9 @@ const getFundingDetail = async (req, res) => {
         representativeName: funding.representative_name,
         businessRegistrationNumber: funding.business_registration_number,
         businessAddress: funding.business_address,
+        businessAddressDetail: funding.business_address_detail,
+        breweryLocation: funding.business_address,
+        breweryAddress: funding.business_address,
         contactEmail: funding.contact_email,
         contactPhone: funding.contact_phone,
         bankName: funding.bank_name,
@@ -4628,6 +4763,8 @@ const getFundingIntro = async (req, res) => {
   }
 
   try {
+    await findAndLinkFundingDraftByFundingId(resolvedFundingId);
+
     const result = await pool.query(
       `
       SELECT
@@ -4635,19 +4772,32 @@ const getFundingIntro = async (req, res) => {
         fp.title,
         fp.description,
         fp.summary,
-        fp.image_urls,
+        COALESCE(NULLIF(fd.image_urls::text, '[]'), NULLIF(fp.image_urls::text, '[]')) AS image_urls,
         fd.introduction AS draft_introduction,
         fd.video_url,
+        fd.main_ingredient,
+        fd.sub_ingredients,
         fd.budget_plan,
         fd.schedule_plan,
+        fd.refund_policy,
+        fd.exchange_policy,
         r.content AS recipe_content,
         r.concept
       FROM funding_projects fp
       LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
       LEFT JOIN LATERAL (
-        SELECT introduction, video_url, budget_plan, schedule_plan
+        SELECT
+          introduction,
+          video_url,
+          main_ingredient,
+          sub_ingredients,
+          budget_plan,
+          schedule_plan,
+          refund_policy,
+          exchange_policy
         FROM funding_drafts
         WHERE funding_id = fp.funding_id
+          AND brewery_id = fp.brewery_user_id
         ORDER BY updated_at DESC
         LIMIT 1
       ) fd ON TRUE
@@ -4664,15 +4814,27 @@ const getFundingIntro = async (req, res) => {
     }
 
     const funding = result.rows[0];
+    const subIngredients = parseJsonArrayField(funding.sub_ingredients);
+    const budgetPlan = parseJsonFieldPreserveText(funding.budget_plan);
+    const schedulePlan = parseJsonFieldPreserveText(funding.schedule_plan);
+    const projectPolicy = parseJsonFieldPreserveText(funding.refund_policy || funding.exchange_policy);
 
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
       title: funding.title,
       introduction: funding.draft_introduction || funding.summary || funding.description || funding.recipe_content || '',
       story: funding.description || funding.recipe_content || funding.concept || '',
+      mainIngredient: funding.main_ingredient || null,
+      primaryIngredient: funding.main_ingredient || null,
+      subIngredient: subIngredients[0] || null,
+      subIngredients,
       videoUrl: funding.video_url,
-      budgetPlan: parseJsonFieldPreserveText(funding.budget_plan),
-      schedulePlan: parseJsonFieldPreserveText(funding.schedule_plan),
+      budgetPlan,
+      projectBudget: budgetPlan,
+      schedulePlan,
+      projectSchedule: schedulePlan,
+      policy: projectPolicy,
+      projectPolicy,
       ...PLAN_GUIDES,
       images: mapFundingImageUrls(buildImageFields(null, funding.image_urls).allImageUrls),
     });
