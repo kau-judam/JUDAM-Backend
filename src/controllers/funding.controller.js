@@ -1001,6 +1001,252 @@ const findFallbackFundingDraftByFundingId = async (fundingId) => {
   return rows[0] || null;
 };
 
+const calculateFundingPeriodDays = (startDate, endDate) => {
+  if (!startDate || !endDate) {
+    return null;
+  }
+
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const diffDays = Math.round((end.getTime() - start.getTime()) / millisecondsPerDay);
+
+  return diffDays > 0 ? diffDays : null;
+};
+
+const normalizeManagementDraftStatus = (fundingStatus) => {
+  const status = toTrimmedString(fundingStatus).toUpperCase();
+
+  if (['ACTIVE', 'ONGOING', 'COMPLETED', 'SUCCESSFUL', 'APPROVED'].includes(status)) {
+    return 'APPROVED';
+  }
+
+  if (['REVIEWING', 'READY', 'PENDING', 'SUBMITTED'].includes(status)) {
+    return 'SUBMITTED';
+  }
+
+  return 'SUBMITTED';
+};
+
+const recoverFundingDraftFromProject = async (fundingId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      fp.funding_id,
+      fp.brewery_user_id,
+      fp.recipe_id,
+      fp.title,
+      fp.short_title,
+      fp.description,
+      fp.summary,
+      fp.category,
+      fp.thumbnail_url,
+      fp.image_urls,
+      fp.goal_amount,
+      fp.start_date,
+      fp.end_date,
+      fp.expected_delivery_date,
+      fp.price_per_bottle,
+      fp.shipping_fee,
+      fp.volume,
+      fp.alcohol_percentage,
+      fp.status,
+      fp.created_at,
+      r.main_ingredient AS recipe_main_ingredient,
+      r.ai_sub_ingredient AS recipe_sub_ingredients,
+      r.target_flavor AS recipe_target_flavor,
+      r.content AS recipe_content,
+      r.summary AS recipe_summary,
+      u.nickname AS user_nickname,
+      u.email AS user_email,
+      u.phone_number AS user_phone_number,
+      u.profile_image AS user_profile_image,
+      ba.brewery_name AS auth_brewery_name,
+      ba.location AS auth_business_address,
+      ba.business_address_detail AS auth_business_address_detail,
+      ba.license_number AS auth_license_number,
+      ba.phone_number AS auth_phone_number,
+      ba.document_url AS auth_document_url,
+      tp.sweetness,
+      tp.acidity,
+      tp.body,
+      tp.carbonation,
+      tp.alcohol_intensity,
+      tp.flavor_notes,
+      support_options.total_stock
+    FROM funding_projects fp
+    LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+    LEFT JOIN users u ON u.user_id = fp.brewery_user_id
+    LEFT JOIN LATERAL (
+      SELECT
+        brewery_name,
+        location,
+        business_address_detail,
+        license_number,
+        phone_number,
+        document_url
+      FROM brewery_auth
+      WHERE user_id = fp.brewery_user_id
+      ORDER BY
+        CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
+        updated_at DESC,
+        application_id DESC
+      LIMIT 1
+    ) ba ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT
+        sweetness,
+        acidity,
+        body,
+        carbonation,
+        alcohol_intensity,
+        flavor_notes
+      FROM taste_profiles
+      WHERE funding_id = fp.funding_id
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1
+    ) tp ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(stock), 0)::int AS total_stock
+      FROM funding_support_options
+      WHERE funding_id = fp.funding_id
+    ) support_options ON TRUE
+    WHERE fp.funding_id = $1
+    `,
+    [Number(fundingId)]
+  );
+
+  const funding = rows[0];
+
+  if (!funding) {
+    return null;
+  }
+
+  const subIngredients = parseFundingListField(funding.recipe_sub_ingredients);
+  const totalStock = Number(funding.total_stock || 0);
+  const pricePerBottle = toNullableNumber(funding.price_per_bottle);
+  const goalAmount = toNullableNumber(funding.goal_amount);
+  const estimatedTotalQuantity =
+    totalStock > 0
+      ? totalStock
+      : pricePerBottle && goalAmount
+        ? Math.floor(goalAmount / pricePerBottle)
+        : null;
+
+  const result = await pool.query(
+    `
+    INSERT INTO funding_drafts (
+      brewery_id,
+      recipe_id,
+      funding_id,
+      status,
+      progress_rate,
+      title,
+      short_title,
+      category,
+      main_ingredient,
+      sub_ingredients,
+      alcohol_percentage,
+      summary,
+      thumbnail_url,
+      image_urls,
+      price_per_bottle,
+      total_quantity,
+      target_amount,
+      funding_start_date,
+      funding_period_days,
+      funding_end_date,
+      expected_delivery_date,
+      shipping_fee,
+      volume,
+      sweetness,
+      acidity,
+      body,
+      carbonation,
+      alcohol_intensity,
+      flavor_notes,
+      introduction,
+      brewery_name,
+      creator_name,
+      profile_image_url,
+      creator_introduction,
+      business_registration_number,
+      business_address,
+      business_address_detail,
+      contact_email,
+      contact_phone,
+      business_registration_file_url,
+      submitted_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      $1, $2, $3, $4, 100,
+      $5, $6, $7, $8, $9, $10, $11, $12, $13,
+      $14, $15, $16, $17, $18, $19, $20, $21, $22,
+      $23, $24, $25, $26, $27, $28,
+      $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    )
+    RETURNING *
+    `,
+    [
+      Number(funding.brewery_user_id),
+      funding.recipe_id === null || funding.recipe_id === undefined
+        ? null
+        : Number(funding.recipe_id),
+      Number(funding.funding_id),
+      normalizeManagementDraftStatus(funding.status),
+      funding.title || null,
+      funding.short_title || null,
+      funding.category || null,
+      funding.recipe_main_ingredient || null,
+      normalizeJsonStorageValue(subIngredients, []),
+      funding.alcohol_percentage === null || funding.alcohol_percentage === undefined
+        ? null
+        : Number(funding.alcohol_percentage),
+      funding.summary || funding.description || funding.recipe_summary || null,
+      funding.thumbnail_url || null,
+      normalizeJsonStorageValue(funding.image_urls, []),
+      pricePerBottle,
+      estimatedTotalQuantity,
+      goalAmount,
+      funding.start_date || null,
+      calculateFundingPeriodDays(funding.start_date, funding.end_date),
+      funding.end_date || null,
+      funding.expected_delivery_date || null,
+      toNullableNumber(funding.shipping_fee),
+      toNullableNumber(funding.volume),
+      toNullableNumber(funding.sweetness),
+      toNullableNumber(funding.acidity),
+      toNullableNumber(funding.body),
+      toNullableNumber(funding.carbonation),
+      toNullableNumber(funding.alcohol_intensity),
+      normalizeJsonStorageValue(funding.flavor_notes || funding.recipe_target_flavor, []),
+      funding.description || funding.recipe_content || funding.summary || null,
+      funding.auth_brewery_name || funding.user_nickname || null,
+      funding.user_nickname || null,
+      funding.user_profile_image || null,
+      null,
+      funding.auth_license_number || null,
+      funding.auth_business_address || null,
+      funding.auth_business_address_detail || null,
+      funding.user_email || null,
+      funding.auth_phone_number || funding.user_phone_number || null,
+      funding.auth_document_url || null,
+    ]
+  );
+
+  return result.rows[0] || null;
+};
+
 const findAndLinkFundingDraftByFundingId = async (fundingId) => {
   const directDraft = await findDirectFundingDraftByFundingId(fundingId);
 
@@ -1011,7 +1257,7 @@ const findAndLinkFundingDraftByFundingId = async (fundingId) => {
   const fallbackDraft = await findFallbackFundingDraftByFundingId(fundingId);
 
   if (!fallbackDraft) {
-    return null;
+    return recoverFundingDraftFromProject(fundingId);
   }
 
   const { rows } = await pool.query(
@@ -4000,6 +4246,61 @@ const deleteFundingDraft = async (req, res) => {
 
   try {
     if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
+    const draftResult = await pool.query(
+      `
+      SELECT
+        fd.draft_id,
+        fd.funding_id,
+        fd.status,
+        fp.status AS funding_status
+      FROM funding_drafts fd
+      LEFT JOIN funding_projects fp ON fp.funding_id = fd.funding_id
+      WHERE fd.draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    const draft = draftResult.rows[0];
+
+    if (!draft) {
+      return res.status(404).json({
+        status: 404,
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+      });
+    }
+
+    const protectedStatuses = [
+      'SUBMITTED',
+      'REVIEWING',
+      'APPROVED',
+      'ACTIVE',
+      'ONGOING',
+      'COMPLETED',
+      'SUCCESSFUL',
+    ];
+    const draftStatus = toTrimmedString(draft.status).toUpperCase();
+    const fundingStatus = toTrimmedString(draft.funding_status).toUpperCase();
+    const isManagementDraft =
+      draft.funding_id !== null ||
+      protectedStatuses.includes(draftStatus) ||
+      protectedStatuses.includes(fundingStatus);
+
+    if (isManagementDraft) {
+      return res.status(409).json({
+        status: 409,
+        message: '등록/제출된 펀딩의 관리용 임시저장은 삭제할 수 없습니다.',
+        data: {
+          draftId: Number(draft.draft_id),
+          fundingId: draft.funding_id === null || draft.funding_id === undefined
+            ? null
+            : Number(draft.funding_id),
+          status: draft.status,
+          fundingStatus: draft.funding_status,
+          protected: true,
+        },
+      });
+    }
 
     await pool.query(
       `
