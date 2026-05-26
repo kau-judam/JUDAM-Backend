@@ -1,6 +1,16 @@
 const multer = require('multer');
 const { uploadFileToS3 } = require('../services/s3.service');
-const { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, getConsumerRecipes, convertRecipeToFunding, deleteRecipe } = require('../services/recipeService');
+const {
+  createRecipe,
+  getRecipes,
+  getPopularRecipesForHome,
+  getRecipeById,
+  addInterest,
+  removeInterest,
+  getConsumerRecipes,
+  convertRecipeToFunding,
+  deleteRecipe,
+} = require('../services/recipeService');
 const { sendAiTaskMessage } = require('../services/sqs.service');
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -91,6 +101,26 @@ const getRecipeList = async (req, res) => {
     return res.status(200).json(result);
   } catch {
     return res.status(500).json({ status: 500, message: '서버 내부 오류' });
+  }
+};
+
+// 홈 인기 레시피 조회 핸들러 (GET /api/recipes/popular)
+const getPopularRecipes = async (req, res) => {
+  try {
+    const recipes = await getPopularRecipesForHome();
+
+    return res.status(200).json({
+      status: 200,
+      message: '홈 인기 레시피 조회 성공',
+      data: {
+        recipes,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '홈 인기 레시피 조회 중 서버 오류가 발생했습니다.',
+    });
   }
 };
 
@@ -211,4 +241,15 @@ const deleteRecipeHandler = async (req, res) => {
   }
 };
 
-module.exports = { upload, postRecipe, getRecipeList, getRecipeDetail, postInterest, deleteInterest, getBreweryRecipes, postRecipeFunding, deleteRecipeHandler };
+module.exports = {
+  upload,
+  postRecipe,
+  getRecipeList,
+  getPopularRecipes,
+  getRecipeDetail,
+  postInterest,
+  deleteInterest,
+  getBreweryRecipes,
+  postRecipeFunding,
+  deleteRecipeHandler,
+};

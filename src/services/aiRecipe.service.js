@@ -59,10 +59,15 @@ const postToAiServer = async (path, body) => {
 };
 
 const suggestSubIngredients = async ({ main_ingredient, region }) => {
-  return postToAiServer('/api/recipe/suggest-sub-ingredients', {
+  const body = {
     main_ingredient,
-    region,
-  });
+  };
+
+  if (region) {
+    body.region = region;
+  }
+
+  return postToAiServer('/api/recipe/suggest-sub-ingredients', body);
 };
 
 const suggestFlavorTags = async ({

@@ -42,6 +42,23 @@ const parseIngredientList = (value) => {
   return [normalizeString(value)].filter(Boolean);
 };
 
+const normalizePublicImageUrl = (imageUrl) => {
+  const normalizedImageUrl = normalizeString(imageUrl);
+
+  if (!normalizedImageUrl) {
+    return null;
+  }
+
+  if (
+    normalizedImageUrl.startsWith('file://') ||
+    normalizedImageUrl.startsWith('content://')
+  ) {
+    return null;
+  }
+
+  return /^https?:\/\//i.test(normalizedImageUrl) ? normalizedImageUrl : null;
+};
+
 const buildRecipeLawFilterPayload = (recipeData = {}) => {
   const title = normalizeString(recipeData.title || recipeData.recipeTitle || 'recipe');
   const description = [
@@ -193,6 +210,60 @@ const getRecipes = async (sort, status, page, size, userId) => {
     totalPages,
     currentPage: page,
   };
+};
+
+// 홈 인기 레시피 조회 (GET /api/recipes/popular)
+const getPopularRecipesForHome = async () => {
+  const result = await pool.query(
+    `
+    SELECT
+      r.recipe_id,
+      r.title,
+      r.summary,
+      r.content,
+      r.image_url,
+      r.author_type,
+      r.status,
+      r.is_fundable,
+      GREATEST(
+        COALESCE(r.interest_count, 0),
+        COALESCE(interest_counts.interest_count, 0)
+      )::INT AS interest_count,
+      GREATEST(
+        COALESCE(r.interest_count, 0),
+        COALESCE(interest_counts.interest_count, 0)
+      )::INT AS like_count,
+      r.created_at
+    FROM recipes r
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::INT AS interest_count
+      FROM recipe_interests ri
+      WHERE ri.recipe_id = r.recipe_id
+    ) interest_counts ON TRUE
+    WHERE r.status = 'PUBLISHED'
+    ORDER BY
+      GREATEST(
+        COALESCE(r.interest_count, 0),
+        COALESCE(interest_counts.interest_count, 0)
+      ) DESC,
+      r.created_at DESC
+    LIMIT 3
+    `
+  );
+
+  return result.rows.map((recipe) => ({
+    recipeId: Number(recipe.recipe_id),
+    title: recipe.title,
+    summary: recipe.summary,
+    content: recipe.content,
+    imageUrl: normalizePublicImageUrl(recipe.image_url),
+    authorType: recipe.author_type,
+    status: recipe.status,
+    isFundable: recipe.is_fundable,
+    interestCount: Number(recipe.interest_count || 0),
+    likeCount: Number(recipe.like_count || 0),
+    createdAt: recipe.created_at,
+  }));
 };
 
 // 레시피 상세 조회 (GET /api/recipes/:recipeId)
@@ -427,4 +498,14 @@ const deleteRecipe = async (recipeId, userId) => {
   await pool.query('DELETE FROM recipes WHERE recipe_id = $1', [recipeId]);
 };
 
-module.exports = { createRecipe, getRecipes, getRecipeById, addInterest, removeInterest, getConsumerRecipes, convertRecipeToFunding, deleteRecipe };
+module.exports = {
+  createRecipe,
+  getRecipes,
+  getPopularRecipesForHome,
+  getRecipeById,
+  addInterest,
+  removeInterest,
+  getConsumerRecipes,
+  convertRecipeToFunding,
+  deleteRecipe,
+};

@@ -71,6 +71,18 @@ jobs:
             --query "Parameter.Value" \
             --output text)
 
+          FILE_UPLOAD_STRICT_S3=$(aws ssm get-parameter \
+            --name "/judam/backend/FILE_UPLOAD_STRICT_S3" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
+          PUBLIC_WEB_BASE_URL=$(aws ssm get-parameter \
+            --name "/judam/backend/PUBLIC_WEB_BASE_URL" \
+            --region "$REGION" \
+            --query "Parameter.Value" \
+            --output text)
+
           AI_SERVER_BASE_URL=$(aws ssm get-parameter \
             --name "/judam/backend/AI_SERVER_BASE_URL" \
             --region "$REGION" \
@@ -121,6 +133,8 @@ jobs:
             echo "OCTOMO_API_KEY=$OCTOMO_API_KEY"
             echo "OCTOMO_API_URL=$OCTOMO_API_URL"
             echo "OCTOMO_RECEIVE_NUMBER=$OCTOMO_RECEIVE_NUMBER"
+            echo "FILE_UPLOAD_STRICT_S3=$FILE_UPLOAD_STRICT_S3"
+            echo "PUBLIC_WEB_BASE_URL=$PUBLIC_WEB_BASE_URL"
           } > "$ENV_TMP"
 
           chmod 600 "$ENV_TMP"
