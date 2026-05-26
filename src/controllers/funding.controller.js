@@ -149,6 +149,44 @@ const stringifyJsonField = (value, fallback = []) => {
   return typeof value === 'string' ? value : JSON.stringify(value);
 };
 
+const normalizeJsonStorageValue = (value, fallback = []) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || value === '') {
+    return JSON.stringify(fallback);
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value));
+    } catch (error) {
+      return JSON.stringify(parseFundingListField(value, fallback));
+    }
+  }
+
+  return JSON.stringify(value);
+};
+
+const normalizeOriginalTextField = (value) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  return typeof value === 'string' ? value : JSON.stringify(value);
+};
+
+const parseOriginalTextField = (value, fallback = null) => {
+  const parsed = parseJsonFieldPreserveText(value, fallback);
+
+  return Array.isArray(parsed) && parsed.length === 0 ? fallback : parsed;
+};
+
 const getUserId = (req) => {
   const userId = Number(req.user?.userId || req.user?.id);
   return Number.isInteger(userId) && userId > 0 ? userId : null;
@@ -465,8 +503,8 @@ const mapFundingImageUrls = (imageUrls = []) =>
   }));
 
 const PLAN_GUIDES = {
-  budgetPlanGuide: '- 프로젝트 예산임: 25만원 형식으로 작성하면 UI에 잘 반영됩니다.',
-  schedulePlanGuide: '- 프로젝트 일정: 일정내용 형식으로 작성하면 UI에 잘 반영됩니다.',
+  budgetPlanGuide: '프로젝트 예산은 "- 프로젝트 예산임: 25만원" 형식으로 작성하면 UI에 잘 반영됩니다.',
+  schedulePlanGuide: '프로젝트 일정은 "- 프로젝트 일정: 일정내용" 형식으로 작성하면 UI에 잘 반영됩니다.',
 };
 
 const parseTasteProfileExtras = (flavorNotesValue) => {
@@ -567,9 +605,12 @@ const buildTasteProfileResponse = (source = {}) => {
       carbonation: source.carbonation,
       flavor: source.flavor ?? extras.flavor,
       alcohol: alcoholIntensity,
+      alcoholIntensity,
       acidity: source.acidity,
+      aromaIntensity: source.aroma_intensity ?? source.aromaIntensity ?? extras.aromaIntensity,
       aroma_intensity: source.aroma_intensity ?? source.aromaIntensity ?? extras.aromaIntensity,
       finish: source.finish ?? extras.finish,
+      aftertaste: source.aftertaste ?? source.finish ?? extras.finish,
     },
     tasteVector: source.taste_vector ?? source.tasteVector ?? extras.tasteVector,
   };
@@ -746,14 +787,14 @@ const resolveFundingId = async (id) => {
 
 const buildFundingDraftPayload = (draft, documents = []) => {
   const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
-  const subIngredients = parseJsonField(draft.sub_ingredients);
-  const rawMaterials = parseJsonField(draft.raw_materials);
+  const subIngredients = parseFundingListField(draft.sub_ingredients);
+  const rawMaterials = parseFundingListField(draft.raw_materials);
   const tags = parseJsonField(draft.tags);
-  const budgetPlan = parseJsonFieldPreserveText(draft.budget_plan);
-  const schedulePlan = parseJsonFieldPreserveText(draft.schedule_plan);
+  const budgetPlan = parseOriginalTextField(draft.budget_plan);
+  const schedulePlan = parseOriginalTextField(draft.schedule_plan);
   const businessNumber = draft.business_registration_number || draft.license_number || null;
   const tasteProfile = buildTasteProfileResponse(draft);
-  const projectPolicy = parseJsonFieldPreserveText(draft.refund_policy || draft.exchange_policy);
+  const projectPolicy = parseOriginalTextField(draft.refund_policy || draft.exchange_policy);
 
   return {
     draftId: Number(draft.draft_id),
@@ -834,9 +875,12 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       deliveryPlan: draft.delivery_plan || draft.expected_delivery_date || null,
       fundingPurpose: draft.funding_purpose || draft.introduction || null,
       budgetPlan,
+      projectBudget: budgetPlan,
       riskPlan: draft.risk_plan || draft.risk_notice || null,
       schedulePlan,
+      projectSchedule: schedulePlan,
       policy: projectPolicy,
+      projectPolicy,
       ...PLAN_GUIDES,
     },
 
@@ -990,6 +1034,22 @@ const findAndLinkFundingDraftByFundingId = async (fundingId) => {
 };
 
 const syncFundingProjectFieldsFromDraft = async (draftId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT funding_id, image_urls
+    FROM funding_drafts
+    WHERE draft_id = $1
+      AND funding_id IS NOT NULL
+    `,
+    [Number(draftId)]
+  );
+
+  const draft = rows[0];
+
+  if (!draft) {
+    return;
+  }
+
   await pool.query(
     `
     UPDATE funding_projects fp
@@ -1000,7 +1060,6 @@ const syncFundingProjectFieldsFromDraft = async (draftId) => {
       summary = COALESCE(fd.summary, fp.summary),
       category = COALESCE(fd.category, fp.category),
       thumbnail_url = COALESCE(fd.thumbnail_url, fp.thumbnail_url),
-      image_urls = COALESCE(fd.image_urls, fp.image_urls),
       goal_amount = COALESCE(fd.target_amount, fp.goal_amount),
       start_date = COALESCE(fd.funding_start_date, fp.start_date),
       end_date = COALESCE(fd.funding_end_date, fp.end_date),
@@ -1016,6 +1075,22 @@ const syncFundingProjectFieldsFromDraft = async (draftId) => {
     `,
     [Number(draftId)]
   );
+
+  if (draft.image_urls !== undefined && draft.image_urls !== null) {
+    await pool.query(
+      `
+      UPDATE funding_projects
+      SET
+        image_urls = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE funding_id = $2
+      `,
+      [
+        normalizeJsonStorageValue(draft.image_urls, []),
+        Number(draft.funding_id),
+      ]
+    );
+  }
 };
 
 const syncTasteProfileFromDraft = async (draftId) => {
@@ -1389,17 +1464,64 @@ const createFundingDraft = async (req, res) => {
 // 임시저장 프로젝트 수정 (임시저장 수정용!)
 const updateFundingDraft = async (req, res) => {
   const { draftId } = req.params;
+  const bodyPayload = req.body || {};
 
-  const {
-    title,
-    shortTitle,
-    category,
-    mainIngredient,
-    subIngredients,
-    alcoholPercentage,
-    summary,
-    thumbnailUrl,
-  } = req.body;
+  const title = getBodyValue(bodyPayload, ['title']);
+  const shortTitle = getBodyValue(bodyPayload, ['shortTitle', 'short_title']);
+  const category = getBodyValue(bodyPayload, ['category']);
+  const mainIngredient = getBodyValue(bodyPayload, ['mainIngredient', 'main_ingredient']);
+  const subIngredients = getBodyValue(bodyPayload, [
+    'subIngredients',
+    'subIngredient',
+    'sub_ingredients',
+  ]);
+  const alcoholPercentage = getBodyValue(bodyPayload, [
+    'alcoholPercentage',
+    'alcohol_percentage',
+    'abv',
+  ]);
+  const summary = getBodyValue(bodyPayload, ['summary', 'description']);
+  const thumbnailUrl = getBodyValue(bodyPayload, ['thumbnailUrl', 'thumbnail_url', 'imageUrl']);
+  const imageUrls = getBodyValue(bodyPayload, ['imageUrls', 'image_urls']);
+  const tags = getBodyValue(bodyPayload, ['tags']);
+  const budgetPlan = getBodyValue(bodyPayload, ['budgetPlan', 'budget_plan', 'projectBudget']);
+  const schedulePlan = getBodyValue(bodyPayload, [
+    'schedulePlan',
+    'schedule_plan',
+    'projectSchedule',
+  ]);
+  const policy = getBodyValue(bodyPayload, ['policy', 'projectPolicy']);
+
+  const hasTitle = hasOwn(bodyPayload, 'title');
+  const hasShortTitle = hasOwn(bodyPayload, 'shortTitle') || hasOwn(bodyPayload, 'short_title');
+  const hasCategory = hasOwn(bodyPayload, 'category');
+  const hasMainIngredient =
+    hasOwn(bodyPayload, 'mainIngredient') || hasOwn(bodyPayload, 'main_ingredient');
+  const hasSubIngredients =
+    hasOwn(bodyPayload, 'subIngredients') ||
+    hasOwn(bodyPayload, 'subIngredient') ||
+    hasOwn(bodyPayload, 'sub_ingredients');
+  const hasAlcoholPercentage =
+    hasOwn(bodyPayload, 'alcoholPercentage') ||
+    hasOwn(bodyPayload, 'alcohol_percentage') ||
+    hasOwn(bodyPayload, 'abv');
+  const hasSummary = hasOwn(bodyPayload, 'summary') || hasOwn(bodyPayload, 'description');
+  const hasImageUrls = hasOwn(bodyPayload, 'imageUrls') || hasOwn(bodyPayload, 'image_urls');
+  const hasThumbnailUrl =
+    hasOwn(bodyPayload, 'thumbnailUrl') ||
+    hasOwn(bodyPayload, 'thumbnail_url') ||
+    hasOwn(bodyPayload, 'imageUrl') ||
+    hasImageUrls;
+  const hasTags = hasOwn(bodyPayload, 'tags');
+  const hasBudgetPlan =
+    hasOwn(bodyPayload, 'budgetPlan') ||
+    hasOwn(bodyPayload, 'budget_plan') ||
+    hasOwn(bodyPayload, 'projectBudget');
+  const hasSchedulePlan =
+    hasOwn(bodyPayload, 'schedulePlan') ||
+    hasOwn(bodyPayload, 'schedule_plan') ||
+    hasOwn(bodyPayload, 'projectSchedule');
+  const hasPolicy = hasOwn(bodyPayload, 'policy') || hasOwn(bodyPayload, 'projectPolicy');
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
@@ -1408,19 +1530,33 @@ const updateFundingDraft = async (req, res) => {
     });
   }
 
-  if (subIngredients && !Array.isArray(subIngredients)) {
+  const normalizedSubIngredients = hasSubIngredients
+    ? parseFundingListField(subIngredients)
+    : undefined;
+  const normalizedImageUrls = hasImageUrls
+    ? parseFundingListField(imageUrls)
+    : undefined;
+  const normalizedTags = hasTags
+    ? parseFundingListField(tags)
+    : undefined;
+
+  if (hasImageUrls && normalizedImageUrls.length > 5) {
     return res.status(400).json({
       status: 400,
-      message: '입력값이 올바르지 않습니다.',
+      message: '대표 이미지는 최대 5개까지 등록할 수 있습니다.',
     });
   }
+
+  const nextThumbnailUrl = hasImageUrls && !thumbnailUrl
+    ? normalizedImageUrls[0] || null
+    : thumbnailUrl;
 
   const progressFields = [
     title,
     shortTitle,
     category,
     mainIngredient,
-    subIngredients,
+    normalizedSubIngredients,
     alcoholPercentage,
     summary,
   ];
@@ -1438,17 +1574,23 @@ const updateFundingDraft = async (req, res) => {
       `
       UPDATE funding_drafts
       SET
-        title = COALESCE($1, title),
-        short_title = COALESCE($2, short_title),
-        category = COALESCE($3, category),
-        main_ingredient = COALESCE($4, main_ingredient),
-        sub_ingredients = COALESCE($5, sub_ingredients),
-        alcohol_percentage = COALESCE($6, alcohol_percentage),
-        summary = COALESCE($7, summary),
-        thumbnail_url = COALESCE($8, thumbnail_url),
-        progress_rate = GREATEST(progress_rate, $9),
+        title = CASE WHEN $1::boolean THEN $2 ELSE title END,
+        short_title = CASE WHEN $3::boolean THEN $4 ELSE short_title END,
+        category = CASE WHEN $5::boolean THEN $6 ELSE category END,
+        main_ingredient = CASE WHEN $7::boolean THEN $8 ELSE main_ingredient END,
+        sub_ingredients = CASE WHEN $9::boolean THEN $10 ELSE sub_ingredients END,
+        alcohol_percentage = CASE WHEN $11::boolean THEN $12 ELSE alcohol_percentage END,
+        summary = CASE WHEN $13::boolean THEN $14 ELSE summary END,
+        thumbnail_url = CASE WHEN $15::boolean THEN $16 ELSE thumbnail_url END,
+        image_urls = CASE WHEN $17::boolean THEN $18 ELSE image_urls END,
+        tags = CASE WHEN $19::boolean THEN $20 ELSE tags END,
+        budget_plan = CASE WHEN $21::boolean THEN $22 ELSE budget_plan END,
+        schedule_plan = CASE WHEN $23::boolean THEN $24 ELSE schedule_plan END,
+        refund_policy = CASE WHEN $25::boolean THEN $26 ELSE refund_policy END,
+        exchange_policy = CASE WHEN $25::boolean THEN $26 ELSE exchange_policy END,
+        progress_rate = GREATEST(progress_rate, $27),
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $10
+      WHERE draft_id = $28
       RETURNING
         draft_id,
         title,
@@ -1459,21 +1601,45 @@ const updateFundingDraft = async (req, res) => {
         alcohol_percentage,
         summary,
         thumbnail_url,
+        image_urls,
+        tags,
+        budget_plan,
+        schedule_plan,
+        refund_policy,
+        exchange_policy,
         status,
         progress_rate,
         updated_at
       `,
       [
-        title || null,
-        shortTitle || null,
-        category || null,
-        mainIngredient || null,
-        subIngredients ? JSON.stringify(subIngredients) : null,
-        alcoholPercentage !== undefined && alcoholPercentage !== null
+        hasTitle,
+        title ?? null,
+        hasShortTitle,
+        shortTitle ?? null,
+        hasCategory,
+        category ?? null,
+        hasMainIngredient,
+        mainIngredient ?? null,
+        hasSubIngredients,
+        hasSubIngredients ? normalizeJsonStorageValue(normalizedSubIngredients, []) : null,
+        hasAlcoholPercentage,
+        alcoholPercentage !== undefined && alcoholPercentage !== null && alcoholPercentage !== ''
           ? Number(alcoholPercentage)
           : null,
-        summary || null,
-        thumbnailUrl || null,
+        hasSummary,
+        summary ?? null,
+        hasThumbnailUrl,
+        nextThumbnailUrl ?? null,
+        hasImageUrls,
+        hasImageUrls ? normalizeJsonStorageValue(normalizedImageUrls, []) : null,
+        hasTags,
+        hasTags ? normalizeJsonStorageValue(normalizedTags, []) : null,
+        hasBudgetPlan,
+        hasBudgetPlan ? normalizeOriginalTextField(budgetPlan) : null,
+        hasSchedulePlan,
+        hasSchedulePlan ? normalizeOriginalTextField(schedulePlan) : null,
+        hasPolicy,
+        hasPolicy ? normalizeOriginalTextField(policy) : null,
         progressRate,
         Number(draftId),
       ]
@@ -1488,6 +1654,7 @@ const updateFundingDraft = async (req, res) => {
 
     const draft = result.rows[0];
     await syncFundingProjectFieldsFromDraft(draft.draft_id);
+    const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -1499,10 +1666,17 @@ const updateFundingDraft = async (req, res) => {
         shortTitle: draft.short_title,
         category: draft.category,
         mainIngredient: draft.main_ingredient,
-        subIngredients: draft.sub_ingredients,
+        subIngredients: parseFundingListField(draft.sub_ingredients),
         alcoholPercentage: draft.alcohol_percentage,
         summary: draft.summary,
-        thumbnailUrl: draft.thumbnail_url,
+        thumbnailUrl: imageFields.thumbnailUrl,
+        imageUrls: imageFields.imageUrls,
+        allImageUrls: imageFields.allImageUrls,
+        images: mapFundingImageUrls(imageFields.allImageUrls),
+        tags: parseJsonField(draft.tags),
+        budgetPlan: parseOriginalTextField(draft.budget_plan),
+        schedulePlan: parseOriginalTextField(draft.schedule_plan),
+        policy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
       },
       message: '임시저장 프로젝트가 수정되었습니다.',
     });
@@ -1619,12 +1793,12 @@ const saveBasicInfo = async (req, res) => {
         shortTitle || null,
         category,
         mainIngredient,
-        subIngredients ? JSON.stringify(subIngredients) : JSON.stringify([]),
+        normalizeJsonStorageValue(subIngredients || [], []),
         Number(alcoholPercentage),
         summary,
         normalizedThumbnailUrl,
-        JSON.stringify(normalizedImageUrls),
-        JSON.stringify(tags || []),
+        normalizeJsonStorageValue(normalizedImageUrls, []),
+        normalizeJsonStorageValue(tags || [], []),
         Number(draftId),
       ]
     );
@@ -1648,7 +1822,7 @@ const saveBasicInfo = async (req, res) => {
         shortTitle: draft.short_title,
         category: draft.category,
         mainIngredient: draft.main_ingredient,
-        subIngredients: draft.sub_ingredients,
+        subIngredients: parseFundingListField(draft.sub_ingredients),
         alcoholPercentage: draft.alcohol_percentage,
         summary: draft.summary,
         thumbnailUrl: imageFields.thumbnailUrl,
@@ -1964,10 +2138,7 @@ const saveLegalInfo = async (req, res) => {
       productType: draft.product_type,
       volume: draft.volume,
       alcoholPercentage: draft.alcohol_percentage,
-      rawMaterials:
-        typeof draft.raw_materials === 'string'
-          ? JSON.parse(draft.raw_materials)
-          : draft.raw_materials,
+      rawMaterials: parseJsonField(draft.raw_materials, []),
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '법적 고시 정보가 저장되었습니다.',
@@ -1986,6 +2157,7 @@ const saveLegalInfo = async (req, res) => {
 // 맛지표 저장
 const saveTasteProfile = async (req, res) => {
   const { draftId } = req.params;
+  const bodyPayload = req.body || {};
 
   const {
     sweetness,
@@ -2003,7 +2175,7 @@ const saveTasteProfile = async (req, res) => {
     flavorTags,
     tasteInput,
     tasteVector,
-  } = req.body;
+  } = bodyPayload;
   const normalizedAlcoholIntensity = alcoholIntensity ?? alcohol;
   const normalizedAromaIntensity = aromaIntensity ?? aromaIntensitySnake;
   const normalizedFinish = finish ?? aftertaste;
@@ -2015,7 +2187,7 @@ const saveTasteProfile = async (req, res) => {
     acidity === undefined ||
     body === undefined ||
     carbonation === undefined ||
-    normalizedAlcoholIntensity === undefined
+    (normalizedAlcoholIntensity === undefined && normalizedFinish === undefined)
   ) {
     return res.status(400).json({
       status: 400,
@@ -2028,7 +2200,7 @@ const saveTasteProfile = async (req, res) => {
     acidity,
     body,
     carbonation,
-    normalizedAlcoholIntensity,
+    ...(normalizedAlcoholIntensity !== undefined ? [normalizedAlcoholIntensity] : []),
     ...(flavor !== undefined ? [flavor] : []),
     ...(normalizedAromaIntensity !== undefined ? [normalizedAromaIntensity] : []),
     ...(normalizedFinish !== undefined ? [normalizedFinish] : []),
@@ -2064,18 +2236,31 @@ const saveTasteProfile = async (req, res) => {
     });
   }
 
-  const flavorNotesPayload = buildTasteProfileStorage({
-    flavorNotes,
-    flavorTags,
-    flavor,
-    aromaIntensity: normalizedAromaIntensity,
-    finish: normalizedFinish,
-    tasteInput,
-    tasteVector,
-  });
-
   try {
     if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
+    const currentResult = await pool.query(
+      `
+      SELECT flavor_notes
+      FROM funding_drafts
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+    const currentExtras = parseTasteProfileExtras(currentResult.rows[0]?.flavor_notes);
+    const flavorNotesPayload = buildTasteProfileStorage({
+      flavorNotes: hasOwn(bodyPayload, 'flavorNotes') ? flavorNotes : currentExtras.flavorNotes,
+      flavorTags: hasOwn(bodyPayload, 'flavorTags') ? flavorTags : currentExtras.flavorTags,
+      flavor: hasOwn(bodyPayload, 'flavor') ? flavor : currentExtras.flavor,
+      aromaIntensity: hasOwn(bodyPayload, 'aromaIntensity') || hasOwn(bodyPayload, 'aroma_intensity')
+        ? normalizedAromaIntensity
+        : currentExtras.aromaIntensity,
+      finish: hasOwn(bodyPayload, 'finish') || hasOwn(bodyPayload, 'aftertaste')
+        ? normalizedFinish
+        : currentExtras.finish,
+      tasteInput: hasOwn(bodyPayload, 'tasteInput') ? tasteInput : currentExtras.tasteInput,
+      tasteVector: hasOwn(bodyPayload, 'tasteVector') ? tasteVector : currentExtras.tasteVector,
+    });
 
     const result = await pool.query(
       `
@@ -2085,7 +2270,7 @@ const saveTasteProfile = async (req, res) => {
         acidity = $2,
         body = $3,
         carbonation = $4,
-        alcohol_intensity = $5,
+        alcohol_intensity = COALESCE($5, alcohol_intensity),
         flavor_notes = $6,
         progress_rate = GREATEST(progress_rate, 64),
         updated_at = CURRENT_TIMESTAMP
@@ -2106,7 +2291,7 @@ const saveTasteProfile = async (req, res) => {
         Number(acidity),
         Number(body),
         Number(carbonation),
-        Number(normalizedAlcoholIntensity),
+        normalizedAlcoholIntensity === undefined ? null : Number(normalizedAlcoholIntensity),
         flavorNotesPayload,
         Number(draftId),
       ]
@@ -2144,19 +2329,23 @@ const saveTasteProfile = async (req, res) => {
 // 프로젝트 계획 정보 저장 API
 const savePlan = async (req, res) => {
   const { draftId } = req.params;
+  const bodyPayload = req.body || {};
 
-  const {
-    introduction,
-    videoUrl,
-    budgetPlan,
-    schedulePlan,
-    policy,
-  } = req.body;
+  const introduction = getBodyValue(bodyPayload, ['introduction', 'projectIntroduction']);
+  const videoUrl = getBodyValue(bodyPayload, ['videoUrl', 'video_url']);
+  const budgetPlan = getBodyValue(bodyPayload, ['budgetPlan', 'budget_plan', 'projectBudget']);
+  const schedulePlan = getBodyValue(bodyPayload, ['schedulePlan', 'schedule_plan', 'projectSchedule']);
+  const policy = getBodyValue(bodyPayload, ['policy', 'projectPolicy']);
+  const hasIntroduction = hasOwn(bodyPayload, 'introduction') || hasOwn(bodyPayload, 'projectIntroduction');
+  const hasVideoUrl = hasOwn(bodyPayload, 'videoUrl') || hasOwn(bodyPayload, 'video_url');
+  const hasBudgetPlan = hasOwn(bodyPayload, 'budgetPlan') || hasOwn(bodyPayload, 'budget_plan') || hasOwn(bodyPayload, 'projectBudget');
+  const hasSchedulePlan = hasOwn(bodyPayload, 'schedulePlan') || hasOwn(bodyPayload, 'schedule_plan') || hasOwn(bodyPayload, 'projectSchedule');
+  const hasPolicy = hasOwn(bodyPayload, 'policy') || hasOwn(bodyPayload, 'projectPolicy');
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
-    !introduction
+    !(hasIntroduction || hasVideoUrl || hasBudgetPlan || hasSchedulePlan || hasPolicy)
   ) {
     return res.status(400).json({
       status: 400,
@@ -2171,15 +2360,15 @@ const savePlan = async (req, res) => {
       `
       UPDATE funding_drafts
       SET
-        introduction = $1,
-        budget_plan = $2,
-        schedule_plan = $3,
-        video_url = $4,
-        refund_policy = CASE WHEN $5::text IS NULL THEN refund_policy ELSE $5 END,
-        exchange_policy = CASE WHEN $5::text IS NULL THEN exchange_policy ELSE $5 END,
+        introduction = CASE WHEN $1::boolean THEN $2 ELSE introduction END,
+        budget_plan = CASE WHEN $3::boolean THEN $4 ELSE budget_plan END,
+        schedule_plan = CASE WHEN $5::boolean THEN $6 ELSE schedule_plan END,
+        video_url = CASE WHEN $7::boolean THEN $8 ELSE video_url END,
+        refund_policy = CASE WHEN $9::boolean THEN $10 ELSE refund_policy END,
+        exchange_policy = CASE WHEN $9::boolean THEN $10 ELSE exchange_policy END,
         progress_rate = GREATEST(progress_rate, 78),
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $6
+      WHERE draft_id = $11
       RETURNING
         draft_id,
         introduction,
@@ -2192,11 +2381,16 @@ const savePlan = async (req, res) => {
         updated_at
       `,
       [
-        introduction,
-        stringifyJsonField(budgetPlan),
-        stringifyJsonField(schedulePlan),
+        hasIntroduction,
+        normalizeOriginalTextField(introduction),
+        hasBudgetPlan,
+        normalizeOriginalTextField(budgetPlan),
+        hasSchedulePlan,
+        normalizeOriginalTextField(schedulePlan),
+        hasVideoUrl,
         videoUrl || null,
-        policy === undefined ? null : stringifyJsonField(policy, null),
+        hasPolicy,
+        normalizeOriginalTextField(policy),
         Number(draftId),
       ]
     );
@@ -2216,9 +2410,12 @@ const savePlan = async (req, res) => {
       plan: {
         introduction: draft.introduction,
         videoUrl: draft.video_url,
-        budgetPlan: parseJsonFieldPreserveText(draft.budget_plan),
-        schedulePlan: parseJsonFieldPreserveText(draft.schedule_plan),
-        policy: parseJsonFieldPreserveText(draft.refund_policy || draft.exchange_policy),
+        budgetPlan: parseOriginalTextField(draft.budget_plan),
+        projectBudget: parseOriginalTextField(draft.budget_plan),
+        schedulePlan: parseOriginalTextField(draft.schedule_plan),
+        projectSchedule: parseOriginalTextField(draft.schedule_plan),
+        policy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
+        projectPolicy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
         ...PLAN_GUIDES,
       },
       progressRate: draft.progress_rate,
@@ -2272,7 +2469,7 @@ const saveBreweryInfo = async (req, res) => {
     'profileImageUrl',
     'profile_image_url',
   ]);
-  const breweryBio = getBodyValue(body, ['breweryBio', 'brewery_bio', 'creatorIntroduction']);
+  const breweryBio = getBodyValue(body, ['breweryBio', 'brewery_bio', 'creatorIntroduction', 'creator_introduction']);
   const businessType = getBodyValue(body, ['businessType', 'business_type']);
   const businessName = getBodyValue(body, ['businessName', 'business_name']);
   const businessCategory = getBodyValue(body, ['businessCategory', 'business_category']);
@@ -2427,6 +2624,7 @@ const saveBreweryInfo = async (req, res) => {
       accountHolder: draft.account_holder,
       breweryProfileImageUrl: draft.profile_image_url,
       breweryBio: draft.creator_introduction,
+      creatorIntroduction: draft.creator_introduction,
       businessType: draft.business_type,
       businessName: draft.business_name,
       businessCategory: draft.business_category,
@@ -3079,13 +3277,19 @@ const confirmBankAccountVerification = async (req, res) => {
 // 환불/교환/성인인증/리스크 안내 저장
 const saveNotices = async (req, res) => {
   const { draftId } = req.params;
+  const bodyPayload = req.body || {};
 
   const {
     refundPolicy,
     exchangePolicy,
+    policy,
+    projectPolicy,
     adultVerificationNotice,
     riskNotice,
-  } = req.body;
+  } = bodyPayload;
+  const normalizedPolicy = policy ?? projectPolicy;
+  const normalizedRefundPolicy = refundPolicy ?? normalizedPolicy;
+  const normalizedExchangePolicy = exchangePolicy ?? normalizedPolicy;
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
@@ -3095,8 +3299,8 @@ const saveNotices = async (req, res) => {
   }
 
   if (
-    !refundPolicy ||
-    !exchangePolicy ||
+    !normalizedRefundPolicy ||
+    !normalizedExchangePolicy ||
     !adultVerificationNotice ||
     !riskNotice
   ) {
@@ -3130,8 +3334,8 @@ const saveNotices = async (req, res) => {
         updated_at
       `,
       [
-        refundPolicy,
-        exchangePolicy,
+        normalizeOriginalTextField(normalizedRefundPolicy),
+        normalizeOriginalTextField(normalizedExchangePolicy),
         adultVerificationNotice,
         riskNotice,
         Number(draftId),
@@ -3150,8 +3354,10 @@ const saveNotices = async (req, res) => {
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'NOTICES',
-      refundPolicy: draft.refund_policy,
-      exchangePolicy: draft.exchange_policy,
+      policy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
+      projectPolicy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
+      refundPolicy: parseOriginalTextField(draft.refund_policy),
+      exchangePolicy: parseOriginalTextField(draft.exchange_policy),
       adultVerificationNotice: draft.adult_verification_notice,
       riskNotice: draft.risk_notice,
       progressRate: draft.progress_rate,
@@ -3434,8 +3640,8 @@ const submitFundingDraft = async (req, res) => {
           draft.introduction || draft.summary || '',
           `${draft.alcohol_percentage || 0}%`,
           draft.main_ingredient || null,
-          draft.sub_ingredients || '[]',
-          draft.flavor_notes || '[]',
+          normalizeJsonStorageValue(draft.sub_ingredients, []),
+          normalizeJsonStorageValue(draft.flavor_notes, []),
           draft.category || null,
           draft.summary || '',
           draft.thumbnail_url || null,
@@ -3508,7 +3714,7 @@ const submitFundingDraft = async (req, res) => {
           draft.summary || '',
           draft.category || null,
           draft.thumbnail_url || null,
-          draft.image_urls || '[]',
+          normalizeJsonStorageValue(draft.image_urls, []),
           draft.expected_delivery_date || null,
           Number(draft.price_per_bottle || 0),
           draft.shipping_fee !== null && draft.shipping_fee !== undefined
@@ -3547,7 +3753,7 @@ const submitFundingDraft = async (req, res) => {
           draft.body,
           draft.carbonation,
           draft.alcohol_intensity,
-          draft.flavor_notes || '[]',
+          normalizeJsonStorageValue(draft.flavor_notes, []),
         ]
       );
 
@@ -4704,10 +4910,10 @@ const getFundingDetail = async (req, res) => {
             (Number(funding.current_amount) / Number(funding.target_amount)) * 100
           )
         : 0;
-    const budgetPlan = parseJsonFieldPreserveText(funding.budget_plan);
-    const schedulePlan = parseJsonFieldPreserveText(funding.schedule_plan);
-    const refundPolicy = parseJsonFieldPreserveText(funding.refund_policy);
-    const exchangePolicy = parseJsonFieldPreserveText(funding.exchange_policy);
+    const budgetPlan = parseOriginalTextField(funding.budget_plan);
+    const schedulePlan = parseOriginalTextField(funding.schedule_plan);
+    const refundPolicy = parseOriginalTextField(funding.refund_policy);
+    const exchangePolicy = parseOriginalTextField(funding.exchange_policy);
     const projectPolicy = refundPolicy ?? exchangePolicy;
     const tasteProfile = taste
       ? buildTasteProfileResponse({
@@ -4923,11 +5129,11 @@ const getFundingIntro = async (req, res) => {
     const mainIngredient = funding.main_ingredient || funding.recipe_main_ingredient || null;
     const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
     const imageFields = buildImageFields(funding.thumbnail_url, funding.image_urls);
-    const budgetPlan = parseJsonFieldPreserveText(funding.budget_plan);
-    const schedulePlan = parseJsonFieldPreserveText(funding.schedule_plan);
+    const budgetPlan = parseOriginalTextField(funding.budget_plan);
+    const schedulePlan = parseOriginalTextField(funding.schedule_plan);
     const projectPolicy =
-      parseJsonFieldPreserveText(funding.refund_policy)
-      ?? parseJsonFieldPreserveText(funding.exchange_policy);
+      parseOriginalTextField(funding.refund_policy)
+      ?? parseOriginalTextField(funding.exchange_policy);
 
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
