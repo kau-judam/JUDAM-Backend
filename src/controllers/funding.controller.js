@@ -496,12 +496,47 @@ const normalizePublicImageUrl = (imageUrl) => {
   return /^https?:\/\//i.test(trimmed) ? trimmed : null;
 };
 
+const normalizeFundingImageUrlsInput = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+
+  const normalizeItem = (item) => {
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      return item.imageUrl || item.image_url || item.url || '';
+    }
+
+    return item;
+  };
+
+  if (Array.isArray(value)) {
+    return uniqueValues(
+      value
+        .map(normalizeItem)
+        .map(normalizePublicImageUrl)
+        .filter(Boolean)
+    ).slice(0, 5);
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return normalizeFundingImageUrlsInput(parsed);
+    } catch (error) {
+      return uniqueValues(
+        value
+          .split(',')
+          .map((imageUrl) => normalizePublicImageUrl(imageUrl))
+          .filter(Boolean)
+      ).slice(0, 5);
+    }
+  }
+
+  return [];
+};
+
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
-  const parsedImageUrls = uniqueValues(
-    parseJsonArrayField(imageUrlsValue)
-      .map(normalizePublicImageUrl)
-      .filter(Boolean)
-  ).slice(0, 5);
+  const parsedImageUrls = normalizeFundingImageUrlsInput(imageUrlsValue);
   const normalizedThumbnailUrl = normalizePublicImageUrl(thumbnailUrl) || parsedImageUrls[0] || null;
   const imageUrls = parsedImageUrls.filter((imageUrl) => imageUrl !== normalizedThumbnailUrl);
   const allImageUrls = uniqueValues([normalizedThumbnailUrl, ...imageUrls].filter(Boolean)).slice(0, 5);
@@ -1035,6 +1070,364 @@ const calculateFundingPeriodDays = (startDate, endDate) => {
   const diffDays = Math.round((end.getTime() - start.getTime()) / millisecondsPerDay);
 
   return diffDays > 0 ? diffDays : null;
+};
+
+const FUNDING_DRAFT_PAYLOAD_SECTIONS = [
+  'basicInfo',
+  'schedule',
+  'legalInfo',
+  'tasteProfile',
+  'plan',
+  'breweryInfo',
+  'notices',
+];
+
+const getPayloadCandidate = (body, keys, sections = FUNDING_DRAFT_PAYLOAD_SECTIONS) => {
+  for (const key of keys) {
+    if (hasOwn(body, key)) {
+      return { exists: true, value: body[key] };
+    }
+  }
+
+  for (const section of sections) {
+    const sectionValue = body?.[section];
+
+    if (!sectionValue || typeof sectionValue !== 'object' || Array.isArray(sectionValue)) {
+      continue;
+    }
+
+    for (const key of keys) {
+      if (hasOwn(sectionValue, key)) {
+        return { exists: true, value: sectionValue[key] };
+      }
+    }
+  }
+
+  return { exists: false, value: undefined };
+};
+
+const normalizeDraftTextValue = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return value === '' ? null : value;
+};
+
+const normalizeDraftOriginalTextValue = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return normalizeOriginalTextField(value);
+};
+
+const normalizeDraftNumberValue = (value) => toNullableNumber(value);
+
+const normalizeDraftBooleanValue = (value) => {
+  const parsed = parseOptionalBoolean(value);
+  return parsed === undefined ? null : parsed;
+};
+
+const normalizeDraftJsonListValue = (value) =>
+  normalizeJsonStorageValue(parseFundingListField(value), []);
+
+const buildFundingDraftPatchFromPayload = (bodyPayload = {}, currentDraft = {}) => {
+  const assignments = [];
+  const values = [];
+  let progressRate = 0;
+  let hasTasteProfile = false;
+
+  const addAssignment = (column, value, sectionProgress = 0) => {
+    values.push(value);
+    assignments.push(`${column} = $${values.length}`);
+    progressRate = Math.max(progressRate, sectionProgress);
+  };
+
+  const addFromPayload = (column, keys, sections, normalize, sectionProgress = 0) => {
+    const candidate = getPayloadCandidate(bodyPayload, keys, sections);
+
+    if (!candidate.exists) {
+      return false;
+    }
+
+    addAssignment(column, normalize(candidate.value), sectionProgress);
+    return true;
+  };
+
+  addFromPayload('title', ['title'], ['basicInfo'], normalizeDraftTextValue, 33);
+  addFromPayload('short_title', ['shortTitle', 'short_title'], ['basicInfo'], normalizeDraftTextValue, 33);
+  addFromPayload('category', ['category'], ['basicInfo'], normalizeDraftTextValue, 33);
+  addFromPayload('main_ingredient', ['mainIngredient', 'main_ingredient'], ['basicInfo', 'legalInfo'], normalizeDraftTextValue, 33);
+  addFromPayload(
+    'sub_ingredients',
+    ['subIngredients', 'subIngredient', 'sub_ingredients'],
+    ['basicInfo', 'legalInfo'],
+    normalizeDraftJsonListValue,
+    33
+  );
+  addFromPayload(
+    'alcohol_percentage',
+    ['alcoholPercentage', 'alcohol_percentage', 'abv'],
+    ['basicInfo', 'legalInfo', 'tasteProfile'],
+    normalizeDraftNumberValue,
+    33
+  );
+  addFromPayload('summary', ['summary', 'description'], ['basicInfo'], normalizeDraftTextValue, 33);
+
+  const imageCandidate = getPayloadCandidate(
+    bodyPayload,
+    ['imageUrls', 'image_urls', 'images'],
+    ['basicInfo']
+  );
+  const thumbnailCandidate = getPayloadCandidate(
+    bodyPayload,
+    ['thumbnailUrl', 'thumbnail_url', 'imageUrl', 'image_url'],
+    ['basicInfo']
+  );
+
+  if (imageCandidate.exists) {
+    const normalizedImageUrls = normalizeFundingImageUrlsInput(imageCandidate.value);
+    addAssignment('image_urls', normalizeJsonStorageValue(normalizedImageUrls, []), 33);
+    addAssignment(
+      'thumbnail_url',
+      normalizePublicImageUrl(thumbnailCandidate.value) || normalizedImageUrls[0] || null,
+      33
+    );
+  } else if (thumbnailCandidate.exists) {
+    addAssignment('thumbnail_url', normalizePublicImageUrl(thumbnailCandidate.value), 33);
+  }
+
+  addFromPayload('tags', ['tags'], ['basicInfo'], normalizeDraftJsonListValue, 33);
+  addFromPayload('recipe_id', ['recipeId', 'recipe_id'], ['basicInfo'], normalizeDraftNumberValue, 33);
+
+  const priceCandidate = getPayloadCandidate(bodyPayload, ['pricePerBottle', 'price_per_bottle'], ['schedule']);
+  const quantityCandidate = getPayloadCandidate(bodyPayload, ['totalQuantity', 'total_quantity'], ['schedule']);
+  const targetCandidate = getPayloadCandidate(bodyPayload, ['targetAmount', 'target_amount', 'goalAmount', 'goal_amount'], ['schedule']);
+
+  if (priceCandidate.exists) {
+    addAssignment('price_per_bottle', normalizeDraftNumberValue(priceCandidate.value), 47);
+  }
+
+  if (quantityCandidate.exists) {
+    addAssignment('total_quantity', normalizeDraftNumberValue(quantityCandidate.value), 47);
+  }
+
+  if (targetCandidate.exists) {
+    addAssignment('target_amount', normalizeDraftNumberValue(targetCandidate.value), 47);
+  } else if (priceCandidate.exists && quantityCandidate.exists) {
+    const price = normalizeDraftNumberValue(priceCandidate.value);
+    const quantity = normalizeDraftNumberValue(quantityCandidate.value);
+    addAssignment('target_amount', price !== null && quantity !== null ? price * quantity : null, 47);
+  }
+
+  const startDateCandidate = getPayloadCandidate(
+    bodyPayload,
+    ['fundingStartDate', 'funding_start_date', 'startDate', 'start_date'],
+    ['schedule']
+  );
+  const endDateCandidate = getPayloadCandidate(
+    bodyPayload,
+    ['fundingEndDate', 'funding_end_date', 'endDate', 'end_date'],
+    ['schedule']
+  );
+  const periodCandidate = getPayloadCandidate(
+    bodyPayload,
+    ['fundingPeriodDays', 'funding_period_days'],
+    ['schedule']
+  );
+
+  if (startDateCandidate.exists) {
+    addAssignment('funding_start_date', normalizeDraftTextValue(startDateCandidate.value), 47);
+  }
+
+  if (periodCandidate.exists) {
+    addAssignment('funding_period_days', normalizeDraftNumberValue(periodCandidate.value), 47);
+  }
+
+  if (endDateCandidate.exists) {
+    addAssignment('funding_end_date', normalizeDraftTextValue(endDateCandidate.value), 47);
+  } else if (startDateCandidate.exists && periodCandidate.exists) {
+    const start = new Date(startDateCandidate.value);
+    const period = Number(periodCandidate.value);
+
+    if (!Number.isNaN(start.getTime()) && Number.isFinite(period)) {
+      const end = new Date(start);
+      end.setDate(end.getDate() + period);
+      addAssignment('funding_end_date', end.toISOString().slice(0, 10), 47);
+    }
+  }
+
+  addFromPayload(
+    'expected_delivery_date',
+    ['expectedDeliveryDate', 'expected_delivery_date'],
+    ['schedule'],
+    normalizeDraftTextValue,
+    47
+  );
+  addFromPayload('platform_fee_rate', ['platformFeeRate', 'platform_fee_rate'], ['schedule'], normalizeDraftNumberValue, 47);
+  addFromPayload('platform_fee_amount', ['platformFeeAmount', 'platform_fee_amount'], ['schedule'], normalizeDraftNumberValue, 47);
+  addFromPayload('shipping_fee', ['shippingFee', 'shipping_fee'], ['schedule'], normalizeDraftNumberValue, 47);
+
+  addFromPayload('product_type', ['productType', 'product_type'], ['legalInfo'], normalizeDraftTextValue, 57);
+  addFromPayload('volume', ['volume'], ['legalInfo'], normalizeDraftNumberValue, 57);
+  addFromPayload('raw_materials', ['rawMaterials', 'raw_materials'], ['legalInfo'], normalizeJsonStorageValue, 57);
+
+  const sweetnessCandidate = getPayloadCandidate(bodyPayload, ['sweetness'], ['tasteProfile']);
+  const acidityCandidate = getPayloadCandidate(bodyPayload, ['acidity'], ['tasteProfile']);
+  const bodyCandidate = getPayloadCandidate(bodyPayload, ['body'], ['tasteProfile']);
+  const carbonationCandidate = getPayloadCandidate(bodyPayload, ['carbonation'], ['tasteProfile']);
+  const alcoholCandidate = getPayloadCandidate(bodyPayload, ['alcoholIntensity', 'alcohol_intensity', 'alcohol'], ['tasteProfile']);
+
+  if (sweetnessCandidate.exists) {
+    addAssignment('sweetness', normalizeDraftNumberValue(sweetnessCandidate.value), 64);
+    hasTasteProfile = true;
+  }
+  if (acidityCandidate.exists) {
+    addAssignment('acidity', normalizeDraftNumberValue(acidityCandidate.value), 64);
+    hasTasteProfile = true;
+  }
+  if (bodyCandidate.exists) {
+    addAssignment('body', normalizeDraftNumberValue(bodyCandidate.value), 64);
+    hasTasteProfile = true;
+  }
+  if (carbonationCandidate.exists) {
+    addAssignment('carbonation', normalizeDraftNumberValue(carbonationCandidate.value), 64);
+    hasTasteProfile = true;
+  }
+  if (alcoholCandidate.exists) {
+    addAssignment('alcohol_intensity', normalizeDraftNumberValue(alcoholCandidate.value), 64);
+    hasTasteProfile = true;
+  }
+
+  const tasteExtraKeys = [
+    ['flavorNotes', 'flavor_notes'],
+    ['flavorTags', 'flavor_tags'],
+    ['flavor'],
+    ['aromaIntensity', 'aroma_intensity'],
+    ['finish', 'aftertaste'],
+    ['tasteInput', 'taste_input'],
+    ['tasteVector', 'taste_vector'],
+  ];
+  const hasTasteExtras = tasteExtraKeys.some((keys) =>
+    getPayloadCandidate(bodyPayload, keys, ['tasteProfile']).exists
+  );
+
+  if (hasTasteExtras) {
+    const currentExtras = parseTasteProfileExtras(currentDraft.flavor_notes);
+    const getTasteValue = (keys, fallback) => {
+      const candidate = getPayloadCandidate(bodyPayload, keys, ['tasteProfile']);
+      return candidate.exists ? candidate.value : fallback;
+    };
+
+    addAssignment(
+      'flavor_notes',
+      buildTasteProfileStorage({
+        flavorNotes: getTasteValue(['flavorNotes', 'flavor_notes'], currentExtras.flavorNotes),
+        flavorTags: getTasteValue(['flavorTags', 'flavor_tags'], currentExtras.flavorTags),
+        flavor: getTasteValue(['flavor'], currentExtras.flavor),
+        aromaIntensity: getTasteValue(['aromaIntensity', 'aroma_intensity'], currentExtras.aromaIntensity),
+        finish: getTasteValue(['finish', 'aftertaste'], currentExtras.finish),
+        tasteInput: getTasteValue(['tasteInput', 'taste_input'], currentExtras.tasteInput),
+        tasteVector: getTasteValue(['tasteVector', 'taste_vector'], currentExtras.tasteVector),
+      }),
+      64
+    );
+    hasTasteProfile = true;
+  }
+
+  addFromPayload('introduction', ['introduction', 'projectIntroduction', 'productionPlan', 'fundingPurpose'], ['plan'], normalizeDraftOriginalTextValue, 78);
+  addFromPayload('video_url', ['videoUrl', 'video_url'], ['plan'], normalizeDraftTextValue, 78);
+  addFromPayload('budget_plan', ['budgetPlan', 'budget_plan', 'projectBudget'], ['plan'], normalizeDraftOriginalTextValue, 78);
+  addFromPayload('schedule_plan', ['schedulePlan', 'schedule_plan', 'projectSchedule'], ['plan'], normalizeDraftOriginalTextValue, 78);
+  addFromPayload('refund_policy', ['policy', 'projectPolicy', 'refundPolicy', 'refund_policy'], ['plan', 'notices'], normalizeDraftOriginalTextValue, 78);
+  addFromPayload('exchange_policy', ['policy', 'projectPolicy', 'exchangePolicy', 'exchange_policy'], ['plan', 'notices'], normalizeDraftOriginalTextValue, 78);
+
+  addFromPayload('brewery_name', ['breweryName', 'brewery_name'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('creator_name', ['creatorName', 'creator_name'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('profile_image_url', ['profileImageUrl', 'profile_image_url', 'breweryProfileImageUrl', 'brewery_profile_image_url'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('creator_introduction', ['creatorIntroduction', 'creator_introduction', 'breweryBio', 'brewery_bio'], ['breweryInfo'], normalizeDraftOriginalTextValue, 85);
+  addFromPayload('representative_name', ['representativeName', 'representative_name'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('business_registration_number', ['businessRegistrationNumber', 'business_registration_number', 'businessNumber', 'licenseNumber'], ['breweryInfo', 'legalInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('business_address', ['businessAddress', 'business_address'], ['breweryInfo', 'legalInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('business_address_detail', ['businessAddressDetail', 'business_address_detail'], ['breweryInfo', 'legalInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('contact_email', ['contactEmail', 'contact_email'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('contact_phone', ['contactPhone', 'contact_phone', 'phoneNumber', 'phone_number'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('bank_name', ['bankName', 'bank_name'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('account_number', ['accountNumber', 'account_number'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('account_holder', ['accountHolder', 'account_holder'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('business_type', ['businessType', 'business_type'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('business_name', ['businessName', 'business_name'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('business_category', ['businessCategory', 'business_category'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('business_item', ['businessItem', 'business_item'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('tax_email', ['taxEmail', 'tax_email'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('phone_verified', ['phoneVerified', 'phone_verified'], ['breweryInfo'], normalizeDraftBooleanValue, 85);
+  addFromPayload('account_verified', ['accountVerified', 'account_verified'], ['breweryInfo'], normalizeDraftBooleanValue, 85);
+  addFromPayload('identity_document_url', ['identityDocumentUrl', 'identity_document_url'], ['breweryInfo'], normalizeDraftTextValue, 85);
+  addFromPayload('business_registration_file_url', ['businessRegistrationFileUrl', 'business_registration_file_url', 'businessLicenseUrl', 'documentUrl'], ['breweryInfo'], normalizeDraftTextValue, 85);
+
+  addFromPayload('adult_verification_notice', ['adultVerificationNotice', 'adult_verification_notice'], ['notices'], normalizeDraftOriginalTextValue, 92);
+  addFromPayload('risk_notice', ['riskNotice', 'risk_notice'], ['notices', 'plan'], normalizeDraftOriginalTextValue, 92);
+
+  return {
+    assignments,
+    values,
+    progressRate,
+    hasTasteProfile,
+  };
+};
+
+const updateFundingDraftRowFromPayload = async (draftId, bodyPayload = {}) => {
+  const currentResult = await pool.query(
+    `
+    SELECT *
+    FROM funding_drafts
+    WHERE draft_id = $1
+    `,
+    [Number(draftId)]
+  );
+
+  const currentDraft = currentResult.rows[0];
+
+  if (!currentDraft) {
+    return null;
+  }
+
+  const patch = buildFundingDraftPatchFromPayload(bodyPayload, currentDraft);
+
+  if (patch.assignments.length === 0) {
+    return currentDraft;
+  }
+
+  const values = [...patch.values];
+  const progressPlaceholder = `$${values.length + 1}`;
+  values.push(patch.progressRate);
+  const draftIdPlaceholder = `$${values.length + 1}`;
+  values.push(Number(draftId));
+
+  const { rows } = await pool.query(
+    `
+    UPDATE funding_drafts
+    SET
+      ${patch.assignments.join(',\n      ')},
+      progress_rate = CASE
+        WHEN ${progressPlaceholder}::int > 0 THEN GREATEST(progress_rate, ${progressPlaceholder}::int)
+        ELSE progress_rate
+      END,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE draft_id = ${draftIdPlaceholder}
+    RETURNING *
+    `,
+    values
+  );
+
+  const updatedDraft = rows[0];
+
+  if (updatedDraft?.draft_id) {
+    await syncFundingProjectFieldsFromDraft(updatedDraft.draft_id);
+
+    if (patch.hasTasteProfile) {
+      await syncTasteProfileFromDraft(updatedDraft.draft_id);
+    }
+  }
+
+  return updatedDraft;
 };
 
 const normalizeManagementDraftStatus = (fundingStatus) => {
@@ -1760,8 +2153,13 @@ const saveAgreement = async (req, res) => {
 
 // 펀딩 프로젝트 임시저장 생성(수정 버전)
 const createFundingDraft = async (req, res) => {
+  const bodyPayload = req.body || {};
+  const currentUserId = getAuthUserId(req.user);
+  const requestedBreweryId = getBodyValue(bodyPayload, ['breweryId', 'brewery_id']);
+  const breweryId = requestedBreweryId === undefined || requestedBreweryId === null || requestedBreweryId === ''
+    ? currentUserId
+    : Number(requestedBreweryId);
   const {
-    breweryId,
     title,
     shortTitle,
     category,
@@ -1773,7 +2171,7 @@ const createFundingDraft = async (req, res) => {
     thumbnailUrl,
     imageUrls,
     tags,
-  } = req.body;
+  } = bodyPayload;
 
   if (!breweryId) {
     return res.status(400).json({
@@ -1784,28 +2182,28 @@ const createFundingDraft = async (req, res) => {
 
   if (!authorizeBreweryUserId(breweryId, req.user, res)) return;
 
-    if (imageUrls && !Array.isArray(imageUrls)) {
+    if (imageUrls && !Array.isArray(imageUrls) && typeof imageUrls !== 'string') {
       return res.status(400).json({
         status: 400,
         message: '대표 이미지 목록 입력값이 올바르지 않습니다.',
       });
     }
 
-    if (imageUrls && imageUrls.length > 5) {
+    if (imageUrls && normalizeFundingImageUrlsInput(imageUrls).length > 5) {
       return res.status(400).json({
         status: 400,
         message: '대표 이미지는 최대 5개까지 등록할 수 있습니다.',
       });
     }
 
-    if (tags && !Array.isArray(tags)) {
+    if (tags && !Array.isArray(tags) && typeof tags !== 'string') {
       return res.status(400).json({
         status: 400,
         message: '검색 태그 입력값이 올바르지 않습니다.',
       });
     }
 
-    const normalizedImageUrls = imageUrls || [];
+    const normalizedImageUrls = normalizeFundingImageUrlsInput(imageUrls || []);
     const normalizedThumbnailUrl =
       normalizedImageUrls.length > 0 ? normalizedImageUrls[0] : thumbnailUrl || null;
 
@@ -1866,20 +2264,13 @@ const createFundingDraft = async (req, res) => {
       ]
     );
 
-    const draft = result.rows[0];
-    const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
+    const draft = await updateFundingDraftRowFromPayload(result.rows[0].draft_id, bodyPayload);
+    const documents = await getFundingDraftDocuments(draft.draft_id);
+    const payload = buildFundingDraftPayload(draft, documents);
 
     return res.status(201).json({
-      draftId: draft.draft_id,
-      breweryId: draft.brewery_id,
-      status: draft.status,
-      progressRate: draft.progress_rate,
-      createdAt: draft.created_at,
-      thumbnailUrl: imageFields.thumbnailUrl,
-      imageUrls: imageFields.imageUrls,
-      allImageUrls: imageFields.allImageUrls,
-      images: mapFundingImageUrls(imageFields.allImageUrls),
-      tags: draft.tags,
+      ...payload,
+      draft,
       message: '펀딩 프로젝트가 임시저장되었습니다.',
     });
   } catch (error) {
@@ -2001,6 +2392,24 @@ const updateFundingDraft = async (req, res) => {
 
   try {
     if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+
+    const updatedDraft = await updateFundingDraftRowFromPayload(draftId, bodyPayload);
+
+    if (!updatedDraft) {
+      return res.status(404).json({
+        status: 404,
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+      });
+    }
+
+    const documents = await getFundingDraftDocuments(updatedDraft.draft_id);
+    const payload = buildFundingDraftPayload(updatedDraft, documents);
+
+    return res.status(200).json({
+      ...payload,
+      draft: updatedDraft,
+      message: '?꾩떆????꾨줈?앺듃媛 ?섏젙?섏뿀?듬땲??',
+    });
 
     const result = await pool.query(
       `
@@ -2881,6 +3290,9 @@ const saveBreweryInfo = async (req, res) => {
   const businessAddress = toTrimmedString(
     getBodyValue(body, ['businessAddress', 'business_address'])
   );
+  const businessAddressDetail = toTrimmedString(
+    getBodyValue(body, ['businessAddressDetail', 'business_address_detail'])
+  );
   const contactEmail = toTrimmedString(getBodyValue(body, ['contactEmail', 'contact_email']));
   const contactPhone = toTrimmedString(getBodyValue(body, ['contactPhone', 'contact_phone']));
   const bankName = toTrimmedString(getBodyValue(body, ['bankName', 'bank_name']));
@@ -2993,23 +3405,24 @@ const saveBreweryInfo = async (req, res) => {
         representative_name = $2,
         business_registration_number = $3,
         business_address = $4,
-        contact_email = $5,
-        contact_phone = $6,
-        bank_name = $7,
-        account_number = $8,
-        account_holder = $9,
-        profile_image_url = $10,
-        creator_introduction = $11,
-        business_type = $12,
-        business_name = $13,
-        business_category = $14,
-        business_item = $15,
-        phone_verified = $16,
-        account_verified = $17,
+        business_address_detail = $5,
+        contact_email = $6,
+        contact_phone = $7,
+        bank_name = $8,
+        account_number = $9,
+        account_holder = $10,
+        profile_image_url = $11,
+        creator_introduction = $12,
+        business_type = $13,
+        business_name = $14,
+        business_category = $15,
+        business_item = $16,
+        phone_verified = $17,
+        account_verified = $18,
         creator_name = COALESCE(creator_name, $1),
         progress_rate = GREATEST(progress_rate, 85),
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $18
+      WHERE draft_id = $19
       RETURNING *
       `,
       [
@@ -3017,6 +3430,7 @@ const saveBreweryInfo = async (req, res) => {
         representativeName,
         businessRegistrationNumber,
         businessAddress,
+        businessAddressDetail || null,
         contactEmail,
         contactPhone,
         bankName,
@@ -3051,6 +3465,7 @@ const saveBreweryInfo = async (req, res) => {
       representativeName: draft.representative_name,
       businessRegistrationNumber: draft.business_registration_number,
       businessAddress: draft.business_address,
+      businessAddressDetail: draft.business_address_detail,
       contactEmail: draft.contact_email,
       contactPhone: draft.contact_phone,
       bankName: draft.bank_name,
@@ -3104,6 +3519,7 @@ const loadBreweryInfo = async (req, res) => {
         business_registration_number,
         representative_name,
         business_address,
+        business_address_detail,
         contact_email,
         contact_phone,
         bank_name,
@@ -3168,55 +3584,69 @@ const loadBreweryInfo = async (req, res) => {
     }
 
     const info = result.rows[0];
+    const resolvedBreweryName = info.approved_brewery_name || info.brewery_name || info.user_nickname || null;
+    const resolvedCreatorName = info.creator_name || info.user_nickname || info.approved_brewery_name || info.brewery_name || null;
+    const resolvedBusinessNumber = info.approved_license_number || info.business_registration_number || null;
+    const resolvedBusinessAddress = info.approved_brewery_location || info.business_address || null;
+    const resolvedBusinessAddressDetail =
+      info.approved_business_address_detail || info.business_address_detail || null;
+    const resolvedContactPhone = info.approved_phone_number || info.user_phone_number || info.contact_phone || null;
+    const resolvedPhoneVerified = Boolean(info.phone_verified || info.approved_phone_number || info.user_phone_number);
+    const resolvedBusinessRegistrationFileUrl =
+      info.approved_document_url || info.business_registration_file_url || null;
+    const businessLicense = resolvedBusinessRegistrationFileUrl
+      ? {
+          documentUrl: resolvedBusinessRegistrationFileUrl,
+          documentKey: info.approved_document_key || null,
+          originalName: info.approved_document_original_name || null,
+          mimeType: info.approved_document_mime_type || null,
+          fileSize: info.approved_document_file_size === null || info.approved_document_file_size === undefined
+            ? null
+            : Number(info.approved_document_file_size),
+        }
+      : null;
+    const missingFields = [
+      ...(!resolvedCreatorName ? ['creatorName'] : []),
+      ...(!resolvedContactPhone ? ['phoneNumber'] : []),
+      ...(!resolvedPhoneVerified ? ['phoneVerification'] : []),
+      ...(!resolvedBusinessNumber ? ['businessNumber'] : []),
+      ...(!resolvedBusinessAddress ? ['businessAddress'] : []),
+      ...(!resolvedBusinessAddressDetail ? ['businessAddressDetail'] : []),
+      ...(!info.representative_name ? ['representativeName'] : []),
+      ...(!resolvedBusinessRegistrationFileUrl ? ['businessLicense'] : []),
+      ...(!info.creator_introduction ? ['creatorIntroduction'] : []),
+    ];
 
     return res.status(200).json({
       breweryInfo: {
         breweryId: info.brewery_id,
-        breweryName: info.brewery_name || info.approved_brewery_name || info.user_nickname,
-        creatorName: info.creator_name || info.brewery_name || info.approved_brewery_name || info.user_nickname,
-        profileImageUrl: info.profile_image_url || info.user_profile_image,
+        breweryName: resolvedBreweryName,
+        creatorName: resolvedCreatorName,
+        profileImageUrl: info.user_profile_image || info.profile_image_url,
         creatorIntroduction: info.creator_introduction,
         breweryBio: info.creator_introduction,
-        businessName: info.business_name || info.brewery_name || info.approved_brewery_name,
-        businessRegistrationNumber: info.business_registration_number || info.approved_license_number,
+        businessName: info.business_name || info.approved_brewery_name || info.brewery_name,
+        businessRegistrationNumber: resolvedBusinessNumber,
         representativeName: info.representative_name,
-        businessAddress: info.business_address || info.approved_brewery_location,
-        businessAddressDetail: info.approved_business_address_detail || null,
-        contactEmail: info.contact_email || info.user_email,
-        contactPhone: info.contact_phone || info.approved_phone_number || info.user_phone_number,
+        businessAddress: resolvedBusinessAddress,
+        businessAddressDetail: resolvedBusinessAddressDetail,
+        contactEmail: info.user_email || info.contact_email,
+        contactPhone: resolvedContactPhone,
         bankName: info.bank_name,
         accountNumber: info.account_number,
         accountHolder: info.account_holder,
-        phoneVerified: info.phone_verified,
+        phoneVerified: resolvedPhoneVerified,
         accountVerified: info.account_verified,
         businessType: info.business_type,
         businessCategory: info.business_category,
         businessItem: info.business_item,
         taxEmail: info.tax_email,
         identityDocumentUrl: info.identity_document_url,
-        businessRegistrationFileUrl: info.business_registration_file_url || info.approved_document_url,
-        businessLicense: info.approved_document_url
-          ? {
-              documentUrl: info.approved_document_url,
-              documentKey: info.approved_document_key,
-              originalName: info.approved_document_original_name,
-              mimeType: info.approved_document_mime_type,
-              fileSize: info.approved_document_file_size === null || info.approved_document_file_size === undefined
-                ? null
-                : Number(info.approved_document_file_size),
-            }
-          : null,
+        businessRegistrationFileUrl: resolvedBusinessRegistrationFileUrl,
+        businessLicense,
         applicationStatus: info.approved_application_status || null,
       },
-      missingFields: [
-        ...(!(info.creator_name || info.brewery_name || info.approved_brewery_name || info.user_nickname) ? ['creatorName'] : []),
-        ...(!(info.contact_phone || info.approved_phone_number || info.user_phone_number) ? ['phoneNumber'] : []),
-        ...(!(info.business_registration_number || info.approved_license_number) ? ['businessNumber'] : []),
-        ...(!(info.business_address || info.approved_brewery_location) ? ['businessAddress'] : []),
-        ...(!info.representative_name ? ['representativeName'] : []),
-        ...(!(info.business_registration_file_url || info.approved_document_url) ? ['businessLicense'] : []),
-        ...(!info.creator_introduction ? ['creatorIntroduction'] : []),
-      ],
+      missingFields,
       message: '양조장 정보를 불러왔습니다. 본인 인증과 입금 계좌는 직접 입력해주세요.',
     });
   } catch (error) {
