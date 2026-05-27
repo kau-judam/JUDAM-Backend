@@ -482,9 +482,27 @@ const updateFundingReviewAiTasteProfile = async ({
   return updateAiTasteProfile(aiPayload);
 };
 
+const normalizePublicImageUrl = (imageUrl) => {
+  const trimmed = toTrimmedString(imageUrl);
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^(file|content):\/\//i.test(trimmed)) {
+    return null;
+  }
+
+  return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+};
+
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
-  const parsedImageUrls = uniqueValues(parseJsonArrayField(imageUrlsValue)).slice(0, 5);
-  const normalizedThumbnailUrl = toTrimmedString(thumbnailUrl) || parsedImageUrls[0] || null;
+  const parsedImageUrls = uniqueValues(
+    parseJsonArrayField(imageUrlsValue)
+      .map(normalizePublicImageUrl)
+      .filter(Boolean)
+  ).slice(0, 5);
+  const normalizedThumbnailUrl = normalizePublicImageUrl(thumbnailUrl) || parsedImageUrls[0] || null;
   const imageUrls = parsedImageUrls.filter((imageUrl) => imageUrl !== normalizedThumbnailUrl);
   const allImageUrls = uniqueValues([normalizedThumbnailUrl, ...imageUrls].filter(Boolean)).slice(0, 5);
 
