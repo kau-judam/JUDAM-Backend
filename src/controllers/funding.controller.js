@@ -187,6 +187,40 @@ const parseOriginalTextField = (value, fallback = null) => {
   return Array.isArray(parsed) && parsed.length === 0 ? fallback : parsed;
 };
 
+const selectProjectPolicyText = (refundPolicyValue, exchangePolicyValue) => {
+  const refundPolicy = parseOriginalTextField(refundPolicyValue);
+  const exchangePolicy = parseOriginalTextField(exchangePolicyValue);
+
+  if (refundPolicy === null || refundPolicy === undefined || refundPolicy === '') {
+    return exchangePolicy ?? null;
+  }
+
+  if (exchangePolicy === null || exchangePolicy === undefined || exchangePolicy === '') {
+    return refundPolicy;
+  }
+
+  if (
+    typeof refundPolicy === 'string' &&
+    typeof exchangePolicy === 'string' &&
+    refundPolicy !== exchangePolicy
+  ) {
+    const trimmedRefundPolicy = refundPolicy.trim();
+    const trimmedExchangePolicy = exchangePolicy.trim();
+
+    if (trimmedRefundPolicy && trimmedExchangePolicy) {
+      if (trimmedRefundPolicy.includes(trimmedExchangePolicy)) {
+        return exchangePolicy;
+      }
+
+      if (trimmedExchangePolicy.includes(trimmedRefundPolicy)) {
+        return refundPolicy;
+      }
+    }
+  }
+
+  return refundPolicy;
+};
+
 const getUserId = (req) => {
   const userId = Number(req.user?.userId || req.user?.id);
   return Number.isInteger(userId) && userId > 0 ? userId : null;
@@ -848,7 +882,7 @@ const buildFundingDraftPayload = (draft, documents = []) => {
   const schedulePlan = parseOriginalTextField(draft.schedule_plan);
   const businessNumber = draft.business_registration_number || draft.license_number || null;
   const tasteProfile = buildTasteProfileResponse(draft);
-  const projectPolicy = parseOriginalTextField(draft.refund_policy || draft.exchange_policy);
+  const projectPolicy = selectProjectPolicyText(draft.refund_policy, draft.exchange_policy);
 
   return {
     draftId: Number(draft.draft_id),
@@ -915,6 +949,7 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       notice: draft.adult_verification_notice || draft.risk_notice || null,
       policy: projectPolicy,
       refundPolicy: projectPolicy,
+      exchangePolicy: projectPolicy,
       adultOnly: draft.adult_only ?? null,
       termsAgreed: draft.all_required_terms_agreed ?? null,
       privacyAgreed: draft.privacy_agreed ?? null,
@@ -1106,6 +1141,13 @@ const getPayloadCandidate = (body, keys, sections = FUNDING_DRAFT_PAYLOAD_SECTIO
 
   return { exists: false, value: undefined };
 };
+
+const getExplicitProjectPolicyCandidate = (body) =>
+  getPayloadCandidate(
+    body,
+    ['policy', 'projectPolicy', 'project_policy'],
+    ['plan', 'notices', 'legalInfo']
+  );
 
 const normalizeDraftTextValue = (value) => {
   if (value === undefined) return undefined;
@@ -1337,8 +1379,16 @@ const buildFundingDraftPatchFromPayload = (bodyPayload = {}, currentDraft = {}) 
   addFromPayload('video_url', ['videoUrl', 'video_url'], ['plan'], normalizeDraftTextValue, 78);
   addFromPayload('budget_plan', ['budgetPlan', 'budget_plan', 'projectBudget'], ['plan'], normalizeDraftOriginalTextValue, 78);
   addFromPayload('schedule_plan', ['schedulePlan', 'schedule_plan', 'projectSchedule'], ['plan'], normalizeDraftOriginalTextValue, 78);
-  addFromPayload('refund_policy', ['policy', 'projectPolicy', 'refundPolicy', 'refund_policy'], ['plan', 'notices'], normalizeDraftOriginalTextValue, 78);
-  addFromPayload('exchange_policy', ['policy', 'projectPolicy', 'exchangePolicy', 'exchange_policy'], ['plan', 'notices'], normalizeDraftOriginalTextValue, 78);
+
+  const explicitProjectPolicyCandidate = getExplicitProjectPolicyCandidate(bodyPayload);
+  if (explicitProjectPolicyCandidate.exists) {
+    const normalizedProjectPolicy = normalizeDraftOriginalTextValue(explicitProjectPolicyCandidate.value);
+    addAssignment('refund_policy', normalizedProjectPolicy, 78);
+    addAssignment('exchange_policy', normalizedProjectPolicy, 78);
+  } else {
+    addFromPayload('refund_policy', ['refundPolicy', 'refund_policy'], ['plan', 'notices'], normalizeDraftOriginalTextValue, 78);
+    addFromPayload('exchange_policy', ['exchangePolicy', 'exchange_policy'], ['plan', 'notices'], normalizeDraftOriginalTextValue, 78);
+  }
 
   addFromPayload('brewery_name', ['breweryName', 'brewery_name'], ['breweryInfo'], normalizeDraftTextValue, 85);
   addFromPayload('creator_name', ['creatorName', 'creator_name'], ['breweryInfo'], normalizeDraftTextValue, 85);
@@ -2518,7 +2568,7 @@ const updateFundingDraft = async (req, res) => {
         tags: parseJsonField(draft.tags),
         budgetPlan: parseOriginalTextField(draft.budget_plan),
         schedulePlan: parseOriginalTextField(draft.schedule_plan),
-        policy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
+        policy: selectProjectPolicyText(draft.refund_policy, draft.exchange_policy),
       },
       message: '임시저장 프로젝트가 수정되었습니다.',
     });
@@ -3246,6 +3296,7 @@ const savePlan = async (req, res) => {
 
     const draft = result.rows[0];
     await syncFundingProjectFieldsFromDraft(draft.draft_id);
+    const projectPolicy = selectProjectPolicyText(draft.refund_policy, draft.exchange_policy);
 
     return res.status(200).json({
       draftId: draft.draft_id,
@@ -3257,8 +3308,8 @@ const savePlan = async (req, res) => {
         projectBudget: parseOriginalTextField(draft.budget_plan),
         schedulePlan: parseOriginalTextField(draft.schedule_plan),
         projectSchedule: parseOriginalTextField(draft.schedule_plan),
-        policy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
-        projectPolicy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
+        policy: projectPolicy,
+        projectPolicy,
         ...PLAN_GUIDES,
       },
       progressRate: draft.progress_rate,
@@ -4221,9 +4272,12 @@ const saveNotices = async (req, res) => {
     adultVerificationNotice,
     riskNotice,
   } = bodyPayload;
-  const normalizedPolicy = policy ?? projectPolicy;
-  const normalizedRefundPolicy = refundPolicy ?? normalizedPolicy;
-  const normalizedExchangePolicy = exchangePolicy ?? normalizedPolicy;
+  const explicitProjectPolicyCandidate = getExplicitProjectPolicyCandidate(bodyPayload);
+  const normalizedPolicy = explicitProjectPolicyCandidate.exists
+    ? explicitProjectPolicyCandidate.value
+    : undefined;
+  const normalizedRefundPolicy = normalizedPolicy ?? refundPolicy;
+  const normalizedExchangePolicy = normalizedPolicy ?? exchangePolicy;
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
@@ -4284,14 +4338,15 @@ const saveNotices = async (req, res) => {
     }
 
     const draft = result.rows[0];
+    const responseProjectPolicy = selectProjectPolicyText(draft.refund_policy, draft.exchange_policy);
 
     return res.status(200).json({
       draftId: draft.draft_id,
       section: 'NOTICES',
-      policy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
-      projectPolicy: parseOriginalTextField(draft.refund_policy || draft.exchange_policy),
-      refundPolicy: parseOriginalTextField(draft.refund_policy),
-      exchangePolicy: parseOriginalTextField(draft.exchange_policy),
+      policy: responseProjectPolicy,
+      projectPolicy: responseProjectPolicy,
+      refundPolicy: responseProjectPolicy,
+      exchangePolicy: responseProjectPolicy,
       adultVerificationNotice: draft.adult_verification_notice,
       riskNotice: draft.risk_notice,
       progressRate: draft.progress_rate,
@@ -5713,9 +5768,9 @@ const getFundingDetail = async (req, res) => {
         fp.bottle_size,
         fp.created_at,
         fd.draft_id,
-        fd.short_title,
-        fd.main_ingredient,
-        fd.sub_ingredients,
+        COALESCE(NULLIF(fd.short_title, ''), NULLIF(fp.short_title, '')) AS short_title,
+        COALESCE(NULLIF(fd.main_ingredient, ''), NULLIF(r.main_ingredient, '')) AS main_ingredient,
+        COALESCE(NULLIF(fd.sub_ingredients, ''), NULLIF(r.ai_sub_ingredient, '')) AS sub_ingredients,
         fd.tags,
         fd.sweetness,
         fd.acidity,
@@ -5727,16 +5782,16 @@ const getFundingDetail = async (req, res) => {
         fd.raw_materials,
         fd.introduction,
         fd.video_url,
-        fd.budget_plan,
-        fd.schedule_plan,
-        fd.refund_policy,
-        fd.exchange_policy,
+        COALESCE(NULLIF(fd.budget_plan, ''), NULLIF(fp.budget_plan, '')) AS budget_plan,
+        COALESCE(NULLIF(fd.schedule_plan, ''), NULLIF(fp.schedule_plan, '')) AS schedule_plan,
+        COALESCE(NULLIF(fd.refund_policy, ''), NULLIF(fp.refund_policy, '')) AS refund_policy,
+        COALESCE(NULLIF(fd.exchange_policy, ''), NULLIF(fp.exchange_policy, '')) AS exchange_policy,
         fd.adult_verification_notice,
         fd.risk_notice,
         fd.brewery_name AS draft_brewery_name,
         fd.creator_name,
         fd.profile_image_url,
-        fd.creator_introduction,
+        COALESCE(NULLIF(fd.creator_introduction, ''), NULLIF(fp.creator_introduction, '')) AS creator_introduction,
         fd.representative_name,
         COALESCE(NULLIF(fd.business_registration_number, ''), ba.license_number) AS business_registration_number,
         COALESCE(NULLIF(fd.business_address, ''), ba.location) AS business_address,
@@ -5918,9 +5973,7 @@ const getFundingDetail = async (req, res) => {
         : 0;
     const budgetPlan = parseOriginalTextField(funding.budget_plan);
     const schedulePlan = parseOriginalTextField(funding.schedule_plan);
-    const refundPolicy = parseOriginalTextField(funding.refund_policy);
-    const exchangePolicy = parseOriginalTextField(funding.exchange_policy);
-    const projectPolicy = refundPolicy ?? exchangePolicy;
+    const projectPolicy = selectProjectPolicyText(funding.refund_policy, funding.exchange_policy);
     const tasteProfile = taste
       ? buildTasteProfileResponse({
           ...taste,
@@ -5937,6 +5990,8 @@ const getFundingDetail = async (req, res) => {
       shortTitle: funding.short_title,
       mainIngredient,
       primaryIngredient: mainIngredient,
+      mainIngredientLabel: '메인 재료',
+      primaryIngredientLabel: '메인 재료',
       subIngredient: subIngredients[0] || null,
       subIngredients,
       ingredients,
@@ -5985,8 +6040,8 @@ const getFundingDetail = async (req, res) => {
         businessAddressDetail: funding.business_address_detail,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
         policy: projectPolicy,
-        refundPolicy,
-        exchangePolicy,
+        refundPolicy: projectPolicy,
+        exchangePolicy: projectPolicy,
       },
       plan: {
         introduction: funding.introduction,
@@ -6031,8 +6086,8 @@ const getFundingDetail = async (req, res) => {
         businessRegistrationFileUrl: funding.business_registration_file_url,
       },
       notices: {
-        refundPolicy,
-        exchangePolicy,
+        refundPolicy: projectPolicy,
+        exchangePolicy: projectPolicy,
         adultVerificationNotice: funding.adult_verification_notice,
         riskNotice: funding.risk_notice,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
@@ -6089,12 +6144,12 @@ const getFundingIntro = async (req, res) => {
         COALESCE(NULLIF(fd.image_urls::text, '[]'), NULLIF(fp.image_urls::text, '[]')) AS image_urls,
         fd.introduction AS draft_introduction,
         fd.video_url,
-        fd.main_ingredient,
-        fd.sub_ingredients,
-        fd.budget_plan,
-        fd.schedule_plan,
-        fd.refund_policy,
-        fd.exchange_policy,
+        COALESCE(NULLIF(fd.main_ingredient, ''), NULLIF(r.main_ingredient, '')) AS main_ingredient,
+        COALESCE(NULLIF(fd.sub_ingredients, ''), NULLIF(r.ai_sub_ingredient, '')) AS sub_ingredients,
+        COALESCE(NULLIF(fd.budget_plan, ''), NULLIF(fp.budget_plan, '')) AS budget_plan,
+        COALESCE(NULLIF(fd.schedule_plan, ''), NULLIF(fp.schedule_plan, '')) AS schedule_plan,
+        COALESCE(NULLIF(fd.refund_policy, ''), NULLIF(fp.refund_policy, '')) AS refund_policy,
+        COALESCE(NULLIF(fd.exchange_policy, ''), NULLIF(fp.exchange_policy, '')) AS exchange_policy,
         r.content AS recipe_content,
         r.concept,
         r.main_ingredient AS recipe_main_ingredient,
@@ -6137,9 +6192,7 @@ const getFundingIntro = async (req, res) => {
     const imageFields = buildImageFields(funding.thumbnail_url, funding.image_urls);
     const budgetPlan = parseOriginalTextField(funding.budget_plan);
     const schedulePlan = parseOriginalTextField(funding.schedule_plan);
-    const projectPolicy =
-      parseOriginalTextField(funding.refund_policy)
-      ?? parseOriginalTextField(funding.exchange_policy);
+    const projectPolicy = selectProjectPolicyText(funding.refund_policy, funding.exchange_policy);
 
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
@@ -6148,6 +6201,8 @@ const getFundingIntro = async (req, res) => {
       story: funding.description || funding.recipe_content || funding.concept || '',
       mainIngredient,
       primaryIngredient: mainIngredient,
+      mainIngredientLabel: '메인 재료',
+      primaryIngredientLabel: '메인 재료',
       subIngredient: subIngredients[0] || null,
       subIngredients,
       ingredients,
