@@ -1,12 +1,44 @@
 const axios = require('axios');
 const pool = require('../config/db');
 
+const normalizeNumericOrderId = (orderId) => {
+  const normalized = String(orderId || '').trim().replace(/^order_/i, '');
+  const numericOrderId = Number(normalized);
+
+  return Number.isInteger(numericOrderId) && numericOrderId > 0 ? numericOrderId : null;
+};
+
+const hasTableColumn = async (client, tableName, columnName) => {
+  const { rows } = await client.query(
+    `
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = $1
+      AND column_name = $2
+    LIMIT 1
+    `,
+    [tableName, columnName]
+  );
+
+  return rows.length > 0;
+};
+
 exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
   const secretKey = process.env.TOSS_SECRET_KEY;
+  const numericOrderId = normalizeNumericOrderId(orderId);
+  const tossOrderId = String(orderId || '').trim();
+  const numericAmount = Number(amount);
 
   if (!secretKey) {
-    const error = new Error('TOSS_SECRET_KEY가 설정되지 않았습니다.');
+    const error = new Error('TOSS_SECRET_KEY가 설정되어 있지 않습니다.');
     error.status = 500;
+    throw error;
+  }
+
+  if (!paymentKey || !numericOrderId || !Number.isFinite(numericAmount) || numericAmount <= 0) {
+    const error = new Error('결제 승인 요청값이 올바르지 않습니다.');
+    error.status = 400;
     throw error;
   }
 
@@ -24,8 +56,9 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
         order_status
       FROM orders
       WHERE order_id = $1
+      FOR UPDATE
       `,
-      [Number(orderId)]
+      [numericOrderId]
     );
 
     if (orderResult.rows.length === 0) {
@@ -42,19 +75,13 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       throw error;
     }
 
-    if (Number(order.total_amount) !== Number(amount)) {
+    if (Number(order.total_amount) !== numericAmount) {
       const error = new Error('주문 금액과 결제 승인 금액이 일치하지 않습니다.');
       error.status = 400;
       throw error;
     }
 
-    /**
-     * 중요:
-     * 결제 요청 단계에서는 payment_key가 아직 DB에 없음.
-     * 그래서 payment_key로 찾으면 안 되고,
-     * order_id + READY 상태로 가장 최근 결제 요청을 찾아야 함.
-     */
-    const readyPaymentResult = await client.query(
+    let readyPaymentResult = await client.query(
       `
       SELECT
         payment_id,
@@ -63,22 +90,33 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
         payment_status
       FROM payments
       WHERE order_id = $1
-      AND payment_status = 'READY'
+        AND payment_status = 'READY'
       ORDER BY created_at DESC
       LIMIT 1
       `,
-      [Number(orderId)]
+      [numericOrderId]
     );
 
     if (readyPaymentResult.rows.length === 0) {
-      const error = new Error('결제 시간이 만료되어 결제 진행 데이터가 존재하지 않습니다.');
-      error.status = 404;
-      throw error;
+      readyPaymentResult = await client.query(
+        `
+        INSERT INTO payments (
+          order_id,
+          payment_method,
+          payment_provider,
+          amount,
+          payment_status
+        )
+        VALUES ($1, NULL, 'TOSS', $2, 'READY')
+        RETURNING payment_id, order_id, amount, payment_status
+        `,
+        [numericOrderId, numericAmount]
+      );
     }
 
     const readyPayment = readyPaymentResult.rows[0];
 
-    if (Number(readyPayment.amount) !== Number(amount)) {
+    if (Number(readyPayment.amount) !== numericAmount) {
       const error = new Error('결제 요청 금액과 승인 금액이 일치하지 않습니다.');
       error.status = 400;
       throw error;
@@ -86,15 +124,11 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
 
     let tossPayment = null;
 
-    /**
-     * 로컬/Postman 테스트용:
-     * paymentKey가 test_ 로 시작하면 실제 토스 API를 호출하지 않고 mock 승인 처리.
-     */
     if (String(paymentKey).startsWith('test_')) {
       tossPayment = {
         paymentKey,
-        orderId: String(orderId),
-        totalAmount: Number(amount),
+        orderId: tossOrderId,
+        totalAmount: numericAmount,
         status: 'DONE',
         method: 'CARD',
         approvedAt: new Date().toISOString(),
@@ -107,8 +141,8 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
         'https://api.tosspayments.com/v1/payments/confirm',
         {
           paymentKey,
-          orderId: String(orderId),
-          amount: Number(amount),
+          orderId: tossOrderId,
+          amount: numericAmount,
         },
         {
           headers: {
@@ -127,43 +161,80 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       SET
         payment_status = 'PAID',
         payment_key = $1,
+        payment_provider = COALESCE(payment_provider, 'TOSS'),
+        payment_method = COALESCE($3, payment_method),
         paid_at = CURRENT_TIMESTAMP
       WHERE payment_id = $2
       RETURNING payment_id, order_id, payment_status, payment_key, amount, paid_at
       `,
-      [paymentKey, readyPayment.payment_id]
+      [paymentKey, readyPayment.payment_id, tossPayment?.method || null]
     );
 
     await client.query(
       `
       UPDATE orders
-      SET order_status = 'PAID'
+      SET
+        order_status = 'PAID',
+        updated_at = CURRENT_TIMESTAMP
       WHERE order_id = $1
       `,
-      [Number(orderId)]
+      [numericOrderId]
     );
 
-    await client.query(
-      `
-      UPDATE funding_projects
-      SET current_amount = current_amount + $1
-      WHERE funding_id = $2
-      `,
-      [Number(amount), order.funding_id]
+    const hasSupporterCount = await hasTableColumn(client, 'funding_projects', 'supporter_count');
+    const fundingResult = await client.query(
+      hasSupporterCount
+        ? `
+          UPDATE funding_projects
+          SET
+            current_amount = current_amount + $1,
+            supporter_count = COALESCE(supporter_count, 0) + 1,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE funding_id = $2
+          RETURNING funding_id, current_amount, supporter_count
+          `
+        : `
+          UPDATE funding_projects
+          SET
+            current_amount = current_amount + $1,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE funding_id = $2
+          RETURNING funding_id, current_amount, NULL::int AS supporter_count
+          `,
+      [numericAmount, order.funding_id]
     );
 
     await client.query('COMMIT');
 
+    const payment = paymentResult.rows[0];
+    const funding = fundingResult.rows[0] || {};
+
     return {
+      orderId: String(order.order_id),
+      numericOrderId: Number(order.order_id),
+      fundingId: order.funding_id === null || order.funding_id === undefined
+        ? null
+        : String(order.funding_id),
+      numericFundingId: order.funding_id === null || order.funding_id === undefined
+        ? null
+        : Number(order.funding_id),
+      paymentStatus: payment.payment_status,
+      orderStatus: 'PAID',
+      amount: Number(payment.amount),
+      currentAmount: Number(funding.current_amount || 0),
+      supporterCount: funding.supporter_count === null || funding.supporter_count === undefined
+        ? null
+        : Number(funding.supporter_count),
+      paymentKey: payment.payment_key,
+      approvedAt: payment.paid_at,
       tossPayment,
-      payment: paymentResult.rows[0],
+      payment,
       message: '토스 결제 승인 및 주문 결제 처리가 완료되었습니다.',
     };
   } catch (error) {
     await client.query('ROLLBACK');
 
     const tossError = error.response?.data;
-
     const customError = new Error(
       tossError?.message || error.message || '토스 결제 승인 중 오류가 발생했습니다.'
     );
