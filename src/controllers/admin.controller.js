@@ -119,8 +119,13 @@ const approveFundingDraft = async (req, res) => {
             shipping_fee = COALESCE($12, shipping_fee),
             volume = COALESCE($13, volume),
             alcohol_percentage = COALESCE($14, alcohol_percentage),
+            budget_plan = COALESCE($15, budget_plan),
+            schedule_plan = COALESCE($16, schedule_plan),
+            refund_policy = COALESCE($17, refund_policy),
+            exchange_policy = COALESCE($18, exchange_policy),
+            creator_introduction = COALESCE($19, creator_introduction),
             updated_at = CURRENT_TIMESTAMP
-          WHERE funding_id = $15
+          WHERE funding_id = $20
           RETURNING
             funding_id,
             title,
@@ -150,6 +155,11 @@ const approveFundingDraft = async (req, res) => {
             draft.alcohol_percentage !== null && draft.alcohol_percentage !== undefined
               ? Number(draft.alcohol_percentage)
               : null,
+            draft.budget_plan || null,
+            draft.schedule_plan || null,
+            draft.refund_policy || null,
+            draft.exchange_policy || null,
+            draft.creator_introduction || null,
             Number(draft.funding_id),
           ]
         );
@@ -179,11 +189,16 @@ const approveFundingDraft = async (req, res) => {
             price_per_bottle,
             shipping_fee,
             volume,
-            alcohol_percentage
+            alcohol_percentage,
+            budget_plan,
+            schedule_plan,
+            refund_policy,
+            exchange_policy,
+            creator_introduction
           )
           VALUES (
             $1, $2, $3, $4, $5, 0, $6, $7, 'ONGOING', $8, $9, $10, $11,
-            $12, $13, $14, $15, $16
+            $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
           )
           RETURNING
             funding_id,
@@ -212,6 +227,11 @@ const approveFundingDraft = async (req, res) => {
             draft.alcohol_percentage !== null && draft.alcohol_percentage !== undefined
               ? Number(draft.alcohol_percentage)
               : null,
+            draft.budget_plan || null,
+            draft.schedule_plan || null,
+            draft.refund_policy || null,
+            draft.exchange_policy || null,
+            draft.creator_introduction || null,
           ]
         );
 
