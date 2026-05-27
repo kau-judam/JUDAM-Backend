@@ -7720,12 +7720,18 @@ const createFundingOrder = async (req, res) => {
 
 
 
-  const bottleCount = Number(quantity || optionId);
+  const numericOptionId =
+    optionId === null || optionId === undefined || optionId === ''
+      ? null
+      : Number(optionId);
+  const bottleCount = Number(quantity || 1);
 
   if (
     !bottleCount ||
     !Number.isInteger(bottleCount) ||
     bottleCount <= 0 ||
+    (numericOptionId !== null &&
+      (!Number.isInteger(numericOptionId) || numericOptionId <= 0)) ||
     !recipientName ||
     !recipientPhone ||
     !shippingAddress
@@ -7788,15 +7794,40 @@ const createFundingOrder = async (req, res) => {
     }
 
     const funding = fundingResult.rows[0];
+    let supportOption = null;
 
-    if (!funding.price_per_bottle) {
+    if (numericOptionId !== null) {
+      const optionResult = await pool.query(
+        `
+        SELECT option_id, funding_id, name, price, remaining_stock, stock
+        FROM funding_support_options
+        WHERE option_id = $1
+          AND funding_id = $2
+        `,
+        [numericOptionId, Number(fundingId)]
+      );
+
+      if (optionResult.rows.length === 0) {
+        return res.status(404).json({
+          status: 404,
+          message: '선택한 후원 옵션을 찾을 수 없습니다.',
+        });
+      }
+
+      supportOption = optionResult.rows[0];
+    }
+
+    const pricePerBottle = Number(
+      supportOption?.price ?? funding.price_per_bottle
+    );
+
+    if (!Number.isFinite(pricePerBottle) || pricePerBottle <= 0) {
       return res.status(400).json({
         status: 400,
-        message: '프로젝트 1병 가격이 설정되어 있지 않습니다.',
+        message: '후원 옵션 가격이 설정되어 있지 않습니다.',
       });
     }
 
-    const pricePerBottle = Number(funding.price_per_bottle);
     const shippingFee =
       funding.shipping_fee !== null && funding.shipping_fee !== undefined
         ? Number(funding.shipping_fee)
@@ -7870,7 +7901,7 @@ const createFundingOrder = async (req, res) => {
       [
         userId,
         Number(fundingId),
-        Number(optionId || bottleCount),
+        numericOptionId,
         bottleCount,
         pricePerBottle,
         shippingFee,
@@ -7917,8 +7948,10 @@ const createFundingOrder = async (req, res) => {
       optionId: order.option_id,
       quantity: order.quantity,
       pricePerBottle: order.price_per_bottle,
+      supportOptionPrice: order.price_per_bottle,
       shippingFee: order.shipping_fee,
       donationAmount: order.donation_amount,
+      additionalSupportAmount: order.donation_amount,
       amount: order.total_amount,
       totalAmount: order.total_amount,
       orderName,
@@ -7949,8 +7982,10 @@ const createFundingOrder = async (req, res) => {
       optionId: order.option_id,
       quantity: order.quantity,
       pricePerBottle: order.price_per_bottle,
+      supportOptionPrice: order.price_per_bottle,
       shippingFee: order.shipping_fee,
       donationAmount: order.donation_amount,
+      additionalSupportAmount: order.donation_amount,
       totalAmount: order.total_amount,
       orderStatus: order.order_status,
       recipientName: order.recipient_name,
