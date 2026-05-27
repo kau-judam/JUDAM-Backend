@@ -7771,6 +7771,7 @@ const createFundingOrder = async (req, res) => {
       `
       SELECT
         funding_id,
+        title,
         price_per_bottle,
         shipping_fee
       FROM funding_projects
@@ -7805,6 +7806,16 @@ const createFundingOrder = async (req, res) => {
 
     const userId = requireUserId(req, res);
     if (!userId) return;
+
+    const userResult = await pool.query(
+      `
+      SELECT user_id, nickname, email, phone_number
+      FROM users
+      WHERE user_id = $1
+      `,
+      [userId]
+    );
+    const user = userResult.rows[0] || {};
 
     const orderResult = await pool.query(
       `
@@ -7879,8 +7890,60 @@ const createFundingOrder = async (req, res) => {
     );
 
     const order = orderResult.rows[0];
+    const paymentResult = await pool.query(
+      `
+      INSERT INTO payments (
+        order_id,
+        payment_method,
+        payment_provider,
+        amount,
+        payment_status
+      )
+      VALUES ($1, NULL, 'TOSS', $2, 'READY')
+      RETURNING payment_id, payment_status, amount, created_at
+      `,
+      [Number(order.order_id), Number(order.total_amount)]
+    );
+    const payment = paymentResult.rows[0];
+    const orderName = `${funding.title || '펀딩 후원'} ${bottleCount}병`;
+    const customerName = user.nickname || recipientName;
+    const customerEmail = user.email || supporterEmail || null;
+    const customerMobilePhone = user.phone_number || recipientPhone;
+    const responseData = {
+      orderId: String(order.order_id),
+      numericOrderId: Number(order.order_id),
+      fundingId: String(order.funding_id),
+      numericFundingId: Number(order.funding_id),
+      optionId: order.option_id,
+      quantity: order.quantity,
+      pricePerBottle: order.price_per_bottle,
+      shippingFee: order.shipping_fee,
+      donationAmount: order.donation_amount,
+      amount: order.total_amount,
+      totalAmount: order.total_amount,
+      orderName,
+      customerName,
+      customerEmail,
+      customerMobilePhone,
+      orderStatus: order.order_status,
+      paymentId: payment.payment_id,
+      paymentStatus: payment.payment_status,
+      recipientName: order.recipient_name,
+      recipientPhone: order.recipient_phone,
+      shippingAddress: order.shipping_address,
+      shippingDetailAddress: order.shipping_detail_address,
+      supporterEmail: order.supporter_email,
+      supportMessage: order.support_message,
+      postalCode: order.postal_code,
+      adultVerified: order.adult_verified,
+      noticeAgreed: order.notice_agreed,
+      privacyAgreed: order.privacy_agreed,
+      createdAt: order.created_at,
+    };
 
     return res.status(201).json({
+      status: 201,
+      data: responseData,
       orderId: order.order_id,
       fundingId: order.funding_id,
       optionId: order.option_id,
@@ -7901,7 +7964,7 @@ const createFundingOrder = async (req, res) => {
       noticeAgreed: order.notice_agreed,
       createdAt: order.created_at,
       privacyAgreed: order.privacy_agreed,
-      message: '후원 주문이 생성되었습니다.',
+      message: '후원 주문 생성 성공',
     });
   } catch (error) {
     console.error(error);
