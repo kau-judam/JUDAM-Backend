@@ -515,7 +515,7 @@ const normalizeFundingImageUrlsInput = (value) => {
         .map(normalizeItem)
         .map(normalizePublicImageUrl)
         .filter(Boolean)
-    ).slice(0, 5);
+    );
   }
 
   if (typeof value === 'string') {
@@ -528,7 +528,7 @@ const normalizeFundingImageUrlsInput = (value) => {
           .split(',')
           .map((imageUrl) => normalizePublicImageUrl(imageUrl))
           .filter(Boolean)
-      ).slice(0, 5);
+      );
     }
   }
 
@@ -538,12 +538,13 @@ const normalizeFundingImageUrlsInput = (value) => {
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
   const parsedImageUrls = normalizeFundingImageUrlsInput(imageUrlsValue);
   const normalizedThumbnailUrl = normalizePublicImageUrl(thumbnailUrl) || parsedImageUrls[0] || null;
-  const imageUrls = parsedImageUrls.filter((imageUrl) => imageUrl !== normalizedThumbnailUrl);
-  const allImageUrls = uniqueValues([normalizedThumbnailUrl, ...imageUrls].filter(Boolean)).slice(0, 5);
+  const additionalImageUrls = parsedImageUrls.filter((imageUrl) => imageUrl !== normalizedThumbnailUrl);
+  const allImageUrls = uniqueValues([normalizedThumbnailUrl, ...additionalImageUrls].filter(Boolean)).slice(0, 5);
 
   return {
     thumbnailUrl: normalizedThumbnailUrl,
-    imageUrls,
+    imageUrls: allImageUrls,
+    additionalImageUrls,
     allImageUrls,
   };
 };
@@ -1183,7 +1184,7 @@ const buildFundingDraftPatchFromPayload = (bodyPayload = {}, currentDraft = {}) 
   );
 
   if (imageCandidate.exists) {
-    const normalizedImageUrls = normalizeFundingImageUrlsInput(imageCandidate.value);
+    const normalizedImageUrls = normalizeFundingImageUrlsInput(imageCandidate.value).slice(0, 5);
     addAssignment('image_urls', normalizeJsonStorageValue(normalizedImageUrls, []), 33);
     addAssignment(
       'thumbnail_url',
@@ -1887,7 +1888,7 @@ const syncFundingProjectFieldsFromDraft = async (draftId) => {
       WHERE funding_id = $2
       `,
       [
-        normalizeJsonStorageValue(draft.image_urls, []),
+        normalizeJsonStorageValue(normalizeFundingImageUrlsInput(draft.image_urls).slice(0, 5), []),
         Number(draft.funding_id),
       ]
     );
@@ -2562,37 +2563,37 @@ const saveBasicInfo = async (req, res) => {
     });
   }
 
-  if (subIngredients && !Array.isArray(subIngredients)) {
+  if (subIngredients && !Array.isArray(subIngredients) && typeof subIngredients !== 'string') {
     return res.status(400).json({
       status: 400,
       message: '서브 재료 입력값이 올바르지 않습니다.',
     });
   }
 
-  if (imageUrls && !Array.isArray(imageUrls)) {
+  if (imageUrls && !Array.isArray(imageUrls) && typeof imageUrls !== 'string') {
     return res.status(400).json({
       status: 400,
       message: '대표 이미지 목록 입력값이 올바르지 않습니다.',
     });
   }
 
-  if (imageUrls && imageUrls.length > 5) {
+  if (imageUrls && normalizeFundingImageUrlsInput(imageUrls).length > 5) {
     return res.status(400).json({
       status: 400,
       message: '대표 이미지는 최대 5개까지 등록할 수 있습니다.',
     });
   }
 
-  if (tags && !Array.isArray(tags)) {
+  if (tags && !Array.isArray(tags) && typeof tags !== 'string') {
     return res.status(400).json({
       status: 400,
       message: '검색 태그 입력값이 올바르지 않습니다.',
     });
   }
 
-  const normalizedImageUrls = imageUrls || [];
+  const normalizedImageUrls = normalizeFundingImageUrlsInput(imageUrls || []);
   const normalizedThumbnailUrl =
-    normalizedImageUrls.length > 0 ? normalizedImageUrls[0] : thumbnailUrl || null;
+    normalizePublicImageUrl(thumbnailUrl) || normalizedImageUrls[0] || null;
 
   try {
     if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
@@ -2634,12 +2635,12 @@ const saveBasicInfo = async (req, res) => {
         shortTitle || null,
         category,
         mainIngredient,
-        normalizeJsonStorageValue(subIngredients || [], []),
+        normalizeJsonStorageValue(parseFundingListField(subIngredients || []), []),
         Number(alcoholPercentage),
         summary,
         normalizedThumbnailUrl,
         normalizeJsonStorageValue(normalizedImageUrls, []),
-        normalizeJsonStorageValue(tags || [], []),
+        normalizeJsonStorageValue(parseFundingListField(tags || []), []),
         Number(draftId),
       ]
     );
@@ -3664,6 +3665,8 @@ const uploadFundingDraftFile = async (req, res) => {
   const file = req.file;
 
   const allowedFileTypes = [
+    'PROJECT_IMAGE',
+    'FUNDING_IMAGE',
     'PROFILE_IMAGE',
     'IDENTITY_DOCUMENT',
     'BUSINESS_REGISTRATION',
@@ -3708,6 +3711,72 @@ const uploadFundingDraftFile = async (req, res) => {
     if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
 
     const fileUrl = await storeUploadedFile(file, `funding-drafts/${draftId}`, draftId);
+
+    if (fileType === 'PROJECT_IMAGE' || fileType === 'FUNDING_IMAGE') {
+      const currentResult = await pool.query(
+        `
+        SELECT thumbnail_url, image_urls
+        FROM funding_drafts
+        WHERE draft_id = $1
+        `,
+        [Number(draftId)]
+      );
+
+      const currentDraft = currentResult.rows[0];
+
+      if (!currentDraft) {
+        return res.status(404).json({
+          status: 404,
+          message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+        });
+      }
+
+      const currentImageUrls = normalizeFundingImageUrlsInput(currentDraft.image_urls);
+
+      if (currentImageUrls.length >= 5) {
+        return res.status(400).json({
+          status: 400,
+          message: '????대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
+        });
+      }
+
+      const nextImageFields = buildImageFields(
+        currentDraft.thumbnail_url || fileUrl,
+        [...currentImageUrls, fileUrl]
+      );
+
+      const result = await pool.query(
+        `
+        UPDATE funding_drafts
+        SET
+          thumbnail_url = $1,
+          image_urls = $2,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE draft_id = $3
+        RETURNING draft_id, thumbnail_url, image_urls, updated_at
+        `,
+        [
+          nextImageFields.thumbnailUrl,
+          normalizeJsonStorageValue(nextImageFields.allImageUrls, []),
+          Number(draftId),
+        ]
+      );
+
+      const draft = result.rows[0];
+      await syncFundingProjectFieldsFromDraft(draft.draft_id);
+
+      return res.status(201).json({
+        draftId: draft.draft_id,
+        fileType,
+        fileUrl,
+        thumbnailUrl: nextImageFields.thumbnailUrl,
+        imageUrls: nextImageFields.imageUrls,
+        allImageUrls: nextImageFields.allImageUrls,
+        images: mapFundingImageUrls(nextImageFields.allImageUrls),
+        updatedAt: draft.updated_at,
+        message: '?뚯씪???낅줈?쒕릺?덉뒿?덈떎.',
+      });
+    }
 
     const result = await pool.query(
       `
@@ -4579,7 +4648,7 @@ const submitFundingDraft = async (req, res) => {
           draft.summary || '',
           draft.category || null,
           draft.thumbnail_url || null,
-          normalizeJsonStorageValue(draft.image_urls, []),
+          normalizeJsonStorageValue(normalizeFundingImageUrlsInput(draft.image_urls).slice(0, 5), []),
           draft.expected_delivery_date || null,
           Number(draft.price_per_bottle || 0),
           draft.shipping_fee !== null && draft.shipping_fee !== undefined
@@ -5092,23 +5161,29 @@ const updateFundingProject = async (req, res) => {
     });
   }
 
-  if (imageUrls !== undefined && !Array.isArray(imageUrls)) {
+  if (imageUrls !== undefined && !Array.isArray(imageUrls) && typeof imageUrls !== 'string') {
     return res.status(400).json({
       status: 400,
       message: '????대?吏 紐⑸줉 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
-  if (imageUrls && imageUrls.length > 5) {
+  if (imageUrls && normalizeFundingImageUrlsInput(imageUrls).length > 5) {
     return res.status(400).json({
       status: 400,
       message: '????대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
     });
   }
 
-  const normalizedImageFields = imageUrls !== undefined || thumbnailUrl !== undefined
-    ? buildImageFields(thumbnailUrl, imageUrls || [])
+  const normalizedImageFields = imageUrls !== undefined
+    ? buildImageFields(thumbnailUrl, imageUrls)
     : null;
+  const normalizedThumbnailUrl = thumbnailUrl !== undefined
+    ? normalizePublicImageUrl(thumbnailUrl)
+    : null;
+  const shouldUpdateThumbnail =
+    normalizedImageFields !== null ||
+    (thumbnailUrl !== undefined && normalizedThumbnailUrl !== null);
 
   try {
     if (!(await authorizeFundingProjectOwner(fundingId, req.user, res))) return;
@@ -5125,9 +5200,9 @@ const updateFundingProject = async (req, res) => {
         price_per_bottle = COALESCE($6, price_per_bottle),
         shipping_fee = COALESCE($7, shipping_fee),
         status = COALESCE($8, status),
-        thumbnail_url = COALESCE($9, thumbnail_url),
-        image_urls = COALESCE($10, image_urls)
-      WHERE funding_id = $11
+        thumbnail_url = CASE WHEN $9::boolean THEN $10 ELSE thumbnail_url END,
+        image_urls = CASE WHEN $11::boolean THEN $12 ELSE image_urls END
+      WHERE funding_id = $13
       RETURNING
         funding_id,
         title,
@@ -5151,7 +5226,9 @@ const updateFundingProject = async (req, res) => {
         pricePerBottle !== undefined ? Number(pricePerBottle) : null,
         shippingFee !== undefined ? Number(shippingFee) : null,
         status || null,
-        normalizedImageFields ? normalizedImageFields.thumbnailUrl : null,
+        shouldUpdateThumbnail,
+        normalizedImageFields ? normalizedImageFields.thumbnailUrl : normalizedThumbnailUrl,
+        imageUrls !== undefined,
         normalizedImageFields ? JSON.stringify(normalizedImageFields.allImageUrls) : null,
         Number(fundingId),
       ]
@@ -5286,7 +5363,7 @@ const getFundingList = async (req, res) => {
   };
   const requestedSort = typeof sort === 'string' && sort.trim()
     ? sort.trim().replace(/-/g, '_').toUpperCase()
-    : 'ID_ASC';
+    : 'LATEST';
   const normalizedSort = sortAliasMap[requestedSort] || requestedSort;
   const normalizedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
   const normalizedStatus =
@@ -5422,10 +5499,10 @@ const getFundingList = async (req, res) => {
       LEFT JOIN users requester ON requester.user_id = ${userIdParam}
     `;
     const orderBy = {
-      RECOMMENDED: 'ORDER BY match_rate DESC NULLS LAST, fp.created_at DESC',
-      POPULAR: 'ORDER BY like_counts.like_count DESC, fp.created_at DESC',
-      LATEST: 'ORDER BY fp.created_at DESC',
-      DEADLINE: 'ORDER BY CASE WHEN fp.end_date >= CURRENT_DATE THEN 0 ELSE 1 END, fp.end_date ASC, fp.created_at DESC',
+      RECOMMENDED: 'ORDER BY match_rate DESC NULLS LAST, COALESCE(like_counts.like_count, 0) DESC, fp.created_at DESC, fp.funding_id DESC',
+      POPULAR: 'ORDER BY COALESCE(like_counts.like_count, 0) DESC, fp.created_at DESC, fp.funding_id DESC',
+      LATEST: 'ORDER BY fp.created_at DESC, fp.funding_id DESC',
+      DEADLINE: 'ORDER BY CASE WHEN fp.end_date >= CURRENT_DATE THEN 0 ELSE 1 END, fp.end_date ASC NULLS LAST, fp.created_at DESC, fp.funding_id DESC',
       ID_ASC: 'ORDER BY fp.funding_id ASC',
     }[normalizedSort];
 
