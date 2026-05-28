@@ -8,6 +8,11 @@ const normalizeNumericOrderId = (orderId) => {
   return Number.isInteger(numericOrderId) && numericOrderId > 0 ? numericOrderId : null;
 };
 
+const isMockTossPaymentAllowed = () =>
+  process.env.TOSS_ALLOW_MOCK_PAYMENT === 'true'
+  || process.env.NODE_ENV === 'test'
+  || process.env.NODE_ENV === 'development';
+
 const hasTableColumn = async (client, tableName, columnName) => {
   const { rows } = await client.query(
     `
@@ -125,6 +130,12 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
     let tossPayment = null;
 
     if (String(paymentKey).startsWith('test_')) {
+      if (!isMockTossPaymentAllowed()) {
+        const error = new Error('운영 환경에서는 mock paymentKey를 사용할 수 없습니다.');
+        error.status = 400;
+        throw error;
+      }
+
       tossPayment = {
         paymentKey,
         orderId: tossOrderId,
@@ -153,6 +164,21 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       );
 
       tossPayment = tossResponse.data;
+    }
+
+    if (tossPayment?.status && tossPayment.status !== 'DONE') {
+      const error = new Error('토스 결제가 완료 상태가 아닙니다.');
+      error.status = 400;
+      throw error;
+    }
+
+    if (
+      tossPayment?.totalAmount !== undefined &&
+      Number(tossPayment.totalAmount) !== numericAmount
+    ) {
+      const error = new Error('토스 승인 금액과 주문 금액이 일치하지 않습니다.');
+      error.status = 400;
+      throw error;
     }
 
     const paymentResult = await client.query(

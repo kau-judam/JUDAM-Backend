@@ -74,9 +74,9 @@ const requestPayment = async (req, res) => {
       });
     }
 
-    const checkoutUrl = successUrl || failUrl
-      ? `toss://payments?successUrl=${encodeURIComponent(successUrl || '')}&failUrl=${encodeURIComponent(failUrl || '')}`
-      : null;
+    // Legacy READY endpoint only. The production Toss checkout is opened by the
+    // frontend SDK, and the backend finalizes payment through POST /api/payments/toss/confirm.
+    const checkoutUrl = null;
 
     const paymentResult = await pool.query(
       `
@@ -114,6 +114,12 @@ const requestPayment = async (req, res) => {
       customerMobilePhone: order.phone_number || null,
       paymentUrl: payment.payment_url,
       checkoutUrl: payment.payment_url || null,
+      callbackUrls: {
+        successUrl: successUrl || null,
+        failUrl: failUrl || null,
+      },
+      legacy: true,
+      recommendedConfirmEndpoint: '/api/payments/toss/confirm',
       createdAt: payment.created_at,
     };
 
@@ -323,6 +329,15 @@ const completePayment = async (req, res) => {
     return res.status(400).json({
       status: 400,
       message: '주문 ID가 올바르지 않습니다.',
+    });
+  }
+
+  if (process.env.ALLOW_LEGACY_PAYMENT_COMPLETE !== 'true') {
+    return res.status(410).json({
+      status: 410,
+      message: '이 결제 완료 API는 legacy/mock 용도입니다. 실제 결제 완료는 POST /api/payments/toss/confirm을 사용해주세요.',
+      legacy: true,
+      recommendedConfirmEndpoint: '/api/payments/toss/confirm',
     });
   }
 

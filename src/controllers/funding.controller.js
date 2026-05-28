@@ -2133,14 +2133,20 @@ const storeUploadedFile = async (file, folder, ownerId = 'anonymous') => {
     return null;
   }
 
+  const strictS3 = process.env.FILE_UPLOAD_STRICT_S3 === 'true';
+
   if (process.env.AWS_S3_BUCKET && process.env.AWS_REGION) {
     try {
       return await uploadFileToS3(file.buffer, file.originalname, file.mimetype, ownerId);
     } catch (error) {
-      if (process.env.FILE_UPLOAD_STRICT_S3 === 'true') {
+      if (strictS3) {
         throw error;
       }
     }
+  }
+
+  if (strictS3) {
+    throw new Error('S3 업로드 설정이 필요합니다.');
   }
 
   const base64 = file.buffer.toString('base64');
