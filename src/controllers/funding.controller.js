@@ -4999,14 +4999,17 @@ const getFundingDraftByFundingId = async (req, res) => {
 
     const documents = await getFundingDraftDocuments(draft.draft_id);
     const payload = buildFundingDraftPayload(draft, documents);
+    const responseData = {
+      ...payload,
+      draft,
+    };
 
     return res.status(200).json({
+      ...payload,
       status: 200,
+      draftStatus: payload.status,
       message: '연결된 임시저장 프로젝트 조회 성공',
-      data: {
-        ...payload,
-        draft,
-      },
+      data: responseData,
     });
   } catch (error) {
     return res.status(500).json({
