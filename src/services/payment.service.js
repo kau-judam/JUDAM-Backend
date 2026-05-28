@@ -8,6 +8,38 @@ const normalizeNumericOrderId = (orderId) => {
   return Number.isInteger(numericOrderId) && numericOrderId > 0 ? numericOrderId : null;
 };
 
+const toSafeNumber = (value, fallback = 0) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+};
+
+const calculateFundingAmountFromOrder = (order) => {
+  const paidAmount = toSafeNumber(order.total_amount);
+  const quantity = Math.max(1, toSafeNumber(order.quantity, 1));
+  const rewardAmount = Math.max(0, toSafeNumber(order.price_per_bottle) * quantity);
+  const shippingFee = Math.max(0, toSafeNumber(order.shipping_fee));
+  const donationAmount = toSafeNumber(order.donation_amount);
+  const legacyAdditionalSupportAmount = toSafeNumber(order.additional_support_amount);
+  const additionalSupportAmount = Math.max(
+    0,
+    donationAmount > 0 ? donationAmount : legacyAdditionalSupportAmount
+  );
+  const calculatedFundingAmount = rewardAmount + additionalSupportAmount;
+  const fundingAmount =
+    calculatedFundingAmount > 0
+      ? calculatedFundingAmount
+      : Math.max(0, paidAmount - shippingFee);
+
+  return {
+    paidAmount,
+    fundingAmount,
+    rewardAmount,
+    subtotalAmount: rewardAmount,
+    shippingFee,
+    additionalSupportAmount,
+  };
+};
+
 const isMockTossPaymentAllowed = () =>
   process.env.TOSS_ALLOW_MOCK_PAYMENT === 'true'
   || process.env.NODE_ENV === 'test'
@@ -58,6 +90,11 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
         order_id,
         funding_id,
         total_amount,
+        quantity,
+        price_per_bottle,
+        shipping_fee,
+        donation_amount,
+        additional_support_amount,
         order_status
       FROM orders
       WHERE order_id = $1
@@ -73,6 +110,7 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
     }
 
     const order = orderResult.rows[0];
+    const fundingAmounts = calculateFundingAmountFromOrder(order);
 
     if (order.order_status === 'PAID') {
       const error = new Error('이미 결제 완료된 주문입니다.');
@@ -227,7 +265,7 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
           WHERE funding_id = $2
           RETURNING funding_id, current_amount, NULL::int AS supporter_count
           `,
-      [numericAmount, order.funding_id]
+      [fundingAmounts.fundingAmount, order.funding_id]
     );
 
     await client.query('COMMIT');
@@ -247,6 +285,12 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       paymentStatus: payment.payment_status,
       orderStatus: 'PAID',
       amount: Number(payment.amount),
+      paidAmount: fundingAmounts.paidAmount,
+      fundingAmount: fundingAmounts.fundingAmount,
+      rewardAmount: fundingAmounts.rewardAmount,
+      subtotalAmount: fundingAmounts.subtotalAmount,
+      shippingFee: fundingAmounts.shippingFee,
+      additionalSupportAmount: fundingAmounts.additionalSupportAmount,
       currentAmount: Number(funding.current_amount || 0),
       supporterCount: funding.supporter_count === null || funding.supporter_count === undefined
         ? null
