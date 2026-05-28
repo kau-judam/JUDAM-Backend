@@ -9176,17 +9176,51 @@ const updateFundingReview = async (req, res) => {
       ]
     );
 
-    const review = await getFundingReviewById({
-      fundingId: Number(fundingId),
-      reviewId: result.rows[0].review_id,
-      userId,
-    }) || result.rows[0];
-    const aiTasteUpdate = await updateFundingReviewAiTasteProfile({
-      userId,
-      review,
-      requestBody: req.body || {},
-      isCreate: false,
-    });
+    const updatedReview = result.rows[0];
+
+    if (!updatedReview) {
+      return res.status(404).json({
+        status: 404,
+        message: '수정할 후기를 찾을 수 없습니다.',
+      });
+    }
+
+    let review = updatedReview;
+    try {
+      review = await getFundingReviewById({
+        fundingId: Number(fundingId),
+        reviewId: updatedReview.review_id,
+        userId,
+      }) || updatedReview;
+    } catch (lookupError) {
+      console.warn('Funding review lookup failed after update', {
+        fundingId: Number(fundingId),
+        reviewId: Number(updatedReview.review_id),
+        userId,
+        message: lookupError.message,
+      });
+    }
+
+    let aiTasteUpdate = null;
+    try {
+      aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+        userId,
+        review,
+        requestBody: req.body || {},
+        isCreate: false,
+      });
+    } catch (aiError) {
+      console.warn('Funding review AI taste update failed after review update', {
+        fundingId: Number(fundingId),
+        reviewId: Number(updatedReview.review_id),
+        userId,
+        message: aiError.message,
+      });
+      aiTasteUpdate = {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
 
     return res.status(200).json({
       ...mapFundingReview(review),
@@ -9194,6 +9228,8 @@ const updateFundingReview = async (req, res) => {
       message: '후기가 수정되었습니다.',
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       status: 500,
       message: '후기 수정 중 서버 오류가 발생했습니다.',
