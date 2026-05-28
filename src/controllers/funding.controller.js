@@ -6010,7 +6010,10 @@ const getFundingDetail = async (req, res) => {
         fd.alcohol_intensity,
         fd.flavor_notes,
         fd.product_type,
-        fd.raw_materials,
+        COALESCE(
+          NULLIF(NULLIF(BTRIM(fd.raw_materials::text), '[]'), 'null'),
+          NULLIF(NULLIF(BTRIM(raw_material_source.raw_materials::text), '[]'), 'null')
+        ) AS raw_materials,
         fd.introduction,
         fd.video_url,
         COALESCE(NULLIF(fd.budget_plan, ''), NULLIF(fp.budget_plan, '')) AS budget_plan,
@@ -6062,6 +6065,16 @@ const getFundingDetail = async (req, res) => {
         LIMIT 1
       ) fd ON TRUE
       LEFT JOIN LATERAL (
+        SELECT fd_raw.raw_materials
+        FROM funding_drafts fd_raw
+        WHERE fd_raw.funding_id = fp.funding_id
+          AND fd_raw.brewery_id = fp.brewery_user_id
+          AND fd_raw.raw_materials IS NOT NULL
+          AND NULLIF(NULLIF(BTRIM(fd_raw.raw_materials::text), '[]'), 'null') IS NOT NULL
+        ORDER BY fd_raw.updated_at DESC
+        LIMIT 1
+      ) raw_material_source ON TRUE
+      LEFT JOIN LATERAL (
         SELECT
           brewery_name,
           location,
@@ -6099,7 +6112,10 @@ const getFundingDetail = async (req, res) => {
     const mainIngredient = funding.main_ingredient || null;
     const subIngredients = parseFundingListField(funding.sub_ingredients);
     const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
-    const rawMaterials = parseFundingRawMaterialsField(funding.raw_materials);
+    const parsedRawMaterials = parseFundingRawMaterialsField(funding.raw_materials);
+    const rawMaterials = parsedRawMaterials.length > 0
+      ? parsedRawMaterials
+      : parseFundingRawMaterialsField([mainIngredient, ...subIngredients].filter(Boolean));
 
     const optionResult = await pool.query(
       `
@@ -6226,6 +6242,8 @@ const getFundingDetail = async (req, res) => {
       subIngredient: subIngredients[0] || null,
       subIngredients,
       ingredients,
+      rawMaterials,
+      ingredientDetails: rawMaterials,
       tags: parseJsonField(funding.tags),
       thumbnailUrl: imageFields.thumbnailUrl,
       imageUrls: imageFields.imageUrls,
