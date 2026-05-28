@@ -240,9 +240,6 @@ const requireUserId = (req, res) => {
   return userId;
 };
 
-// TODO: Remove this temporary bypass after the funding review permission API is finalized.
-const TEMP_OPEN_FUNDING_REVIEW_ACCESS = true;
-
 const FUNDING_OWNER_FORBIDDEN_MESSAGE = '해당 펀딩 프로젝트에 대한 권한이 없습니다.';
 const AUTH_REQUIRED_MESSAGE = '유효하지 않거나 만료된 토큰입니다.';
 
@@ -261,6 +258,30 @@ const getAuthUserRole = (user) =>
   toTrimmedString(user?.role || user?.userRole || user?.type).toUpperCase();
 
 const isAdminUser = (user) => getAuthUserRole(user) === 'ADMIN';
+
+const findPaidFundingOrder = async (fundingId, userId) => {
+  if (!fundingId || !userId) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT order_id
+    FROM orders
+    WHERE funding_id = $1
+      AND user_id = $2
+      AND order_status = 'PAID'
+    ORDER BY updated_at DESC, created_at DESC, order_id DESC
+    LIMIT 1
+    `,
+    [Number(fundingId), Number(userId)]
+  );
+
+  return rows[0] || null;
+};
+
+const canWriteFundingReview = async (fundingId, userId) =>
+  Boolean(await findPaidFundingOrder(fundingId, userId));
 
 const handleAuthorizationError = (res, error) => {
   if (![401, 403, 404].includes(error.status)) {
@@ -7442,6 +7463,7 @@ const getFundingReviews = async (req, res) => {
       : 'ORDER BY fr.created_at DESC';
 
   try {
+    const reviewWritable = await canWriteFundingReview(resolvedFundingId, userId);
     const countResult = await pool.query(
       `
       SELECT COUNT(*)::int AS total_count
@@ -7499,6 +7521,8 @@ const getFundingReviews = async (req, res) => {
       size: sizeNumber,
       totalElements,
       totalPages: Math.ceil(totalElements / sizeNumber),
+      canWriteReview: reviewWritable,
+      canReview: reviewWritable,
       message: '후기 목록 조회 성공',
     });
   } catch (error) {
@@ -7575,8 +7599,12 @@ const getFundingReviewDetail = async (req, res) => {
       });
     }
 
+    const reviewWritable = await canWriteFundingReview(resolvedFundingId, userId);
+
     return res.status(200).json({
       ...mapFundingReview(result.rows[0]),
+      canWriteReview: reviewWritable,
+      canReview: reviewWritable,
       message: '후기 상세 조회 성공',
     });
   } catch (error) {
@@ -8494,7 +8522,15 @@ const createFundingReview = async (req, res) => {
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
-    // TODO: Restore purchase/order-based review write permission checks after the review API policy is finalized.
+    const paidOrder = await findPaidFundingOrder(Number(fundingId), userId);
+
+    if (!paidOrder) {
+      return res.status(403).json({
+        status: 403,
+        message: '후원 완료 후 후기를 작성할 수 있습니다.',
+      });
+    }
+
     const uploadedImageUrls = [];
     for (const file of files) {
       uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
@@ -8673,19 +8709,15 @@ const updateFundingReview = async (req, res) => {
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
-    const reviewOwnerClause = TEMP_OPEN_FUNDING_REVIEW_ACCESS ? '' : 'AND user_id = $3';
-    const reviewLookupValues = TEMP_OPEN_FUNDING_REVIEW_ACCESS
-      ? [Number(fundingId), Number(reviewId)]
-      : [Number(fundingId), Number(reviewId), userId];
     const existingResult = await pool.query(
       `
       SELECT *
       FROM funding_reviews
       WHERE funding_id = $1
       AND review_id = $2
-      ${reviewOwnerClause}
+      AND user_id = $3
       `,
-      reviewLookupValues
+      [Number(fundingId), Number(reviewId), userId]
     );
 
     if (existingResult.rows.length === 0) {
@@ -8802,19 +8834,15 @@ const deleteFundingReview = async (req, res) => {
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
-    const reviewOwnerClause = TEMP_OPEN_FUNDING_REVIEW_ACCESS ? '' : 'AND user_id = $3';
-    const reviewDeleteValues = TEMP_OPEN_FUNDING_REVIEW_ACCESS
-      ? [Number(fundingId), Number(reviewId)]
-      : [Number(fundingId), Number(reviewId), userId];
     const result = await pool.query(
       `
       DELETE FROM funding_reviews
       WHERE funding_id = $1
       AND review_id = $2
-      ${reviewOwnerClause}
+      AND user_id = $3
       RETURNING review_id, funding_id, user_id
       `,
-      reviewDeleteValues
+      [Number(fundingId), Number(reviewId), userId]
     );
 
     if (result.rows.length === 0) {
