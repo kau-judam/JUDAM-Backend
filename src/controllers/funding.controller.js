@@ -5222,6 +5222,7 @@ const getFundingDraftPreview = async (req, res) => {
       `
       SELECT
         document_id,
+        draft_id,
         document_type,
         file_name,
         file_url,
@@ -5235,10 +5236,18 @@ const getFundingDraftPreview = async (req, res) => {
       [Number(draftId)]
     );
 
-    const payload = buildFundingDraftPayload(draftResult.rows[0], documentResult.rows);
+    const draft = draftResult.rows[0];
+    const payload = buildFundingDraftPayload(draft, documentResult.rows);
+    const responseData = {
+      ...payload,
+      draft,
+    };
 
     return res.status(200).json({
       ...payload,
+      status: 200,
+      draftStatus: payload.status,
+      data: responseData,
       message: '프로젝트 미리보기 조회 성공',
     });
   } catch (error) {
