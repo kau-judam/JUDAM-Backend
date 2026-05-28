@@ -1369,12 +1369,12 @@ const buildFundingDraftPatchFromPayload = (bodyPayload = {}, currentDraft = {}) 
   const imageCandidate = getPayloadCandidate(
     bodyPayload,
     ['imageUrls', 'image_urls', 'images'],
-    ['basicInfo']
+    ['basicInfo', 'images']
   );
   const thumbnailCandidate = getPayloadCandidate(
     bodyPayload,
     ['thumbnailUrl', 'thumbnail_url', 'imageUrl', 'image_url'],
-    ['basicInfo']
+    ['basicInfo', 'images']
   );
 
   if (imageCandidate.exists) {
@@ -2635,7 +2635,7 @@ const updateFundingDraft = async (req, res) => {
     ? parseFundingListField(subIngredients)
     : undefined;
   const normalizedImageUrls = hasImageUrls
-    ? parseFundingListField(imageUrls)
+    ? normalizeFundingImageUrlsInput(imageUrls)
     : undefined;
   const normalizedTags = hasTags
     ? parseFundingListField(tags)
