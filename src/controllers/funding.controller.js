@@ -7786,6 +7786,46 @@ const getSupportOptions = async (req, res) => {
   }
 
   try {
+    const fundingResult = await pool.query(
+      `
+      SELECT
+        fp.funding_id,
+        COALESCE(fd.expected_delivery_date, fp.expected_delivery_date) AS expected_delivery_date,
+        COALESCE(fd.volume, fp.volume) AS volume,
+        COALESCE(fd.alcohol_percentage, fp.alcohol_percentage) AS alcohol_percentage,
+        COALESCE(NULLIF(fd.main_ingredient, ''), NULLIF(r.main_ingredient, '')) AS main_ingredient,
+        COALESCE(NULLIF(fd.sub_ingredients, ''), NULLIF(r.ai_sub_ingredient, '')) AS sub_ingredients
+      FROM funding_projects fp
+      LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+      LEFT JOIN LATERAL (
+        SELECT
+          expected_delivery_date,
+          volume,
+          alcohol_percentage,
+          main_ingredient,
+          sub_ingredients
+        FROM funding_drafts fd_inner
+        WHERE fd_inner.funding_id = fp.funding_id
+        ORDER BY updated_at DESC
+        LIMIT 1
+      ) fd ON TRUE
+      WHERE fp.funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (fundingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+      });
+    }
+
+    const funding = fundingResult.rows[0];
+    const mainIngredient = funding.main_ingredient || null;
+    const subIngredients = parseFundingListField(funding.sub_ingredients);
+    const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
+
     const result = await pool.query(
       `
       SELECT
@@ -7808,13 +7848,30 @@ const getSupportOptions = async (req, res) => {
 
     return res.status(200).json({
       fundingId: Number(fundingId),
+      expectedDeliveryDate: funding.expected_delivery_date,
+      volume: funding.volume,
+      alcoholPercentage: funding.alcohol_percentage,
+      mainIngredient,
+      primaryIngredient: mainIngredient,
+      mainIngredientLabel: '메인 재료',
+      primaryIngredientLabel: '메인 재료',
+      subIngredient: subIngredients[0] || null,
+      subIngredients,
+      ingredients,
       supportOptions: result.rows.map((option) => ({
         optionId: Number(option.option_id),
         name: option.name,
         price: Number(option.price || 0),
         description: option.description,
-        volume: option.volume,
-        alcohol: option.alcohol,
+        volume: option.volume ?? funding.volume,
+        alcohol: option.alcohol ?? funding.alcohol_percentage,
+        alcoholPercentage: option.alcohol ?? funding.alcohol_percentage,
+        expectedDeliveryDate: funding.expected_delivery_date,
+        mainIngredient,
+        primaryIngredient: mainIngredient,
+        subIngredient: subIngredients[0] || null,
+        subIngredients,
+        ingredients,
         stock: option.stock,
         remainingStock: option.remaining_stock,
         maxPerUser: option.max_per_user,
