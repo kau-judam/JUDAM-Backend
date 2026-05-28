@@ -8105,6 +8105,32 @@ const getSupportOptions = async (req, res) => {
 };
 
 // 후원 주문 생성
+const logFundingOrderValidationFailure = ({
+  req,
+  fundingId,
+  optionId,
+  quantity,
+  recipientName,
+  recipientPhone,
+  shippingAddress,
+  missingFields = [],
+  invalidFields = [],
+  reason,
+}) => {
+  console.warn('Funding order validation failed', {
+    reason,
+    fundingId: fundingId && !isNaN(Number(fundingId)) ? Number(fundingId) : null,
+    userId: getUserId(req) || null,
+    optionId: optionId === null || optionId === undefined || optionId === '' ? null : optionId,
+    quantity,
+    hasRecipientName: Boolean(recipientName),
+    hasRecipientPhone: Boolean(recipientPhone),
+    hasShippingAddress: Boolean(shippingAddress),
+    missingFields,
+    invalidFields,
+  });
+};
+
 const createFundingOrder = async (req, res) => {
   const { fundingId } = req.params;
   const body = req.body || {};
@@ -8163,21 +8189,47 @@ const createFundingOrder = async (req, res) => {
     optionId === null || optionId === undefined || optionId === ''
       ? null
       : Number(optionId);
-  const bottleCount = Number(quantity || 1);
+  const bottleCount =
+    quantity === null || quantity === undefined || quantity === ''
+      ? 1
+      : Number(quantity);
+  const missingFields = [];
+  const invalidFields = [];
+
+  if (!recipientName) missingFields.push('recipientName');
+  if (!recipientPhone) missingFields.push('recipientPhone');
+  if (!shippingAddress) missingFields.push('shippingAddress');
+
+  if (!Number.isInteger(bottleCount) || bottleCount <= 0) {
+    invalidFields.push('quantity');
+  }
 
   if (
-    !bottleCount ||
-    !Number.isInteger(bottleCount) ||
-    bottleCount <= 0 ||
-    (numericOptionId !== null &&
-      (!Number.isInteger(numericOptionId) || numericOptionId <= 0)) ||
-    !recipientName ||
-    !recipientPhone ||
-    !shippingAddress
+    numericOptionId !== null &&
+    (!Number.isInteger(numericOptionId) || numericOptionId <= 0)
   ) {
+    invalidFields.push('optionId');
+  }
+
+  if (missingFields.length > 0 || invalidFields.length > 0) {
+    logFundingOrderValidationFailure({
+      req,
+      fundingId,
+      optionId,
+      quantity,
+      recipientName,
+      recipientPhone,
+      shippingAddress,
+      missingFields,
+      invalidFields,
+      reason: 'invalid_order_input',
+    });
+
     return res.status(400).json({
       status: 400,
       message: '주문 입력값이 올바르지 않습니다.',
+      missingFields,
+      invalidFields,
     });
   }
 
@@ -8205,9 +8257,23 @@ const createFundingOrder = async (req, res) => {
   const donationAmountNumber = Number(donationAmount || 0);
 
   if (!Number.isInteger(donationAmountNumber) || donationAmountNumber < 0) {
+    logFundingOrderValidationFailure({
+      req,
+      fundingId,
+      optionId,
+      quantity,
+      recipientName,
+      recipientPhone,
+      shippingAddress,
+      invalidFields: ['additionalSupportAmount'],
+      reason: 'invalid_additional_support_amount',
+    });
+
     return res.status(400).json({
       status: 400,
       message: '추가 후원금 입력값이 올바르지 않습니다.',
+      missingFields: [],
+      invalidFields: ['additionalSupportAmount'],
     });
   }
 
