@@ -40,6 +40,22 @@ const toNullableNumber = (value) => {
   return Number.isFinite(numberValue) ? numberValue : null;
 };
 
+const buildOrderFundingAmountExpression = (alias = 'o') => {
+  const priceAmount = `COALESCE(${alias}.price_per_bottle, 0) * GREATEST(COALESCE(${alias}.quantity, 1), 1)`;
+  const supportAmount = `CASE
+      WHEN COALESCE(${alias}.donation_amount, 0) > 0 THEN COALESCE(${alias}.donation_amount, 0)
+      ELSE COALESCE(${alias}.additional_support_amount, 0)
+    END`;
+  const calculatedFundingAmount = `(${priceAmount} + ${supportAmount})`;
+
+  return `
+    CASE
+      WHEN ${calculatedFundingAmount} > 0 THEN ${calculatedFundingAmount}
+      ELSE GREATEST(0, COALESCE(${alias}.total_amount, 0) - COALESCE(${alias}.shipping_fee, 0))
+    END
+  `;
+};
+
 const parseOptionalBoolean = (value) => {
   if (value === undefined || value === null || value === '') {
     return undefined;
@@ -5829,6 +5845,13 @@ const getFundingList = async (req, res) => {
         application_id DESC
       LIMIT 1
     ) ba ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT
+        NULLIF(COALESCE(SUM(${buildOrderFundingAmountExpression('paid_order')}), 0), 0)::bigint AS funding_amount
+      FROM orders paid_order
+      WHERE paid_order.funding_id = fp.funding_id
+        AND paid_order.order_status = 'PAID'
+    ) paid_funding_amounts ON TRUE
   `;
 
   try {
@@ -5902,7 +5925,7 @@ const getFundingList = async (req, res) => {
         COALESCE(fp.thumbnail_url, r.image_url) AS thumbnail_url,
         fp.image_urls,
         fp.status,
-        fp.current_amount,
+        COALESCE(paid_funding_amounts.funding_amount, fp.current_amount) AS current_amount,
         fp.goal_amount AS target_amount,
         fp.start_date,
         fp.end_date,
@@ -6014,7 +6037,7 @@ const getFundingStats = async (req, res) => {
           order_id,
           user_id,
           funding_id,
-          total_amount
+          ${buildOrderFundingAmountExpression('orders')} AS funding_amount
         FROM orders
         WHERE order_status = 'PAID'
           AND funding_id IS NOT NULL
@@ -6022,7 +6045,7 @@ const getFundingStats = async (req, res) => {
       paid_amounts_by_funding AS (
         SELECT
           funding_id,
-          COALESCE(SUM(total_amount), 0)::bigint AS paid_amount
+          COALESCE(SUM(funding_amount), 0)::bigint AS paid_amount
         FROM paid_orders
         GROUP BY funding_id
       ),
@@ -6049,9 +6072,19 @@ const getFundingStats = async (req, res) => {
         ) AS total_supporter_count,
         COUNT(*) FILTER (
           WHERE goal_amount > 0
-            AND GREATEST(COALESCE(current_amount, 0), paid_amount) >= goal_amount
+            AND (
+              CASE WHEN paid_amount > 0
+                THEN paid_amount
+                ELSE COALESCE(current_amount, 0)
+              END
+            ) >= goal_amount
         )::int AS successful_project_count,
-        COALESCE(SUM(GREATEST(COALESCE(current_amount, 0), paid_amount)), 0)::bigint AS total_raised_amount
+        COALESCE(SUM(
+          CASE WHEN paid_amount > 0
+            THEN paid_amount
+            ELSE COALESCE(current_amount, 0)
+          END
+        ), 0)::bigint AS total_raised_amount
       FROM funding_with_paid_amount
       `
     );
@@ -6117,7 +6150,7 @@ const getFundingDetail = async (req, res) => {
         COALESCE(fd.category, fp.category) AS category,
         COALESCE(NULLIF(fd.image_urls::text, '[]'), NULLIF(fp.image_urls::text, '[]')) AS image_urls,
         fp.status,
-        fp.current_amount,
+        COALESCE(paid_funding_amounts.funding_amount, fp.current_amount) AS current_amount,
         COALESCE(fd.target_amount, fp.goal_amount) AS target_amount,
         COALESCE(fd.funding_start_date, fp.start_date) AS start_date,
         COALESCE(fd.funding_end_date, fp.end_date) AS end_date,
@@ -6227,6 +6260,13 @@ const getFundingDetail = async (req, res) => {
         FROM funding_likes fl
         WHERE fl.funding_id = fp.funding_id
       ) like_counts ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          NULLIF(COALESCE(SUM(${buildOrderFundingAmountExpression('paid_order')}), 0), 0)::bigint AS funding_amount
+        FROM orders paid_order
+        WHERE paid_order.funding_id = fp.funding_id
+          AND paid_order.order_status = 'PAID'
+      ) paid_funding_amounts ON TRUE
       WHERE fp.funding_id = $1
       `,
       [resolvedFundingId, userId]

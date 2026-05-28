@@ -7,6 +7,37 @@ const normalizeNumericOrderId = (orderId) => {
   return Number.isInteger(numericOrderId) && numericOrderId > 0 ? numericOrderId : null;
 };
 
+const toSafeNumber = (value, fallback = 0) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+};
+
+const calculateFundingAmountFromOrder = (order) => {
+  const paidAmount = toSafeNumber(order.total_amount);
+  const quantity = Math.max(1, toSafeNumber(order.quantity, 1));
+  const rewardAmount = Math.max(0, toSafeNumber(order.price_per_bottle) * quantity);
+  const shippingFee = Math.max(0, toSafeNumber(order.shipping_fee));
+  const donationAmount = toSafeNumber(order.donation_amount);
+  const legacyAdditionalSupportAmount = toSafeNumber(order.additional_support_amount);
+  const additionalSupportAmount = Math.max(
+    0,
+    donationAmount > 0 ? donationAmount : legacyAdditionalSupportAmount
+  );
+  const calculatedFundingAmount = rewardAmount + additionalSupportAmount;
+
+  return {
+    paidAmount,
+    rewardAmount,
+    subtotalAmount: rewardAmount,
+    shippingFee,
+    additionalSupportAmount,
+    fundingAmount:
+      calculatedFundingAmount > 0
+        ? calculatedFundingAmount
+        : Math.max(0, paidAmount - shippingFee),
+  };
+};
+
 const requestPayment = async (req, res) => {
   const numericOrderId = normalizeNumericOrderId(req.params.orderId);
   const {
@@ -344,7 +375,16 @@ const completePayment = async (req, res) => {
   try {
     const orderResult = await pool.query(
       `
-      SELECT order_id, funding_id, total_amount, order_status
+      SELECT
+        order_id,
+        funding_id,
+        total_amount,
+        quantity,
+        price_per_bottle,
+        shipping_fee,
+        donation_amount,
+        additional_support_amount,
+        order_status
       FROM orders
       WHERE order_id = $1
       `,
@@ -359,6 +399,7 @@ const completePayment = async (req, res) => {
     }
 
     const order = orderResult.rows[0];
+    const fundingAmounts = calculateFundingAmountFromOrder(order);
 
     const paymentResult = await pool.query(
       `
@@ -411,7 +452,7 @@ const completePayment = async (req, res) => {
       SET current_amount = current_amount + $1
       WHERE funding_id = $2
       `,
-      [payment.amount, order.funding_id]
+      [fundingAmounts.fundingAmount, order.funding_id]
     );
 
     return res.status(200).json({
@@ -421,12 +462,18 @@ const completePayment = async (req, res) => {
         orderId: String(order.order_id),
         paymentId: payment.payment_id,
         paymentStatus: 'PAID',
-        paidAmount: payment.amount,
+        paidAmount: fundingAmounts.paidAmount,
+        fundingAmount: fundingAmounts.fundingAmount,
+        rewardAmount: fundingAmounts.rewardAmount,
+        subtotalAmount: fundingAmounts.subtotalAmount,
+        shippingFee: fundingAmounts.shippingFee,
+        additionalSupportAmount: fundingAmounts.additionalSupportAmount,
       },
       orderId: order.order_id,
       paymentId: payment.payment_id,
       paymentStatus: 'PAID',
-      paidAmount: payment.amount,
+      paidAmount: fundingAmounts.paidAmount,
+      fundingAmount: fundingAmounts.fundingAmount,
     });
   } catch (error) {
     console.error(error);
