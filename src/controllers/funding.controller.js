@@ -348,8 +348,41 @@ const findPaidFundingOrder = async (fundingId, userId) => {
   return rows[0] || null;
 };
 
-const canWriteFundingReview = async (fundingId, userId) =>
-  Boolean(await findPaidFundingOrder(fundingId, userId));
+const findFundingReviewByUser = async (fundingId, userId) => {
+  if (!fundingId || !userId) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT review_id
+    FROM funding_reviews
+    WHERE funding_id = $1
+      AND user_id = $2
+    ORDER BY created_at DESC, review_id DESC
+    LIMIT 1
+    `,
+    [Number(fundingId), Number(userId)]
+  );
+
+  return rows[0] || null;
+};
+
+const getFundingReviewWriteState = async (fundingId, userId) => {
+  const paidOrder = await findPaidFundingOrder(fundingId, userId);
+  const existingReview = await findFundingReviewByUser(fundingId, userId);
+
+  return {
+    paidOrder,
+    existingReview,
+    canWriteReview: Boolean(paidOrder) && !existingReview,
+  };
+};
+
+const canWriteFundingReview = async (fundingId, userId) => {
+  const { canWriteReview } = await getFundingReviewWriteState(fundingId, userId);
+  return canWriteReview;
+};
 
 const handleAuthorizationError = (res, error) => {
   if (![401, 403, 404].includes(error.status)) {
@@ -7665,7 +7698,8 @@ const getFundingReviews = async (req, res) => {
       : 'ORDER BY fr.created_at DESC';
 
   try {
-    const reviewWritable = await canWriteFundingReview(resolvedFundingId, userId);
+    const reviewWriteState = await getFundingReviewWriteState(resolvedFundingId, userId);
+    const reviewWritable = reviewWriteState.canWriteReview;
     const countResult = await pool.query(
       `
       SELECT COUNT(*)::int AS total_count
@@ -7725,6 +7759,10 @@ const getFundingReviews = async (req, res) => {
       totalPages: Math.ceil(totalElements / sizeNumber),
       canWriteReview: reviewWritable,
       canReview: reviewWritable,
+      hasWrittenReview: Boolean(reviewWriteState.existingReview),
+      myReviewId: reviewWriteState.existingReview
+        ? Number(reviewWriteState.existingReview.review_id)
+        : null,
       message: '후기 목록 조회 성공',
     });
   } catch (error) {
@@ -7801,12 +7839,17 @@ const getFundingReviewDetail = async (req, res) => {
       });
     }
 
-    const reviewWritable = await canWriteFundingReview(resolvedFundingId, userId);
+    const reviewWriteState = await getFundingReviewWriteState(resolvedFundingId, userId);
+    const reviewWritable = reviewWriteState.canWriteReview;
 
     return res.status(200).json({
       ...mapFundingReview(result.rows[0]),
       canWriteReview: reviewWritable,
       canReview: reviewWritable,
+      hasWrittenReview: Boolean(reviewWriteState.existingReview),
+      myReviewId: reviewWriteState.existingReview
+        ? Number(reviewWriteState.existingReview.review_id)
+        : null,
       message: '후기 상세 조회 성공',
     });
   } catch (error) {
@@ -8857,6 +8900,17 @@ const createFundingReview = async (req, res) => {
       return res.status(403).json({
         status: 403,
         message: '후원 완료 후 후기를 작성할 수 있습니다.',
+      });
+    }
+
+    const existingReview = await findFundingReviewByUser(Number(fundingId), userId);
+    if (existingReview) {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 작성한 후기가 있습니다.',
+        data: {
+          reviewId: Number(existingReview.review_id),
+        },
       });
     }
 
