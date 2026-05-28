@@ -43,10 +43,9 @@ router.get('/me/likes/posts', authMiddleware, getMyLikedPostList);
 router.get('/me/post-comments', authMiddleware, getMyPostCommentList);
 
 //마이페이지 후원 내역 조회
-//router.get('/me/funding-orders', authMiddleware, getMyFundingOrders);
-router.get('/me/funding-orders', getMyFundingOrders);
+router.get('/me/funding-orders', authMiddleware, getMyFundingOrders);
 
-router.get('/me/liked-fundings', getMyLikedFundings);
+router.get('/me/liked-fundings', authMiddleware, getMyLikedFundings);
 
 //최근배송지 불러오기
 router.get('/me/recent-shipping-address', authMiddleware, getRecentShippingAddress);
