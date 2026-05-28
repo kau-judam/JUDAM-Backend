@@ -8468,11 +8468,20 @@ const getFundingShareLink = async (req, res) => {
       });
     }
 
+    const normalizeShareBaseUrl = (value) => {
+      const normalized = toTrimmedString(value);
+
+      if (!normalized || ['null', 'undefined'].includes(normalized.toLowerCase())) {
+        return null;
+      }
+
+      return normalized.replace(/\/+$/, '');
+    };
     const publicBaseUrl =
-      process.env.PUBLIC_WEB_BASE_URL ||
-      process.env.FRONTEND_BASE_URL ||
-      `${req.protocol}://${req.get('host')}`;
-    const shareUrl = `${publicBaseUrl.replace(/\/$/, '')}/fundings/${fundingId}`;
+      normalizeShareBaseUrl(process.env.PUBLIC_WEB_BASE_URL) ||
+      normalizeShareBaseUrl(process.env.FRONTEND_BASE_URL) ||
+      normalizeShareBaseUrl(`${req.protocol}://${req.get('host')}`);
+    const shareUrl = `${publicBaseUrl}/funding/${Number(fundingId)}`;
 
     let shareCount = null;
     try {
