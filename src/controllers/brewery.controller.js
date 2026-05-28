@@ -32,6 +32,8 @@ const sendError = (res, status, message, error) => {
 
 const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
 
+const normalizeAccountNumber = (value) => normalizeString(value).replace(/\D/g, '');
+
 const getOptionalString = (body, key) => {
   if (!Object.prototype.hasOwnProperty.call(body, key)) {
     return undefined;
@@ -52,6 +54,41 @@ const getOptionalNullableString = (body, key) => {
   }
 
   return value === '' ? null : value;
+};
+
+const verifyBreweryAccount = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  const { bankName, accountNumber, accountHolder } = req.body || {};
+  const normalizedBankName = normalizeString(bankName);
+  const normalizedAccountNumber = normalizeAccountNumber(accountNumber);
+  const normalizedAccountHolder = normalizeString(accountHolder);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload에 userId가 없습니다.');
+  }
+
+  if (!normalizedBankName || !normalizedAccountNumber || !normalizedAccountHolder) {
+    return res.status(400).json({
+      verified: false,
+      message: '입금계좌 정보를 모두 입력해주세요.',
+    });
+  }
+
+  if (normalizedAccountNumber.length < 8) {
+    return res.status(400).json({
+      verified: false,
+      message: '계좌번호는 숫자 8자리 이상이어야 합니다.',
+    });
+  }
+
+  // MVP simple verification. Replace this with a real bank account owner check before production.
+  return res.status(200).json({
+    verified: true,
+    bankName: normalizedBankName,
+    accountNumber: normalizedAccountNumber,
+    accountHolder: normalizedAccountHolder,
+    message: '입금계좌 인증이 완료되었습니다.',
+  });
 };
 
 const getOptionalEstablishedYear = (body) => {
@@ -629,6 +666,7 @@ module.exports = {
   getMyBreweryDashboardFundingSummary,
   getMyBreweryDashboardFundings,
   getMyBreweryDashboardNotifications,
+  verifyBreweryAccount,
   createBreweryApplication,
   getBreweryApplications,
   getMyBreweryApplication,

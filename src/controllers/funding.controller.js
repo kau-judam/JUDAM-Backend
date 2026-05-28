@@ -746,11 +746,13 @@ const shouldExposeBankVerificationCode = () =>
   || process.env.NODE_ENV !== 'production';
 
 const normalizeComparableAccountNumber = (accountNumber) =>
-  toTrimmedString(accountNumber).replace(/[\s-]/g, '');
+  toTrimmedString(accountNumber).replace(/\D/g, '');
 
 const getBankVerificationFields = (body = {}) => ({
   bankName: toTrimmedString(getBodyValue(body, ['bankName', 'bank_name'])),
-  accountNumber: toTrimmedString(getBodyValue(body, ['accountNumber', 'account_number'])),
+  accountNumber: normalizeComparableAccountNumber(
+    getBodyValue(body, ['accountNumber', 'account_number'])
+  ),
   normalizedAccountNumber: normalizeComparableAccountNumber(
     getBodyValue(body, ['accountNumber', 'account_number'])
   ),
@@ -3423,6 +3425,7 @@ const saveBreweryInfo = async (req, res) => {
 
   const normalizedBusinessNumber = businessRegistrationNumber.replace(/\D/g, '');
   const normalizedPhone = contactPhone.replace(/\D/g, '');
+  const normalizedAccountNumber = normalizeComparableAccountNumber(accountNumber);
 
   if (!/^\d{10}$/.test(normalizedBusinessNumber)) {
     return res.status(400).json({
@@ -3435,6 +3438,13 @@ const saveBreweryInfo = async (req, res) => {
     return res.status(400).json({
       status: 400,
       message: '전화번호 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (normalizedAccountNumber.length < 8) {
+    return res.status(400).json({
+      status: 400,
+      message: '계좌번호는 숫자 8자리 이상이어야 합니다.',
     });
   }
 
@@ -3451,14 +3461,14 @@ const saveBreweryInfo = async (req, res) => {
         WHERE verification_token = $1
           AND status = 'VERIFIED'
           AND bank_name = $2
-          AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $3
+          AND regexp_replace(account_number, '[^0-9]', '', 'g') = $3
           AND account_holder = $4
         LIMIT 1
         `,
         [
           bankVerificationToken,
           bankName,
-          normalizeComparableAccountNumber(accountNumber),
+          normalizedAccountNumber,
           accountHolder,
         ]
       );
@@ -3510,7 +3520,7 @@ const saveBreweryInfo = async (req, res) => {
         contactEmail,
         contactPhone,
         bankName,
-        accountNumber,
+        normalizedAccountNumber,
         accountHolder,
         breweryProfileImageUrl || null,
         breweryBio || null,
@@ -3944,12 +3954,13 @@ const verifyAccountForFundingDraft = async (req, res) => {
     || accountVerificationToken
     || snakeAccountVerificationToken
   );
+  const normalizedAccountNumber = normalizeComparableAccountNumber(accountNumber);
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
     !bankName ||
-    !accountNumber ||
+    !normalizedAccountNumber ||
     !accountHolder ||
     !resolvedBankVerificationToken
   ) {
@@ -3969,14 +3980,14 @@ const verifyAccountForFundingDraft = async (req, res) => {
       WHERE verification_token = $1
         AND status = 'VERIFIED'
         AND bank_name = $2
-        AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $3
+        AND regexp_replace(account_number, '[^0-9]', '', 'g') = $3
         AND account_holder = $4
       LIMIT 1
       `,
       [
         resolvedBankVerificationToken,
         bankName,
-        normalizeComparableAccountNumber(accountNumber),
+        normalizedAccountNumber,
         accountHolder,
       ]
     );
@@ -4006,7 +4017,7 @@ const verifyAccountForFundingDraft = async (req, res) => {
         account_verified,
         updated_at
       `,
-      [bankName, accountNumber, accountHolder, Number(draftId)]
+      [bankName, normalizedAccountNumber, accountHolder, Number(draftId)]
     );
 
     if (result.rows.length === 0) {
@@ -4192,7 +4203,7 @@ const confirmBankAccountVerification = async (req, res) => {
       FROM funding_bank_account_verifications
       WHERE status = 'PENDING'
         AND bank_name = $1
-        AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $2
+        AND regexp_replace(account_number, '[^0-9]', '', 'g') = $2
         AND account_holder = $3
         AND expires_at > CURRENT_TIMESTAMP
         AND user_id IS NOT DISTINCT FROM $4
