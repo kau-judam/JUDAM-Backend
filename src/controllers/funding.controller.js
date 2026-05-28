@@ -682,6 +682,64 @@ const mapFundingImageUrls = (imageUrls = []) =>
     displayOrder: index + 1,
   }));
 
+const buildFundingSupportOptionsResponse = ({
+  options = [],
+  funding = {},
+  mainIngredient = null,
+  subIngredients = [],
+  ingredients = [],
+}) => {
+  const mappedOptions = (options || []).map((option) => ({
+    optionId: Number(option.option_id),
+    name: option.name,
+    price: Number(option.price || 0),
+    description: option.description,
+    volume: option.volume ?? funding.volume,
+    alcohol: option.alcohol ?? funding.alcohol_percentage,
+    alcoholPercentage: option.alcohol ?? funding.alcohol_percentage,
+    expectedDeliveryDate: funding.expected_delivery_date,
+    mainIngredient,
+    primaryIngredient: mainIngredient,
+    subIngredient: subIngredients[0] || null,
+    subIngredients,
+    ingredients,
+    stock: option.stock,
+    remainingStock: option.remaining_stock,
+    maxPerUser: option.max_per_user,
+    generated: false,
+  }));
+
+  if (mappedOptions.length > 0) {
+    return mappedOptions;
+  }
+
+  const fallbackPrice = Number(funding.price_per_bottle);
+
+  if (!Number.isFinite(fallbackPrice) || fallbackPrice <= 0) {
+    return [];
+  }
+
+  return [{
+    optionId: null,
+    name: '기본 후원 옵션',
+    price: fallbackPrice,
+    description: funding.summary || funding.description || null,
+    volume: funding.volume ?? null,
+    alcohol: funding.alcohol_percentage ?? null,
+    alcoholPercentage: funding.alcohol_percentage ?? null,
+    expectedDeliveryDate: funding.expected_delivery_date ?? null,
+    mainIngredient,
+    primaryIngredient: mainIngredient,
+    subIngredient: subIngredients[0] || null,
+    subIngredients,
+    ingredients,
+    stock: funding.total_quantity ?? null,
+    remainingStock: funding.total_quantity ?? null,
+    maxPerUser: null,
+    generated: true,
+  }];
+};
+
 const PLAN_GUIDES = {
   budgetPlanGuide: '프로젝트 예산은 "- 프로젝트 예산임: 25만원" 형식으로 작성하면 UI에 잘 반영됩니다.',
   schedulePlanGuide: '프로젝트 일정은 "- 프로젝트 일정: 일정내용" 형식으로 작성하면 UI에 잘 반영됩니다.',
@@ -6417,17 +6475,16 @@ const getFundingDetail = async (req, res) => {
         policy: projectPolicy,
       },
       documents: documentResult.rows.map(mapFundingDocument),
-      supportOptions: optionResult.rows.map((option) => ({
-        optionId: Number(option.option_id),
-        name: option.name,
-        price: Number(option.price),
-        description: option.description,
-        volume: option.volume,
-        alcohol: option.alcohol,
-        stock: option.stock,
-        remainingStock: option.remaining_stock,
-        maxPerUser: option.max_per_user,
-      })),
+      supportOptions: buildFundingSupportOptionsResponse({
+        options: optionResult.rows,
+        funding: {
+          ...funding,
+          total_quantity: totalQuantity,
+        },
+        mainIngredient,
+        subIngredients,
+        ingredients,
+      }),
     });
   } catch (error) {
     console.error(error);
@@ -7954,6 +8011,11 @@ const getSupportOptions = async (req, res) => {
       `
       SELECT
         fp.funding_id,
+        fp.title,
+        COALESCE(fp.summary, fp.description) AS summary,
+        fp.description,
+        fp.price_per_bottle,
+        fd.total_quantity,
         COALESCE(fd.expected_delivery_date, fp.expected_delivery_date) AS expected_delivery_date,
         COALESCE(fd.volume, fp.volume) AS volume,
         COALESCE(fd.alcohol_percentage, fp.alcohol_percentage) AS alcohol_percentage,
@@ -7967,7 +8029,8 @@ const getSupportOptions = async (req, res) => {
           volume,
           alcohol_percentage,
           main_ingredient,
-          sub_ingredients
+          sub_ingredients,
+          total_quantity
         FROM funding_drafts fd_inner
         WHERE fd_inner.funding_id = fp.funding_id
         ORDER BY updated_at DESC
@@ -8022,24 +8085,13 @@ const getSupportOptions = async (req, res) => {
       subIngredient: subIngredients[0] || null,
       subIngredients,
       ingredients,
-      supportOptions: result.rows.map((option) => ({
-        optionId: Number(option.option_id),
-        name: option.name,
-        price: Number(option.price || 0),
-        description: option.description,
-        volume: option.volume ?? funding.volume,
-        alcohol: option.alcohol ?? funding.alcohol_percentage,
-        alcoholPercentage: option.alcohol ?? funding.alcohol_percentage,
-        expectedDeliveryDate: funding.expected_delivery_date,
+      supportOptions: buildFundingSupportOptionsResponse({
+        options: result.rows,
+        funding,
         mainIngredient,
-        primaryIngredient: mainIngredient,
-        subIngredient: subIngredients[0] || null,
         subIngredients,
         ingredients,
-        stock: option.stock,
-        remainingStock: option.remaining_stock,
-        maxPerUser: option.max_per_user,
-      })),
+      }),
     });
   } catch (error) {
     console.error(error);
