@@ -17,7 +17,9 @@ exports.confirmTossPayment = async (req, res) => {
       amount,
     });
 
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({
+      ...result,
       status: 200,
       message: '결제 승인 성공',
       data: result,

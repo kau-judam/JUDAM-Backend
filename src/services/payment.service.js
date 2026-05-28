@@ -255,7 +255,7 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
             supporter_count = COALESCE(supporter_count, 0) + 1,
             updated_at = CURRENT_TIMESTAMP
           WHERE funding_id = $2
-          RETURNING funding_id, current_amount, supporter_count
+          RETURNING funding_id, current_amount, goal_amount, supporter_count
           `
         : `
           UPDATE funding_projects
@@ -263,7 +263,7 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
             current_amount = current_amount + $1,
             updated_at = CURRENT_TIMESTAMP
           WHERE funding_id = $2
-          RETURNING funding_id, current_amount, NULL::int AS supporter_count
+          RETURNING funding_id, current_amount, goal_amount, NULL::int AS supporter_count
           `,
       [fundingAmounts.fundingAmount, order.funding_id]
     );
@@ -272,6 +272,12 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
 
     const payment = paymentResult.rows[0];
     const funding = fundingResult.rows[0] || {};
+    const currentAmount = Number(funding.current_amount || 0);
+    const targetAmount = Number(funding.goal_amount || 0);
+    const achievementRate =
+      targetAmount > 0
+        ? Math.floor((currentAmount / targetAmount) * 100)
+        : 0;
 
     return {
       orderId: String(order.order_id),
@@ -291,7 +297,9 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       subtotalAmount: fundingAmounts.subtotalAmount,
       shippingFee: fundingAmounts.shippingFee,
       additionalSupportAmount: fundingAmounts.additionalSupportAmount,
-      currentAmount: Number(funding.current_amount || 0),
+      currentAmount,
+      targetAmount,
+      achievementRate,
       supporterCount: funding.supporter_count === null || funding.supporter_count === undefined
         ? null
         : Number(funding.supporter_count),

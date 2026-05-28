@@ -5499,6 +5499,7 @@ const getFundingDraftPreview = async (req, res) => {
       draft,
     };
 
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({
       ...payload,
       status: 200,
@@ -6018,6 +6019,7 @@ const getFundingList = async (req, res) => {
       .map(mapFundingListRow)
       .filter((funding) => !mineRequested || funding.breweryUserId === userId);
 
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({
       status: 200,
       message: '펀딩 목록 조회 성공',
@@ -6374,6 +6376,7 @@ const getFundingDetail = async (req, res) => {
         })
       : null;
 
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
       title: funding.title,
