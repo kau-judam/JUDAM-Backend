@@ -8219,10 +8219,15 @@ const getFundingShareLink = async (req, res) => {
       });
     }
 
-    const publicBaseUrl = process.env.PUBLIC_WEB_BASE_URL || 'https://judam.com';
+    const publicBaseUrl =
+      process.env.PUBLIC_WEB_BASE_URL ||
+      process.env.FRONTEND_BASE_URL ||
+      `${req.protocol}://${req.get('host')}`;
     const shareUrl = `${publicBaseUrl.replace(/\/$/, '')}/fundings/${fundingId}`;
 
-    const shareResult = await pool.query(
+    let shareCount = null;
+    try {
+      const shareResult = await pool.query(
       `
       INSERT INTO funding_shares (
         funding_id,
@@ -8237,18 +8242,35 @@ const getFundingShareLink = async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       RETURNING share_count
       `,
-      [Number(fundingId), shareUrl]
-    );
+        [Number(fundingId), shareUrl]
+      );
+      shareCount = Number(shareResult.rows[0].share_count);
+    } catch (shareError) {
+      console.warn('Failed to record funding share count', {
+        fundingId: Number(fundingId),
+        message: shareError.message,
+      });
+    }
 
     const funding = fundingResult.rows[0];
-
-    return res.status(200).json({
+    const responseData = {
       fundingId: Number(fundingId),
       shareUrl,
       title: funding.title,
       summary: funding.summary,
       thumbnailImageUrl: funding.thumbnail_url,
-      shareCount: Number(shareResult.rows[0].share_count),
+      shareCount,
+    };
+
+    return res.status(200).json({
+      status: 200,
+      data: responseData,
+      fundingId: Number(fundingId),
+      shareUrl,
+      title: funding.title,
+      summary: funding.summary,
+      thumbnailImageUrl: funding.thumbnail_url,
+      shareCount,
       message: '공유 링크가 생성되었습니다.',
     });
   } catch (error) {
