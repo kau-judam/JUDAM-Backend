@@ -240,6 +240,9 @@ const requireUserId = (req, res) => {
   return userId;
 };
 
+// TODO: Remove this temporary bypass after the funding review permission API is finalized.
+const TEMP_OPEN_FUNDING_REVIEW_ACCESS = true;
+
 const FUNDING_OWNER_FORBIDDEN_MESSAGE = '해당 펀딩 프로젝트에 대한 권한이 없습니다.';
 const AUTH_REQUIRED_MESSAGE = '유효하지 않거나 만료된 토큰입니다.';
 
@@ -8334,6 +8337,7 @@ const createFundingReview = async (req, res) => {
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    // TODO: Restore purchase/order-based review write permission checks after the review API policy is finalized.
     const uploadedImageUrls = [];
     for (const file of files) {
       uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
@@ -8512,15 +8516,19 @@ const updateFundingReview = async (req, res) => {
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    const reviewOwnerClause = TEMP_OPEN_FUNDING_REVIEW_ACCESS ? '' : 'AND user_id = $3';
+    const reviewLookupValues = TEMP_OPEN_FUNDING_REVIEW_ACCESS
+      ? [Number(fundingId), Number(reviewId)]
+      : [Number(fundingId), Number(reviewId), userId];
     const existingResult = await pool.query(
       `
       SELECT *
       FROM funding_reviews
       WHERE funding_id = $1
       AND review_id = $2
-      AND user_id = $3
+      ${reviewOwnerClause}
       `,
-      [Number(fundingId), Number(reviewId), userId]
+      reviewLookupValues
     );
 
     if (existingResult.rows.length === 0) {
@@ -8637,15 +8645,19 @@ const deleteFundingReview = async (req, res) => {
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    const reviewOwnerClause = TEMP_OPEN_FUNDING_REVIEW_ACCESS ? '' : 'AND user_id = $3';
+    const reviewDeleteValues = TEMP_OPEN_FUNDING_REVIEW_ACCESS
+      ? [Number(fundingId), Number(reviewId)]
+      : [Number(fundingId), Number(reviewId), userId];
     const result = await pool.query(
       `
       DELETE FROM funding_reviews
       WHERE funding_id = $1
       AND review_id = $2
-      AND user_id = $3
+      ${reviewOwnerClause}
       RETURNING review_id, funding_id, user_id
       `,
-      [Number(fundingId), Number(reviewId), userId]
+      reviewDeleteValues
     );
 
     if (result.rows.length === 0) {
