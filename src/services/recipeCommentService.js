@@ -1,5 +1,29 @@
 const pool = require('../db');
 
+const normalizeWriterRole = (role) => String(role || 'USER').toUpperCase();
+const isBreweryRole = (role) => normalizeWriterRole(role).startsWith('BREWERY');
+
+const mapWriterFields = (row = {}) => {
+  const writerId = row.user_id === null || row.user_id === undefined
+    ? null
+    : Number(row.user_id);
+  const writerRole = normalizeWriterRole(row.author_type || row.writer_role);
+
+  return {
+    writerId,
+    writer_id: writerId,
+    userId: writerId,
+    user_id: writerId,
+    writerNickname: row.user_nickname || '사용자',
+    writerProfileImage: row.author_profile_image || null,
+    profileImage: row.author_profile_image || null,
+    writerRole,
+    role: writerRole,
+    isBrewery: isBreweryRole(writerRole),
+    writerIsBrewery: isBreweryRole(writerRole),
+  };
+};
+
 // 댓글 목록 조회 (GET /api/recipes/:recipeId/comments)
 // - userId가 null이면 is_liked, is_mine은 항상 false (비로그인)
 const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
@@ -20,7 +44,7 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
        CASE WHEN rcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
        CASE WHEN rc.user_id = $4 THEN true ELSE false END         AS is_mine
      FROM recipe_comments rc
-     JOIN  users u   ON u.user_id  = rc.user_id
+     LEFT JOIN users u ON u.user_id = rc.user_id
      LEFT JOIN recipe_comment_likes rcl
             ON rcl.comment_id = rc.comment_id AND rcl.user_id = $4
      WHERE rc.recipe_id = $1 AND rc.parent_comment_id IS NULL
@@ -39,10 +63,11 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
 
   const comments = dataResult.rows.map((c) => ({
     comment_id:           Number(c.comment_id),
-    user_id:              Number(c.user_id),
+    user_id:              c.user_id === null || c.user_id === undefined ? null : Number(c.user_id),
     nickname:             c.user_nickname,
     author_profile_image: c.author_profile_image,
     author_type:          c.author_type,
+    ...mapWriterFields(c),
     content:              c.content,
     like_count:           Number(c.like_count),
     reply_count:          Number(c.reply_count),
@@ -58,7 +83,7 @@ const getCommentsByRecipeId = async (recipeId, page, size, userId) => {
 // 댓글 작성 (POST /api/recipes/:recipeId/comments)
 const createComment = async (recipeId, content, user) => {
   const nicknameResult = await pool.query(
-    'SELECT nickname FROM users WHERE user_id = $1',
+    'SELECT nickname, profile_image, role FROM users WHERE user_id = $1',
     [user.id]
   );
   const nickname = nicknameResult.rows[0]?.nickname || `user_${user.id}`;
@@ -76,6 +101,12 @@ const createComment = async (recipeId, content, user) => {
     recipe_id:  recipeId,
     user_id:    Number(user.id),
     nickname:   nickname,
+    ...mapWriterFields({
+      user_id: user.id,
+      user_nickname: nickname,
+      author_profile_image: nicknameResult.rows[0]?.profile_image,
+      author_type: nicknameResult.rows[0]?.role,
+    }),
     content:    c.content,
     like_count: Number(c.like_count),
     created_at: c.created_at,
@@ -94,13 +125,19 @@ const updateComment = async (commentId, content) => {
 
   const c = result.rows[0];
   const nicknameResult = await pool.query(
-    'SELECT nickname FROM users WHERE user_id = $1',
+    'SELECT nickname, profile_image, role FROM users WHERE user_id = $1',
     [c.user_id]
   );
 
   return {
     comment_id:    Number(c.comment_id),
     user_nickname: nicknameResult.rows[0]?.nickname || `user_${c.user_id}`,
+    ...mapWriterFields({
+      user_id: c.user_id,
+      user_nickname: nicknameResult.rows[0]?.nickname,
+      author_profile_image: nicknameResult.rows[0]?.profile_image,
+      author_type: nicknameResult.rows[0]?.role,
+    }),
     content:       c.content,
     like_count:    Number(c.like_count),
     created_at:    c.created_at,
@@ -193,7 +230,7 @@ const getReplies = async (parentCommentId, page, size, userId) => {
        CASE WHEN rcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
        CASE WHEN rc.user_id = $4 THEN true ELSE false END         AS is_mine
      FROM recipe_comments rc
-     JOIN  users u ON u.user_id = rc.user_id
+     LEFT JOIN users u ON u.user_id = rc.user_id
      LEFT JOIN recipe_comment_likes rcl
             ON rcl.comment_id = rc.comment_id AND rcl.user_id = $4
      WHERE rc.parent_comment_id = $1
@@ -212,10 +249,11 @@ const getReplies = async (parentCommentId, page, size, userId) => {
 
   const replies = dataResult.rows.map((c) => ({
     comment_id:           Number(c.comment_id),
-    user_id:              Number(c.user_id),
+    user_id:              c.user_id === null || c.user_id === undefined ? null : Number(c.user_id),
     nickname:             c.user_nickname,
     author_profile_image: c.author_profile_image,
     author_type:          c.author_type,
+    ...mapWriterFields(c),
     content:              c.content,
     like_count:           Number(c.like_count),
     is_liked:             c.is_liked,
@@ -240,7 +278,7 @@ const createReply = async (recipeId, parentCommentId, content, user) => {
   }
 
   const nicknameResult = await pool.query(
-    'SELECT nickname FROM users WHERE user_id = $1',
+    'SELECT nickname, profile_image, role FROM users WHERE user_id = $1',
     [user.id]
   );
   const nickname = nicknameResult.rows[0]?.nickname || `user_${user.id}`;
@@ -264,6 +302,12 @@ const createReply = async (recipeId, parentCommentId, content, user) => {
     parent_comment_id:  parentCommentId,
     user_id:            Number(user.id),
     nickname:           nickname,
+    ...mapWriterFields({
+      user_id: user.id,
+      user_nickname: nickname,
+      author_profile_image: nicknameResult.rows[0]?.profile_image,
+      author_type: nicknameResult.rows[0]?.role,
+    }),
     content:            c.content,
     like_count:         Number(c.like_count),
     created_at:         c.created_at,
