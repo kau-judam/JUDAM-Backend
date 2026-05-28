@@ -141,6 +141,74 @@ const parseFundingListField = (value, fallback = []) => {
   return fallback;
 };
 
+const normalizeRawMaterialItem = (material) => {
+  if (material === undefined || material === null || material === '') {
+    return null;
+  }
+
+  if (typeof material !== 'object' || Array.isArray(material)) {
+    const name = toTrimmedString(material);
+    return name ? { name, origin: null } : null;
+  }
+
+  const name = toTrimmedString(
+    material.name
+      ?? material.ingredient
+      ?? material.mainIngredient
+      ?? material.main_ingredient
+      ?? material.rawMaterial
+      ?? material.raw_material
+  );
+  const origin = toTrimmedString(
+    material.origin
+      ?? material.originName
+      ?? material.origin_name
+      ?? material.countryOfOrigin
+      ?? material.country_of_origin
+      ?? material.country
+      ?? material.region
+  );
+
+  if (!name && !origin) {
+    return null;
+  }
+
+  return {
+    ...material,
+    name: name || null,
+    origin: origin || null,
+  };
+};
+
+const parseFundingRawMaterialsField = (value, fallback = []) => {
+  if (value === undefined || value === null || value === '') return fallback;
+
+  if (Array.isArray(value)) {
+    const materials = value.map(normalizeRawMaterialItem).filter(Boolean);
+    return materials.length > 0 ? materials : fallback;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parseFundingRawMaterialsField(parsed, fallback);
+    } catch (error) {
+      const name = toTrimmedString(value);
+      return name ? [{ name, origin: null }] : fallback;
+    }
+  }
+
+  if (typeof value === 'object') {
+    const material = normalizeRawMaterialItem(value);
+    return material ? [material] : fallback;
+  }
+
+  return fallback;
+};
+
+const normalizeRawMaterialsStorageValue = (value) =>
+  JSON.stringify(parseFundingRawMaterialsField(value, []));
+
 const stringifyJsonField = (value, fallback = []) => {
   if (value === undefined || value === null) {
     return JSON.stringify(fallback);
@@ -902,7 +970,7 @@ const resolveFundingId = async (id) => {
 const buildFundingDraftPayload = (draft, documents = []) => {
   const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
   const subIngredients = parseFundingListField(draft.sub_ingredients);
-  const rawMaterials = parseFundingListField(draft.raw_materials);
+  const rawMaterials = parseFundingRawMaterialsField(draft.raw_materials);
   const tags = parseJsonField(draft.tags);
   const budgetPlan = parseOriginalTextField(draft.budget_plan);
   const schedulePlan = parseOriginalTextField(draft.schedule_plan);
@@ -1336,7 +1404,7 @@ const buildFundingDraftPatchFromPayload = (bodyPayload = {}, currentDraft = {}) 
 
   addFromPayload('product_type', ['productType', 'product_type'], ['legalInfo'], normalizeDraftTextValue, 57);
   addFromPayload('volume', ['volume'], ['legalInfo'], normalizeDraftNumberValue, 57);
-  addFromPayload('raw_materials', ['rawMaterials', 'raw_materials'], ['legalInfo'], normalizeJsonStorageValue, 57);
+  addFromPayload('raw_materials', ['rawMaterials', 'raw_materials'], ['legalInfo'], normalizeRawMaterialsStorageValue, 57);
 
   const sweetnessCandidate = getPayloadCandidate(bodyPayload, ['sweetness'], ['tasteProfile']);
   const acidityCandidate = getPayloadCandidate(bodyPayload, ['acidity'], ['tasteProfile']);
@@ -2964,14 +3032,14 @@ const saveLegalInfo = async (req, res) => {
     alcoholPercentage,
     rawMaterials,
   } = req.body;
+  const normalizedRawMaterials = parseFundingRawMaterialsField(rawMaterials);
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
     !productType ||
     volume === undefined ||
-    alcoholPercentage === undefined ||
-    !Array.isArray(rawMaterials)
+    alcoholPercentage === undefined
   ) {
     return res.status(400).json({
       status: 400,
@@ -2990,14 +3058,14 @@ const saveLegalInfo = async (req, res) => {
     });
   }
 
-  if (rawMaterials.length === 0) {
+  if (normalizedRawMaterials.length === 0) {
     return res.status(400).json({
       status: 400,
       message: '최소 1개 이상의 원재료를 입력해야 합니다.',
     });
   }
 
-  const hasInvalidMaterial = rawMaterials.some(
+  const hasInvalidMaterial = normalizedRawMaterials.some(
     (material) => !material.name || !material.origin
   );
 
@@ -3035,7 +3103,7 @@ const saveLegalInfo = async (req, res) => {
         productType,
         Number(volume),
         Number(alcoholPercentage),
-        JSON.stringify(rawMaterials),
+        JSON.stringify(normalizedRawMaterials),
         Number(draftId),
       ]
     );
@@ -3056,7 +3124,7 @@ const saveLegalInfo = async (req, res) => {
       productType: draft.product_type,
       volume: draft.volume,
       alcoholPercentage: draft.alcohol_percentage,
-      rawMaterials: parseJsonField(draft.raw_materials, []),
+      rawMaterials: parseFundingRawMaterialsField(draft.raw_materials),
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '법적 고시 정보가 저장되었습니다.',
@@ -6025,7 +6093,7 @@ const getFundingDetail = async (req, res) => {
     const mainIngredient = funding.main_ingredient || null;
     const subIngredients = parseFundingListField(funding.sub_ingredients);
     const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
-    const rawMaterials = parseJsonField(funding.raw_materials);
+    const rawMaterials = parseFundingRawMaterialsField(funding.raw_materials);
 
     const optionResult = await pool.query(
       `
