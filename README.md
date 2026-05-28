@@ -20,6 +20,7 @@ More details:
 - Harness paths: `docs/HARNESS.md`
 - Funding API status: `docs/FUNDING_API_STATUS.md`
 - Funding frontend handoff: `docs/FRONTEND_HANDOFF_FUNDING.md`
+- Brewery dashboard API: `docs/BREWERY_DASHBOARD_API.md`
 - Work log: `docs/WORK_LOG.md`
 - Database: `docs/DATABASE.md`
 

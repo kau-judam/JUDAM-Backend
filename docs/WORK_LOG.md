@@ -554,6 +554,39 @@
 - `node --check src/controllers/funding.controller.js`, `node --check src/routes/fundingRoutes.js`, `node --check src/middlewares/optionalAuthMiddleware.js` 통과
 - `git diff --check` 통과
 
+### Brewery Dashboard Profile And Notifications
+
+완료:
+
+- 양조장 대시보드 프로필 API를 추가했습니다.
+  - `GET /api/breweries/me/profile`
+  - `PATCH /api/breweries/me/profile`
+- 양조장 대시보드 알림 API를 추가했습니다.
+  - `GET /api/breweries/me/dashboard/basic-info`
+  - `GET /api/breweries/me/dashboard/notifications`
+  - `PATCH /api/notifications/:notificationId/read`
+  - `PATCH /api/notifications/read-all`
+- `brewery_profiles` 테이블을 추가해 대시보드 프로필 표시/수정용 값을 DB에 저장하도록 했습니다.
+- `brewery_dashboard_notifications` 테이블을 추가해 알림과 읽음 상태를 DB에 저장하도록 했습니다.
+- `brewery_auth`는 owner 권한 문제로 ALTER하지 않고, 인증 원본/read-only 값 조회용으로 유지했습니다.
+- 사업자등록번호와 전화번호는 조회 전용으로 유지했습니다.
+- 프로필 수정의 `email`은 로그인 계정 이메일이 아니라 양조장 연락용 이메일인 `brewery_profiles.contact_email`에 저장합니다.
+
+문서:
+
+- `docs/BREWERY_DASHBOARD_API.md`
+- `database/20260528_brewery_dashboard_profile_notifications.sql`
+
+검증:
+
+- Judam DB에 `database/20260528_brewery_dashboard_profile_notifications.sql` 적용 완료
+- `brewery_profiles`, `brewery_dashboard_notifications` 테이블 생성 확인
+- 임시 양조장 계정/인증/프로필/알림 row로 DB-backed 스모크 테스트 완료 후 테스트 데이터 삭제
+- `node --check src/services/brewery.service.js` 통과
+- `node --check src/controllers/brewery.controller.js` 통과
+- `node --check src/controllers/notification.controller.js` 통과
+- `node --check src/routes/brewery.routes.js`, `src/routes/notification.routes.js`, `src/routes/index.js` 통과
+
 ## Backlog
 
 - 전체 펀딩 API 통합 테스트 작성 또는 Postman/curl 시나리오 정리
