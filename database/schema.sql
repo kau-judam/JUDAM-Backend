@@ -369,6 +369,18 @@ CREATE TABLE IF NOT EXISTS funding_support_options (
     ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS funding_shares (
+  funding_id BIGINT PRIMARY KEY,
+  share_url TEXT NOT NULL,
+  share_count INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_funding_shares_funding
+    FOREIGN KEY (funding_id)
+    REFERENCES funding_projects(funding_id)
+    ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS orders (
   order_id BIGSERIAL PRIMARY KEY,
   user_id BIGINT,
