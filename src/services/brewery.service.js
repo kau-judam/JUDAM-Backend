@@ -3,11 +3,18 @@ const pool = require('../config/db');
 const { uploadFileToS3 } = require('./s3.service');
 
 const MAX_BUSINESS_LICENSE_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_BREWERY_PROFILE_IMAGE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_BUSINESS_LICENSE_EXTENSIONS = new Set(['.pdf', '.jpg', '.jpeg', '.png']);
 const ALLOWED_BUSINESS_LICENSE_MIME_TYPES = new Set([
   'application/pdf',
   'image/jpeg',
   'image/png',
+]);
+const ALLOWED_BREWERY_PROFILE_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+const ALLOWED_BREWERY_PROFILE_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
 ]);
 
 const mapApplication = (row) => ({
@@ -66,6 +73,114 @@ const mapBreweryDashboardBasicInfo = (row) => ({
   addressDetail: row.business_address_detail || null,
 });
 
+const parseImageUrls = (value) => {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch (error) {
+      return value.trim() ? [value.trim()] : [];
+    }
+  }
+
+  return [];
+};
+
+const resolveFundingThumbnailUrl = (row) => {
+  if (row.thumbnail_url) {
+    return row.thumbnail_url;
+  }
+
+  return parseImageUrls(row.image_urls)[0] || row.recipe_image_url || null;
+};
+
+const normalizeFundingStatus = (status) => String(status || '').trim().toUpperCase();
+
+const getDashboardFundingStatusLabel = (row) => {
+  const status = normalizeFundingStatus(row.status);
+  const currentAmount = Number(row.current_amount || 0);
+  const targetAmount = Number(row.target_amount || 0);
+  const remainingDays = row.remaining_days === null || row.remaining_days === undefined
+    ? null
+    : Number(row.remaining_days);
+  const startsInDays = row.starts_in_days === null || row.starts_in_days === undefined
+    ? null
+    : Number(row.starts_in_days);
+
+  if (['PRODUCTION', 'IN_PRODUCTION', 'PRODUCING', 'MAKING'].includes(status)) {
+    return '제작 중';
+  }
+
+  if (['SHIPPING', 'DELIVERING'].includes(status)) {
+    return '배송 중';
+  }
+
+  if (['COMPLETED', 'DELIVERED', 'DONE'].includes(status)) {
+    return '완료';
+  }
+
+  if (['FAILED', 'FAILURE', 'CANCELLED', 'CANCELED'].includes(status)) {
+    return '펀딩 실패';
+  }
+
+  if (remainingDays !== null && remainingDays < 0) {
+    return targetAmount > 0 && currentAmount >= targetAmount ? '펀딩 성공' : '펀딩 실패';
+  }
+
+  if (['SUCCESSFUL', 'SUCCESS', 'FUNDING_SUCCESS'].includes(status)) {
+    return '펀딩 성공';
+  }
+
+  if (startsInDays !== null && startsInDays > 0) {
+    return '펀딩 예정';
+  }
+
+  if (['READY', 'SCHEDULED', 'APPROVED'].includes(status)) {
+    return '펀딩 예정';
+  }
+
+  if (targetAmount > 0 && currentAmount >= targetAmount) {
+    return '목표 달성';
+  }
+
+  return '진행 중';
+};
+
+const mapBreweryDashboardFunding = (row) => {
+  const currentAmount = Number(row.current_amount || 0);
+  const targetAmount = Number(row.target_amount || 0);
+  const rawRemainingDays = row.remaining_days === null || row.remaining_days === undefined
+    ? null
+    : Number(row.remaining_days);
+
+  return {
+    fundingId: Number(row.funding_id),
+    title: row.title,
+    breweryName: row.brewery_name || null,
+    thumbnailUrl: resolveFundingThumbnailUrl(row),
+    currentAmount,
+    targetAmount,
+    achievementRate: targetAmount > 0 ? Math.floor((currentAmount / targetAmount) * 100) : 0,
+    status: getDashboardFundingStatusLabel(row),
+    remainingDays: rawRemainingDays === null ? null : Math.max(rawRemainingDays, 0),
+    endDate: row.end_date || null,
+  };
+};
+
+const mapBreweryFundingSummary = (row) => ({
+  activeFundingCount: Number(row.active_funding_count || 0),
+  totalFundingCount: Number(row.total_funding_count || 0),
+  totalParticipantCount: Number(row.total_participant_count || 0),
+});
+
 const mapBreweryNotification = (row) => ({
   notificationId: Number(row.notification_id),
   type: row.type,
@@ -109,6 +224,56 @@ const validateBusinessLicenseFile = (file) => {
       `file_size=${file.size}`,
     );
   }
+};
+
+const validateBreweryProfileImageFile = (file) => {
+  if (!file) {
+    throw createServiceError(
+      400,
+      '프로필 이미지 파일을 첨부해주세요.',
+      'image 필드는 필수입니다.',
+    );
+  }
+
+  const extension = path.extname(file.originalname || '').toLowerCase();
+
+  if (
+    !ALLOWED_BREWERY_PROFILE_IMAGE_EXTENSIONS.has(extension)
+    || !ALLOWED_BREWERY_PROFILE_IMAGE_MIME_TYPES.has(file.mimetype)
+  ) {
+    throw createServiceError(
+      400,
+      '프로필 이미지 파일 형식이 올바르지 않습니다.',
+      '프로필 이미지는 jpg, jpeg, png, webp 파일만 업로드할 수 있습니다.',
+    );
+  }
+
+  if (file.size > MAX_BREWERY_PROFILE_IMAGE_SIZE) {
+    throw createServiceError(
+      400,
+      '프로필 이미지는 최대 5MB까지 업로드할 수 있습니다.',
+      `file_size=${file.size}`,
+    );
+  }
+};
+
+const uploadProfileImageFile = async (file, userId) => {
+  if (process.env.AWS_S3_BUCKET && process.env.AWS_REGION) {
+    try {
+      return await uploadFileToS3(
+        file.buffer,
+        file.originalname,
+        file.mimetype,
+        userId,
+      );
+    } catch (error) {
+      if (process.env.FILE_UPLOAD_STRICT_S3 === 'true') {
+        throw error;
+      }
+    }
+  }
+
+  return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 };
 
 const extractS3KeyFromUrl = (fileUrl) => {
@@ -898,6 +1063,205 @@ const updateBreweryProfileByUserId = async ({ userId, profile }) => {
   return mapBreweryProfile(rows[0]);
 };
 
+const uploadBreweryProfileImageByUserId = async ({ userId, file }) => {
+  await assertBreweryDashboardUser(userId);
+  validateBreweryProfileImageFile(file);
+
+  const profileImageUrl = await uploadProfileImageFile(file, userId);
+  const profile = await updateBreweryProfileByUserId({
+    userId,
+    profile: {
+      profileImageUrl,
+    },
+  });
+
+  return {
+    profileImageUrl,
+    profile,
+  };
+};
+
+const getBreweryFundingSummaryByUserId = async (userId) => {
+  await assertBreweryDashboardUser(userId);
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        COUNT(DISTINCT fp.funding_id) FILTER (
+          WHERE fp.status IN ('ONGOING', 'ACTIVE')
+            AND (fp.end_date IS NULL OR fp.end_date >= CURRENT_DATE)
+        )::int AS active_funding_count,
+        COUNT(DISTINCT fp.funding_id)::int AS total_funding_count,
+        COUNT(DISTINCT o.user_id) FILTER (
+          WHERE o.order_status = 'PAID'
+            AND o.user_id IS NOT NULL
+        )::int AS total_participant_count
+      FROM funding_projects fp
+      LEFT JOIN orders o ON o.funding_id = fp.funding_id
+      WHERE fp.brewery_user_id = $1
+    `,
+    [userId],
+  );
+
+  return mapBreweryFundingSummary(rows[0] || {});
+};
+
+const getBreweryDashboardFundingsByUserId = async ({
+  userId,
+  status,
+  page,
+  size,
+}) => {
+  await assertBreweryDashboardUser(userId);
+
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  const statusConditions = {
+    active: `
+      (
+        fp.status IN ('READY', 'SCHEDULED', 'APPROVED', 'ACTIVE', 'ONGOING', 'ACHIEVED', 'GOAL_ACHIEVED')
+        OR (
+          fp.goal_amount > 0
+          AND fp.current_amount >= fp.goal_amount
+          AND fp.status NOT IN (
+            'SUCCESSFUL',
+            'SUCCESS',
+            'FUNDING_SUCCESS',
+            'ENDED',
+            'COMPLETED',
+            'DELIVERED',
+            'DONE',
+            'FAILED',
+            'FAILURE',
+            'PRODUCTION',
+            'IN_PRODUCTION',
+            'PRODUCING',
+            'MAKING',
+            'SHIPPING',
+            'DELIVERING',
+            'CANCELLED',
+            'CANCELED'
+          )
+        )
+      )
+      AND (fp.end_date IS NULL OR fp.end_date >= CURRENT_DATE)
+    `,
+    completed: `
+      (
+        fp.status IN (
+          'ENDED',
+          'COMPLETED',
+          'DELIVERED',
+          'DONE',
+          'SUCCESSFUL',
+          'SUCCESS',
+          'FUNDING_SUCCESS',
+          'FAILED',
+          'FAILURE',
+          'PRODUCTION',
+          'IN_PRODUCTION',
+          'PRODUCING',
+          'MAKING',
+          'SHIPPING',
+          'DELIVERING',
+          'CANCELLED',
+          'CANCELED'
+        )
+        OR (fp.end_date IS NOT NULL AND fp.end_date < CURRENT_DATE)
+      )
+    `,
+  };
+
+  const statusCondition = statusConditions[normalizedStatus];
+
+  if (!statusCondition) {
+    throw createServiceError(
+      400,
+      '펀딩 목록 상태 값이 올바르지 않습니다.',
+      'status는 active 또는 completed여야 합니다.',
+    );
+  }
+
+  const baseValues = [userId];
+  const baseWhere = `
+    WHERE fp.brewery_user_id = $1
+      AND ${statusCondition}
+  `;
+
+  const countResult = await pool.query(
+    `
+      SELECT COUNT(*)::int AS total_count
+      FROM funding_projects fp
+      ${baseWhere}
+    `,
+    baseValues,
+  );
+
+  const totalElements = Number(countResult.rows[0]?.total_count || 0);
+  const { rows } = await pool.query(
+    `
+      SELECT
+        fp.funding_id,
+        fp.title,
+        COALESCE(bp.brewery_name, ba.brewery_name, u.nickname) AS brewery_name,
+        fp.thumbnail_url,
+        fp.image_urls,
+        r.image_url AS recipe_image_url,
+        fp.current_amount,
+        fp.goal_amount AS target_amount,
+        fp.status,
+        fp.start_date,
+        fp.end_date,
+        CASE
+          WHEN fp.start_date IS NULL THEN NULL
+          ELSE (fp.start_date - CURRENT_DATE)::int
+        END AS starts_in_days,
+        CASE
+          WHEN fp.end_date IS NULL THEN NULL
+          ELSE (fp.end_date - CURRENT_DATE)::int
+        END AS remaining_days
+      FROM funding_projects fp
+      JOIN users u ON u.user_id = fp.brewery_user_id
+      LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+      LEFT JOIN brewery_profiles bp ON bp.user_id = fp.brewery_user_id
+      LEFT JOIN LATERAL (
+        SELECT brewery_name
+        FROM brewery_auth
+        WHERE user_id = fp.brewery_user_id
+          AND status = 'APPROVED'
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      ) ba ON TRUE
+      ${baseWhere}
+      ORDER BY
+        CASE
+          WHEN fp.end_date IS NULL THEN 1
+          ELSE 0
+        END,
+        fp.end_date ASC NULLS LAST,
+        fp.created_at DESC,
+        fp.funding_id DESC
+      LIMIT $2
+      OFFSET $3
+    `,
+    [
+      ...baseValues,
+      size,
+      page * size,
+    ],
+  );
+
+  const fundings = rows.map(mapBreweryDashboardFunding);
+
+  return {
+    content: fundings,
+    data: fundings,
+    page,
+    size,
+    totalElements,
+    totalPages: Math.ceil(totalElements / size),
+  };
+};
+
 const getBreweryNotificationsByUserId = async (userId) => {
   await assertBreweryDashboardUser(userId);
 
@@ -991,6 +1355,9 @@ module.exports = {
   getBreweryProfileByUserId,
   getBreweryDashboardBasicInfoByUserId,
   updateBreweryProfileByUserId,
+  uploadBreweryProfileImageByUserId,
+  getBreweryFundingSummaryByUserId,
+  getBreweryDashboardFundingsByUserId,
   getBreweryNotificationsByUserId,
   markBreweryNotificationRead,
   markAllBreweryNotificationsRead,

@@ -5,6 +5,9 @@ const {
   getMyBreweryProfile,
   getMyBreweryDashboardBasicInfo,
   updateMyBreweryProfile,
+  uploadMyBreweryProfileImage,
+  getMyBreweryDashboardFundingSummary,
+  getMyBreweryDashboardFundings,
   getMyBreweryDashboardNotifications,
   createBreweryApplication,
   getBreweryApplications,
@@ -19,7 +22,19 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/me/profile', authMiddleware, getMyBreweryProfile);
 router.patch('/me/profile', authMiddleware, updateMyBreweryProfile);
+router.patch(
+  '/me/profile/image',
+  authMiddleware,
+  upload.fields([
+    { name: 'image', maxCount: 1 },
+    { name: 'profileImage', maxCount: 1 },
+    { name: 'file', maxCount: 1 },
+  ]),
+  uploadMyBreweryProfileImage,
+);
 router.get('/me/dashboard/basic-info', authMiddleware, getMyBreweryDashboardBasicInfo);
+router.get('/me/dashboard/funding-summary', authMiddleware, getMyBreweryDashboardFundingSummary);
+router.get('/me/dashboard/fundings', authMiddleware, getMyBreweryDashboardFundings);
 router.get('/me/dashboard/notifications', authMiddleware, getMyBreweryDashboardNotifications);
 
 router.post('/applications', authMiddleware, upload.single('businessLicense'), createBreweryApplication);

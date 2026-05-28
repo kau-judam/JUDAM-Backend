@@ -8,6 +8,9 @@ const {
   getBreweryProfileByUserId,
   getBreweryDashboardBasicInfoByUserId,
   updateBreweryProfileByUserId,
+  uploadBreweryProfileImageByUserId,
+  getBreweryFundingSummaryByUserId,
+  getBreweryDashboardFundingsByUserId,
   getBreweryNotificationsByUserId,
 } = require('../services/brewery.service');
 const { verifyAuthPhoneVerificationToken } = require('../services/auth-phone.service');
@@ -71,6 +74,26 @@ const getOptionalEstablishedYear = (body) => {
   }
 
   return year;
+};
+
+const parsePaginationQuery = (query = {}) => {
+  const page = query.page === undefined ? 0 : Number(query.page);
+  const size = query.size === undefined ? 10 : Number(query.size);
+
+  if (
+    !Number.isInteger(page) ||
+    !Number.isInteger(size) ||
+    page < 0 ||
+    size <= 0 ||
+    size > 100
+  ) {
+    const error = new Error('페이지 요청값이 올바르지 않습니다.');
+    error.statusCode = 400;
+    error.detail = 'page는 0 이상의 정수, size는 1부터 100 사이의 정수여야 합니다.';
+    throw error;
+  }
+
+  return { page, size };
 };
 
 const getMyBreweryProfile = async (req, res) => {
@@ -159,6 +182,114 @@ const updateMyBreweryProfile = async (req, res) => {
       res,
       error.statusCode || 500,
       error.message || '양조장 프로필 수정에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const getUploadedProfileImageFile = (req) => {
+  if (req.file) {
+    return req.file;
+  }
+
+  if (!req.files || typeof req.files !== 'object') {
+    return null;
+  }
+
+  const fileGroups = [
+    req.files.image,
+    req.files.profileImage,
+    req.files.file,
+  ];
+
+  for (const group of fileGroups) {
+    if (Array.isArray(group) && group[0]) {
+      return group[0];
+    }
+  }
+
+  return null;
+};
+
+const uploadMyBreweryProfileImage = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  try {
+    const result = await uploadBreweryProfileImageByUserId({
+      userId,
+      file: getUploadedProfileImageFile(req),
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 프로필 이미지 업로드에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const getMyBreweryDashboardFundingSummary = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  try {
+    const summary = await getBreweryFundingSummaryByUserId(userId);
+
+    return res.status(200).json(summary);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 대시보드 펀딩 현황 조회에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const getMyBreweryDashboardFundings = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  let pagination;
+
+  try {
+    pagination = parsePaginationQuery(req.query);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 400,
+      error.message,
+      error.detail || error.message,
+    );
+  }
+
+  try {
+    const result = await getBreweryDashboardFundingsByUserId({
+      userId,
+      status: req.query.status,
+      page: pagination.page,
+      size: pagination.size,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 대시보드 펀딩 목록 조회에 실패했습니다.',
       error.detail || error.message,
     );
   }
@@ -494,6 +625,9 @@ module.exports = {
   getMyBreweryProfile,
   getMyBreweryDashboardBasicInfo,
   updateMyBreweryProfile,
+  uploadMyBreweryProfileImage,
+  getMyBreweryDashboardFundingSummary,
+  getMyBreweryDashboardFundings,
   getMyBreweryDashboardNotifications,
   createBreweryApplication,
   getBreweryApplications,

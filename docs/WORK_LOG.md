@@ -561,8 +561,11 @@
 - 양조장 대시보드 프로필 API를 추가했습니다.
   - `GET /api/breweries/me/profile`
   - `PATCH /api/breweries/me/profile`
+  - `PATCH /api/breweries/me/profile/image`
 - 양조장 대시보드 알림 API를 추가했습니다.
   - `GET /api/breweries/me/dashboard/basic-info`
+  - `GET /api/breweries/me/dashboard/funding-summary`
+  - `GET /api/breweries/me/dashboard/fundings`
   - `GET /api/breweries/me/dashboard/notifications`
   - `PATCH /api/notifications/:notificationId/read`
   - `PATCH /api/notifications/read-all`
@@ -571,6 +574,17 @@
 - `brewery_auth`는 owner 권한 문제로 ALTER하지 않고, 인증 원본/read-only 값 조회용으로 유지했습니다.
 - 사업자등록번호와 전화번호는 조회 전용으로 유지했습니다.
 - 프로필 수정의 `email`은 로그인 계정 이메일이 아니라 양조장 연락용 이메일인 `brewery_profiles.contact_email`에 저장합니다.
+- 프로필 이미지 multipart 업로드를 추가하고, 업로드 결과 URL을 `brewery_profiles.profile_image_url`에 저장하도록 했습니다.
+  - `image`, `profileImage`, `file` 필드명을 허용합니다.
+  - `jpg`, `jpeg`, `png`, `webp` 파일을 최대 5MB까지 허용합니다.
+  - S3 실패 시 `FILE_UPLOAD_STRICT_S3=true`가 아니면 data URL fallback을 저장합니다.
+- 내 펀딩 현황 요약 API를 추가했습니다.
+  - `funding_projects`와 `orders`를 실제 DB 기준으로 집계합니다.
+  - 추가 마이그레이션은 필요하지 않습니다.
+- 내 펀딩 현황 목록 API를 추가했습니다.
+  - `status=active|completed`, `page`, `size` 쿼리를 지원합니다.
+  - 로그인한 양조장 계정의 `funding_projects.brewery_user_id` 기준으로만 조회합니다.
+  - 카드 표시용 `fundingId`, `title`, `breweryName`, `thumbnailUrl`, `currentAmount`, `targetAmount`, `achievementRate`, `status`, `remainingDays`, `endDate`를 반환합니다.
 
 문서:
 
@@ -581,7 +595,10 @@
 
 - Judam DB에 `database/20260528_brewery_dashboard_profile_notifications.sql` 적용 완료
 - `brewery_profiles`, `brewery_dashboard_notifications` 테이블 생성 확인
+- 2026-05-28 DB 재연결 후 `judam` / `judam_jaewon` 기준 양조장 대시보드 필수 테이블/컬럼 누락 0건 확인
+- `brewery_profiles`, `brewery_dashboard_notifications`의 FK/UNIQUE/CHECK 제약조건과 조회용 인덱스 확인
 - 임시 양조장 계정/인증/프로필/알림 row로 DB-backed 스모크 테스트 완료 후 테스트 데이터 삭제
+- 현재 `brewery_profiles`, `brewery_dashboard_notifications` row count는 0건입니다. 프로필 row는 최초 프로필 수정/이미지 업로드 시 생성되고, 알림 row는 알림 생성 로직이 넣을 때 생성됩니다.
 - `node --check src/services/brewery.service.js` 통과
 - `node --check src/controllers/brewery.controller.js` 통과
 - `node --check src/controllers/notification.controller.js` 통과
