@@ -8932,59 +8932,7 @@ const createFundingReview = async (req, res) => {
       parseOptionalBoolean(recordVisibility) ??
       true;
 
-    const existingResult = await pool.query(
-      `
-      SELECT review_id
-      FROM funding_reviews
-      WHERE funding_id = $1
-      AND user_id = $2
-      `,
-      [Number(fundingId), userId]
-    );
-
-    const result = existingResult.rows.length > 0
-      ? await pool.query(
-        `
-        UPDATE funding_reviews
-        SET
-          rating = $1,
-          title = $2,
-          content = $3,
-          image_urls = $4,
-          mood = $5,
-          pairing = $6,
-          tags = $7,
-          record_visibility = $8,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE review_id = $9
-        RETURNING
-          review_id,
-          funding_id,
-          user_id,
-          rating,
-          title,
-          content,
-          image_urls,
-          mood,
-          pairing,
-          tags,
-          record_visibility,
-          created_at,
-          updated_at
-        `,
-        [
-          Number(rating),
-          title || null,
-          normalizedContent,
-          JSON.stringify(normalizedImageUrls),
-          mood || null,
-          pairing || null,
-          JSON.stringify(normalizedTags),
-          normalizedRecordVisibility,
-          existingResult.rows[0].review_id,
-        ]
-      )
-      : await pool.query(
+    const result = await pool.query(
       `
       INSERT INTO funding_reviews (
         funding_id,
@@ -9028,22 +8976,56 @@ const createFundingReview = async (req, res) => {
       ]
     );
 
-    const review = await getFundingReviewById({
-      fundingId: Number(fundingId),
-      reviewId: result.rows[0].review_id,
-      userId,
-    }) || result.rows[0];
-    const aiTasteUpdate = await updateFundingReviewAiTasteProfile({
-      userId,
-      review,
-      requestBody: req.body || {},
-      isCreate: existingResult.rows.length === 0,
-    });
+    const createdReview = result.rows[0];
+
+    if (!createdReview) {
+      return res.status(500).json({
+        status: 500,
+        message: '후기 등록 결과를 확인할 수 없습니다.',
+      });
+    }
+
+    let review = createdReview;
+    try {
+      review = await getFundingReviewById({
+        fundingId: Number(fundingId),
+        reviewId: createdReview.review_id,
+        userId,
+      }) || createdReview;
+    } catch (lookupError) {
+      console.warn('Funding review lookup failed after create', {
+        fundingId: Number(fundingId),
+        reviewId: Number(createdReview.review_id),
+        userId,
+        message: lookupError.message,
+      });
+    }
+
+    let aiTasteUpdate = null;
+    try {
+      aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+        userId,
+        review,
+        requestBody: req.body || {},
+        isCreate: true,
+      });
+    } catch (aiError) {
+      console.warn('Funding review AI taste update failed after review create', {
+        fundingId: Number(fundingId),
+        reviewId: Number(createdReview.review_id),
+        userId,
+        message: aiError.message,
+      });
+      aiTasteUpdate = {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
 
     return res.status(201).json({
       ...mapFundingReview(review),
       ...(aiTasteUpdate ? { aiTasteUpdate } : {}),
-      message: existingResult.rows.length > 0 ? '후기가 수정되었습니다.' : '후기가 등록되었습니다.',
+      message: '후기가 등록되었습니다.',
     });
   } catch (error) {
     console.error(error);
