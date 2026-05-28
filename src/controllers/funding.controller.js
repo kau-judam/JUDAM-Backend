@@ -3576,73 +3576,61 @@ const loadBreweryInfo = async (req, res) => {
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '임시저장 프로젝트 ID가 올바르지 않습니다.',
+      message: '요청한 draftId가 유효하지 않습니다.',
     });
   }
 
   try {
     if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
 
-    const result = await pool.query(
+    const { rows } = await pool.query(
       `
       SELECT
         fd.brewery_id,
         fd.brewery_name,
-        creator_name,
-        profile_image_url,
-        creator_introduction,
-        business_name,
-        business_registration_number,
-        representative_name,
-        business_address,
-        business_address_detail,
-        contact_email,
-        contact_phone,
-        bank_name,
-        account_number,
-        account_holder,
-        phone_verified,
-        account_verified,
-        business_type,
-        business_category,
-        business_item,
-        tax_email,
-        identity_document_url,
-        business_registration_file_url,
+        fd.creator_name,
+        fd.creator_introduction,
+        fd.business_name,
+        fd.business_registration_number,
+        fd.representative_name,
+        fd.business_address,
+        fd.business_address_detail,
+        fd.contact_email,
+        fd.contact_phone,
+        fd.bank_name,
+        fd.account_number,
+        fd.account_holder,
+        fd.phone_verified,
+        fd.account_verified,
+        fd.business_type,
+        fd.business_category,
+        fd.business_item,
+        fd.identity_document_url,
+        fd.business_registration_file_url,
+        u.email AS user_email,
+        u.phone_number AS user_phone_number,
+        ba.application_id AS approved_application_id,
         ba.brewery_name AS approved_brewery_name,
         ba.location AS approved_brewery_location,
         ba.license_number AS approved_license_number,
         ba.business_address_detail AS approved_business_address_detail,
         ba.phone_number AS approved_phone_number,
-        ba.document_url AS approved_document_url,
-        ba.document_key AS approved_document_key,
-        ba.original_name AS approved_document_original_name,
-        ba.mime_type AS approved_document_mime_type,
-        ba.file_size AS approved_document_file_size,
-        ba.status AS approved_application_status,
-        u.nickname AS user_nickname,
-        u.email AS user_email,
-        u.phone_number AS user_phone_number,
-        u.profile_image AS user_profile_image
+        ba.document_url AS approved_business_registration_file_url
       FROM funding_drafts fd
-      LEFT JOIN users u ON u.user_id = fd.brewery_id
+      JOIN users u ON u.user_id = fd.brewery_id
       LEFT JOIN LATERAL (
         SELECT
+          application_id,
           brewery_name,
           location,
           license_number,
           business_address_detail,
           phone_number,
-          document_url,
-          document_key,
-          original_name,
-          mime_type,
-          file_size,
-          status
+          document_url
         FROM brewery_auth
         WHERE user_id = fd.brewery_id
+          AND status = 'APPROVED'
         ORDER BY
-          CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
           updated_at DESC,
           application_id DESC
         LIMIT 1
@@ -3652,88 +3640,87 @@ const loadBreweryInfo = async (req, res) => {
       [Number(draftId)]
     );
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '펀딩 초안 정보를 찾을 수 없습니다.',
       });
     }
 
-    const info = result.rows[0];
-    const resolvedBreweryName = info.approved_brewery_name || info.brewery_name || info.user_nickname || null;
-    const resolvedCreatorName = info.creator_name || info.user_nickname || info.approved_brewery_name || info.brewery_name || null;
-    const resolvedBusinessNumber = info.approved_license_number || info.business_registration_number || null;
-    const resolvedBusinessAddress = info.approved_brewery_location || info.business_address || null;
-    const resolvedBusinessAddressDetail =
-      info.approved_business_address_detail || info.business_address_detail || null;
-    const resolvedContactPhone = info.approved_phone_number || info.user_phone_number || info.contact_phone || null;
-    const resolvedPhoneVerified = Boolean(info.phone_verified || info.approved_phone_number || info.user_phone_number);
-    const resolvedBusinessRegistrationFileUrl =
-      info.approved_document_url || info.business_registration_file_url || null;
-    const businessLicense = resolvedBusinessRegistrationFileUrl
-      ? {
-          documentUrl: resolvedBusinessRegistrationFileUrl,
-          documentKey: info.approved_document_key || null,
-          originalName: info.approved_document_original_name || null,
-          mimeType: info.approved_document_mime_type || null,
-          fileSize: info.approved_document_file_size === null || info.approved_document_file_size === undefined
-            ? null
-            : Number(info.approved_document_file_size),
-        }
-      : null;
+    const info = rows[0];
+
+    if (!info.approved_application_id) {
+      return res.status(404).json({
+        status: 404,
+        message: '승인된 양조장 정보를 찾을 수 없습니다.',
+      });
+    }
+
+    const breweryName = info.approved_brewery_name || info.brewery_name || null;
+    const representativeName = info.representative_name || null;
+    const businessRegistrationNumber = info.approved_license_number || info.business_registration_number || null;
+    const businessAddress = info.approved_brewery_location || info.business_address || null;
+    const businessAddressDetail = info.approved_business_address_detail || info.business_address_detail || null;
+    const contactEmail = info.contact_email || info.user_email || null;
+    const contactPhone = info.contact_phone || info.approved_phone_number || info.user_phone_number || null;
+    const businessRegistrationFileUrl = info.business_registration_file_url || info.approved_business_registration_file_url || null;
+    const businessName = info.business_name || info.brewery_name || info.approved_brewery_name || null;
+
     const missingFields = [
-      ...(!resolvedCreatorName ? ['creatorName'] : []),
-      ...(!resolvedContactPhone ? ['phoneNumber'] : []),
-      ...(!resolvedPhoneVerified ? ['phoneVerification'] : []),
-      ...(!resolvedBusinessNumber ? ['businessNumber'] : []),
-      ...(!resolvedBusinessAddress ? ['businessAddress'] : []),
-      ...(!resolvedBusinessAddressDetail ? ['businessAddressDetail'] : []),
-      ...(!info.representative_name ? ['representativeName'] : []),
-      ...(!resolvedBusinessRegistrationFileUrl ? ['businessLicense'] : []),
-      ...(!info.creator_introduction ? ['creatorIntroduction'] : []),
+      ...(breweryName ? [] : ['breweryName']),
+      ...(representativeName ? [] : ['representativeName']),
+      ...(businessRegistrationNumber ? [] : ['businessRegistrationNumber']),
+      ...(businessAddress ? [] : ['businessAddress']),
+      ...(businessAddressDetail ? [] : ['businessAddressDetail']),
+      ...(contactEmail ? [] : ['contactEmail']),
+      ...(contactPhone ? [] : ['contactPhone']),
+      ...(info.bank_name ? [] : ['bankName']),
+      ...(info.account_number ? [] : ['accountNumber']),
+      ...(info.account_holder ? [] : ['accountHolder']),
+      ...(info.business_type ? [] : ['businessType']),
+      ...(businessName ? [] : ['businessName']),
+      ...(info.business_category ? [] : ['businessCategory']),
+      ...(info.business_item ? [] : ['businessItem']),
+      ...(info.creator_introduction ? [] : ['creatorIntroduction']),
+      ...(info.phone_verified ? [] : ['phoneVerified']),
+      ...(info.account_verified ? [] : ['accountVerified']),
+      ...(businessRegistrationFileUrl ? [] : ['businessRegistrationFileUrl']),
     ];
 
     return res.status(200).json({
-      breweryInfo: {
-        breweryId: info.brewery_id,
-        breweryName: resolvedBreweryName,
-        creatorName: resolvedCreatorName,
-        profileImageUrl: info.user_profile_image || info.profile_image_url,
-        creatorIntroduction: info.creator_introduction,
-        breweryBio: info.creator_introduction,
-        businessName: info.business_name || info.approved_brewery_name || info.brewery_name,
-        businessRegistrationNumber: resolvedBusinessNumber,
-        representativeName: info.representative_name,
-        businessAddress: resolvedBusinessAddress,
-        businessAddressDetail: resolvedBusinessAddressDetail,
-        contactEmail: info.user_email || info.contact_email,
-        contactPhone: resolvedContactPhone,
+      status: 200,
+      message: '양조장 정보 불러오기 성공',
+      data: {
+        breweryName,
+        representativeName,
+        businessRegistrationNumber,
+        businessAddress,
+        businessAddressDetail,
+        contactEmail,
+        contactPhone,
         bankName: info.bank_name,
         accountNumber: info.account_number,
         accountHolder: info.account_holder,
-        phoneVerified: resolvedPhoneVerified,
-        accountVerified: info.account_verified,
         businessType: info.business_type,
+        businessName,
         businessCategory: info.business_category,
         businessItem: info.business_item,
-        taxEmail: info.tax_email,
-        identityDocumentUrl: info.identity_document_url,
-        businessRegistrationFileUrl: resolvedBusinessRegistrationFileUrl,
-        businessLicense,
-        applicationStatus: info.approved_application_status || null,
+        creatorIntroduction: info.creator_introduction,
+        phoneVerified: !!info.phone_verified,
+        accountVerified: !!info.account_verified,
+        businessRegistrationFileUrl,
+        businessLicenseUrl: businessRegistrationFileUrl,
+        missingFields,
       },
-      missingFields,
-      message: '양조장 정보를 불러왔습니다. 본인 인증과 입금 계좌는 직접 입력해주세요.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '양조장 정보 불러오기 중 서버 오류가 발생했습니다.',
+      message: '양조장 정보 조회 중 오류가 발생했습니다.',
       error: error.message,
     });
   }
 };
-//프젝생성 추가2: 펀딩 프로젝트 파일 업로드:이미지,신분증,사업자등록증 파일을 한 API에서 처리
 const uploadFundingDraftFile = async (req, res) => {
   const { draftId } = req.params;
   const { fileType } = req.body;
