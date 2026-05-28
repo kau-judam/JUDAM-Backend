@@ -1598,6 +1598,7 @@ const FUNDING_PROJECT_MANAGEMENT_COLUMNS = [
 ];
 
 let fundingProjectManagementColumnsCache = null;
+let fundingProjectRawMaterialsColumnCache = null;
 
 const getFundingProjectManagementColumns = async () => {
   if (fundingProjectManagementColumnsCache) {
@@ -1624,8 +1625,33 @@ const projectManagementColumnSelect = (columns, columnName, alias) =>
     ? `fp.${columnName} AS ${alias}`
     : `NULL::text AS ${alias}`;
 
+const getFundingProjectRawMaterialsColumn = async () => {
+  if (fundingProjectRawMaterialsColumnCache) {
+    return fundingProjectRawMaterialsColumnCache;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT data_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'funding_projects'
+      AND column_name = 'raw_materials'
+    LIMIT 1
+    `
+  );
+
+  fundingProjectRawMaterialsColumnCache = rows[0] || null;
+  return fundingProjectRawMaterialsColumnCache;
+};
+
 const recoverFundingDraftFromProject = async (fundingId) => {
   const managementColumns = await getFundingProjectManagementColumns();
+  const rawMaterialsColumn = await getFundingProjectRawMaterialsColumn();
+  const projectRawMaterialsSelect = rawMaterialsColumn
+    ? 'fp.raw_materials::text AS project_raw_materials'
+    : 'NULL::text AS project_raw_materials';
+
   const { rows } = await pool.query(
     `
     SELECT
@@ -1670,6 +1696,7 @@ const recoverFundingDraftFromProject = async (fundingId) => {
       tp.carbonation,
       tp.alcohol_intensity,
       tp.flavor_notes,
+      ${projectRawMaterialsSelect},
       support_options.total_stock,
       ${projectManagementColumnSelect(managementColumns, 'budget_plan', 'project_budget_plan')},
       ${projectManagementColumnSelect(managementColumns, 'schedule_plan', 'project_schedule_plan')},
@@ -1850,7 +1877,26 @@ const recoverFundingDraftFromProject = async (fundingId) => {
     ]
   );
 
-  return result.rows[0] || null;
+  const recoveredDraft = result.rows[0] || null;
+  const recoveredRawMaterials = parseFundingRawMaterialsField(funding.project_raw_materials);
+
+  if (recoveredDraft && recoveredRawMaterials.length > 0) {
+    const updated = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        raw_materials = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $2
+      RETURNING *
+      `,
+      [JSON.stringify(recoveredRawMaterials), Number(recoveredDraft.draft_id)]
+    );
+
+    return updated.rows[0] || recoveredDraft;
+  }
+
+  return recoveredDraft;
 };
 
 const hydrateFundingDraftManagementFieldsFromProject = async (draft) => {
@@ -1982,7 +2028,7 @@ const findAndLinkFundingDraftByFundingId = async (fundingId) => {
 const syncFundingProjectFieldsFromDraft = async (draftId) => {
   const { rows } = await pool.query(
     `
-    SELECT funding_id, image_urls
+    SELECT funding_id, image_urls, raw_materials
     FROM funding_drafts
     WHERE draft_id = $1
       AND funding_id IS NOT NULL
@@ -2033,6 +2079,29 @@ const syncFundingProjectFieldsFromDraft = async (draftId) => {
       `,
       [
         normalizeJsonStorageValue(normalizeFundingImageUrlsInput(draft.image_urls).slice(0, 5), []),
+        Number(draft.funding_id),
+      ]
+    );
+  }
+
+  const rawMaterialsColumn = await getFundingProjectRawMaterialsColumn();
+  const normalizedRawMaterials = parseFundingRawMaterialsField(draft.raw_materials);
+
+  if (rawMaterialsColumn && normalizedRawMaterials.length > 0) {
+    const rawMaterialsAssignment = ['json', 'jsonb'].includes(rawMaterialsColumn.data_type)
+      ? '$1::jsonb'
+      : '$1';
+
+    await pool.query(
+      `
+      UPDATE funding_projects
+      SET
+        raw_materials = ${rawMaterialsAssignment},
+        updated_at = CURRENT_TIMESTAMP
+      WHERE funding_id = $2
+      `,
+      [
+        JSON.stringify(normalizedRawMaterials),
         Number(draft.funding_id),
       ]
     );
@@ -5975,6 +6044,10 @@ const getFundingDetail = async (req, res) => {
 
   try {
     await findAndLinkFundingDraftByFundingId(resolvedFundingId);
+    const rawMaterialsColumn = await getFundingProjectRawMaterialsColumn();
+    const projectRawMaterialsExpression = rawMaterialsColumn
+      ? 'fp.raw_materials::text'
+      : 'NULL::text';
 
     const fundingResult = await pool.query(
       `
@@ -6012,7 +6085,8 @@ const getFundingDetail = async (req, res) => {
         fd.product_type,
         COALESCE(
           NULLIF(NULLIF(BTRIM(fd.raw_materials::text), '[]'), 'null'),
-          NULLIF(NULLIF(BTRIM(raw_material_source.raw_materials::text), '[]'), 'null')
+          NULLIF(NULLIF(BTRIM(raw_material_source.raw_materials::text), '[]'), 'null'),
+          NULLIF(NULLIF(BTRIM(${projectRawMaterialsExpression}), '[]'), 'null')
         ) AS raw_materials,
         fd.introduction,
         fd.video_url,
