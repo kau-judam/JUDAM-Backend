@@ -4542,6 +4542,72 @@ const submitFundingDraft = async (req, res) => {
     const draft = draftResult.rows[0];
 
     if (draft.status === 'SUBMITTED') {
+      if (draft.funding_id) {
+        const fundingResult = await pool.query(
+          `
+          SELECT
+            funding_id,
+            title,
+            status,
+            goal_amount,
+            current_amount,
+            start_date,
+            end_date,
+            price_per_bottle,
+            shipping_fee,
+            created_at
+          FROM funding_projects
+          WHERE funding_id = $1
+          `,
+          [Number(draft.funding_id)]
+        );
+        const funding = fundingResult.rows[0] || {};
+        const responseData = {
+          draftId: Number(draft.draft_id),
+          fundingId: Number(draft.funding_id),
+          numericFundingId: Number(draft.funding_id),
+          recipeId: draft.recipe_id === null || draft.recipe_id === undefined
+            ? null
+            : Number(draft.recipe_id),
+          status: draft.status,
+          fundingStatus: funding.status || null,
+          progressRate: Number(draft.progress_rate || 0),
+          submittedAt: draft.submitted_at,
+          updatedAt: draft.updated_at,
+          funding: funding.funding_id
+            ? {
+              fundingId: Number(funding.funding_id),
+              numericFundingId: Number(funding.funding_id),
+              title: funding.title,
+              status: funding.status,
+              goalAmount: funding.goal_amount,
+              currentAmount: funding.current_amount,
+              startDate: funding.start_date,
+              endDate: funding.end_date,
+              pricePerBottle: funding.price_per_bottle,
+              shippingFee: funding.shipping_fee,
+              createdAt: funding.created_at,
+            }
+            : null,
+        };
+
+        return res.status(200).json({
+          status: 200,
+          message: '이미 제출된 펀딩 프로젝트입니다.',
+          data: responseData,
+          draftId: responseData.draftId,
+          fundingId: responseData.fundingId,
+          numericFundingId: responseData.numericFundingId,
+          recipeId: responseData.recipeId,
+          draftStatus: responseData.status,
+          fundingStatus: responseData.fundingStatus,
+          progressRate: responseData.progressRate,
+          submittedAt: responseData.submittedAt,
+          updatedAt: responseData.updatedAt,
+          funding: responseData.funding,
+        });
+      }
+
       return res.status(400).json({
         status: 400,
         message: '이미 제출된 프로젝트입니다.',
@@ -4777,11 +4843,39 @@ const submitFundingDraft = async (req, res) => {
         });
       }
 
+      const responseData = {
+        draftId: Number(submittedDraft.draft_id),
+        fundingId: Number(funding.funding_id),
+        numericFundingId: Number(funding.funding_id),
+        recipeId: Number(recipeId),
+        status: submittedDraft.status,
+        fundingStatus: funding.status,
+        progressRate: Number(submittedDraft.progress_rate || 0),
+        submittedAt: submittedDraft.submitted_at,
+        updatedAt: submittedDraft.updated_at,
+        funding: {
+          fundingId: Number(funding.funding_id),
+          numericFundingId: Number(funding.funding_id),
+          title: funding.title,
+          status: funding.status,
+          goalAmount: funding.goal_amount,
+          currentAmount: funding.current_amount,
+          startDate: funding.start_date,
+          endDate: funding.end_date,
+          pricePerBottle: funding.price_per_bottle,
+          shippingFee: funding.shipping_fee,
+          createdAt: funding.created_at,
+        },
+      };
+
       return res.status(200).json({
+        status: 200,
+        data: responseData,
         draftId: submittedDraft.draft_id,
         fundingId: funding.funding_id,
+        numericFundingId: Number(funding.funding_id),
         recipeId,
-        status: submittedDraft.status,
+        draftStatus: responseData.status,
         fundingStatus: funding.status,
         progressRate: submittedDraft.progress_rate,
         submittedAt: submittedDraft.submitted_at,
