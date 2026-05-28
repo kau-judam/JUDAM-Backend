@@ -27,6 +27,7 @@ Applied to `judam`:
 - `database/20260524_funding_review_comments.sql`
 - `database/20260525_funding_review_likes.sql`
 - `database/20260525_funding_bank_account_verifications.sql`
+- `database/20260528_brewery_dashboard_profile_notifications.sql`
 
 Latest verification:
 
@@ -52,6 +53,9 @@ Latest verification:
 - Added `database/20260524_funding_review_comments.sql` for review detail comments and comment likes.
 - Applied `database/20260525_funding_review_likes.sql` on 2026-05-25.
 - Confirmed funding review like persistence through `funding_review_likes`.
+- Applied `database/20260528_brewery_dashboard_profile_notifications.sql` on 2026-05-28.
+- Confirmed `brewery_profiles` for editable brewery dashboard profile fields.
+- Confirmed `brewery_dashboard_notifications` for brewery dashboard notification persistence.
 
 Skipped because `brewery_logs` is owned by `judam_admin`:
 

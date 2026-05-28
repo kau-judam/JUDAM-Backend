@@ -36,7 +36,8 @@ These files are the runtime harness for the API server.
 - `/api/recipes`: recipe, recipe comments, interests, and brewery recipe APIs.
 - `/api/fundings`: funding drafts, funding projects, orders, reviews, inquiries, reports, and brewery logs.
 - `/api/orders`, `/api/payments`: order and payment APIs.
-- `/api/breweries`: brewery application APIs.
+- `/api/breweries`: brewery application, profile, and dashboard notification APIs.
+- `/api/notifications`: authenticated notification read-state APIs.
 - `/api/ai`, `/api/recipe`, `/api/survey`: AI integration APIs.
 - `/api/sqs`: SQS integration test API.
 - `/api/posts`: community post APIs.

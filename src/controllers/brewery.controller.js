@@ -5,6 +5,10 @@ const {
   approveApplication,
   rejectApplication,
   updateApprovedApplicationByUserId,
+  getBreweryProfileByUserId,
+  getBreweryDashboardBasicInfoByUserId,
+  updateBreweryProfileByUserId,
+  getBreweryNotificationsByUserId,
 } = require('../services/brewery.service');
 const { verifyAuthPhoneVerificationToken } = require('../services/auth-phone.service');
 
@@ -35,6 +39,155 @@ const getOptionalString = (body, key) => {
   }
 
   return typeof body[key] === 'string' ? body[key].trim() : String(body[key]).trim();
+};
+
+const getOptionalNullableString = (body, key) => {
+  const value = getOptionalString(body, key);
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === '' ? null : value;
+};
+
+const getOptionalEstablishedYear = (body) => {
+  if (!Object.prototype.hasOwnProperty.call(body, 'establishedYear')) {
+    return undefined;
+  }
+
+  if (body.establishedYear === null || body.establishedYear === '') {
+    return null;
+  }
+
+  const year = Number(body.establishedYear);
+  const currentYear = new Date().getFullYear();
+
+  if (!Number.isInteger(year) || year < 1000 || year > currentYear) {
+    const error = new Error('설립연도 입력값이 올바르지 않습니다.');
+    error.statusCode = 400;
+    error.detail = `establishedYear는 1000부터 ${currentYear} 사이의 정수여야 합니다.`;
+    throw error;
+  }
+
+  return year;
+};
+
+const getMyBreweryProfile = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  try {
+    const profile = await getBreweryProfileByUserId(userId);
+
+    return res.status(200).json(profile);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 프로필 조회에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const getMyBreweryDashboardBasicInfo = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  try {
+    const basicInfo = await getBreweryDashboardBasicInfoByUserId(userId);
+
+    return res.status(200).json(basicInfo);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 대시보드 기본 정보 조회에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const updateMyBreweryProfile = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  const body = req.body || {};
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  let establishedYear;
+
+  try {
+    establishedYear = getOptionalEstablishedYear(body);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 400,
+      error.message,
+      error.detail || error.message,
+    );
+  }
+
+  try {
+    const profile = await updateBreweryProfileByUserId({
+      userId,
+      profile: {
+        profileImageUrl: getOptionalNullableString(body, 'profileImageUrl'),
+        breweryName: getOptionalNullableString(body, 'breweryName'),
+        oneLineIntroduction: getOptionalNullableString(body, 'oneLineIntroduction'),
+        shortIntroduction: getOptionalNullableString(body, 'shortIntroduction'),
+        brandStory: getOptionalNullableString(body, 'brandStory'),
+        history: getOptionalNullableString(body, 'history'),
+        establishedYear,
+        representativeName: getOptionalNullableString(body, 'representativeName'),
+        address: getOptionalNullableString(body, 'address'),
+        email: getOptionalNullableString(body, 'email'),
+      },
+    });
+
+    return res.status(200).json(profile);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 프로필 수정에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const getMyBreweryDashboardNotifications = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  try {
+    const notifications = await getBreweryNotificationsByUserId(userId);
+    const unreadCount = notifications.filter((notification) => !notification.isRead).length;
+
+    return res.status(200).json({
+      notifications,
+      content: notifications,
+      unreadCount,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 대시보드 알림 목록 조회에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
 };
 
 const createBreweryApplication = async (req, res) => {
@@ -338,6 +491,10 @@ const rejectBreweryApplication = async (req, res) => {
 };
 
 module.exports = {
+  getMyBreweryProfile,
+  getMyBreweryDashboardBasicInfo,
+  updateMyBreweryProfile,
+  getMyBreweryDashboardNotifications,
   createBreweryApplication,
   getBreweryApplications,
   getMyBreweryApplication,

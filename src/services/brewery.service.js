@@ -41,6 +41,42 @@ const mapUserResponse = (row) => ({
   profileImage: row.profile_image,
 });
 
+const mapBreweryProfile = (row) => ({
+  profileImageUrl: row.profile_image_url || null,
+  breweryName: row.brewery_name || null,
+  oneLineIntroduction: row.one_line_introduction || null,
+  shortIntroduction: row.short_introduction || null,
+  brandStory: row.brand_story || null,
+  history: row.history || null,
+  establishedYear: row.established_year === null || row.established_year === undefined
+    ? null
+    : Number(row.established_year),
+  representativeName: row.representative_name || null,
+  address: row.profile_address || row.location || null,
+  businessRegistrationNumber: row.license_number || null,
+  phoneNumber: row.phone_number || row.user_phone_number || null,
+  email: row.contact_email || row.user_email || null,
+  isVerified: row.status === 'APPROVED',
+});
+
+const mapBreweryDashboardBasicInfo = (row) => ({
+  breweryName: row.brewery_name || null,
+  profileImageUrl: row.profile_image_url || null,
+  address: row.profile_address || row.location || null,
+  addressDetail: row.business_address_detail || null,
+});
+
+const mapBreweryNotification = (row) => ({
+  notificationId: Number(row.notification_id),
+  type: row.type,
+  title: row.title,
+  content: row.content,
+  createdAt: row.created_at,
+  isRead: Boolean(row.is_read),
+  linkUrl: row.link_url || null,
+  imageUrl: row.image_url || null,
+});
+
 const createServiceError = (statusCode, message, detail) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -645,6 +681,306 @@ const updateApprovedApplicationByUserId = async ({
   return mapApplication(rows[0]);
 };
 
+const assertBreweryDashboardUser = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        u.user_id,
+        u.role,
+        EXISTS (
+          SELECT 1
+          FROM brewery_auth ba
+          WHERE ba.user_id = u.user_id
+            AND ba.status = 'APPROVED'
+        ) AS has_approved_brewery
+      FROM users u
+      WHERE u.user_id = $1
+        AND u.deleted_at IS NULL
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(404, '사용자를 찾을 수 없습니다.', `user_id=${userId}`);
+  }
+
+  const role = String(rows[0].role || '').toUpperCase();
+
+  if (!role.startsWith('BREWERY') && !rows[0].has_approved_brewery) {
+    throw createServiceError(
+      403,
+      '양조장 계정만 사용할 수 있는 기능입니다.',
+      `user_id=${userId}`,
+    );
+  }
+
+  return rows[0];
+};
+
+const getBreweryProfileByUserId = async (userId) => {
+  await assertBreweryDashboardUser(userId);
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        ba.application_id,
+        ba.user_id,
+        COALESCE(bp.brewery_name, ba.brewery_name) AS brewery_name,
+        ba.license_number,
+        ba.status,
+        ba.location,
+        ba.phone_number,
+        bp.profile_image_url,
+        bp.one_line_introduction,
+        bp.short_introduction,
+        bp.brand_story,
+        bp.history,
+        bp.established_year,
+        bp.representative_name,
+        bp.address AS profile_address,
+        bp.contact_email,
+        u.email AS user_email,
+        u.phone_number AS user_phone_number,
+        u.profile_image AS user_profile_image
+      FROM brewery_auth ba
+      JOIN users u ON u.user_id = ba.user_id
+      LEFT JOIN brewery_profiles bp ON bp.user_id = ba.user_id
+      WHERE ba.user_id = $1
+        AND ba.status = 'APPROVED'
+      ORDER BY ba.updated_at DESC, ba.created_at DESC
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(
+      404,
+      '승인된 양조장 프로필을 찾을 수 없습니다.',
+      `user_id=${userId}`,
+    );
+  }
+
+  return mapBreweryProfile(rows[0]);
+};
+
+const getBreweryDashboardBasicInfoByUserId = async (userId) => {
+  await assertBreweryDashboardUser(userId);
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        COALESCE(bp.brewery_name, ba.brewery_name) AS brewery_name,
+        bp.profile_image_url,
+        ba.location,
+        bp.address AS profile_address,
+        ba.business_address_detail
+      FROM brewery_auth ba
+      LEFT JOIN brewery_profiles bp ON bp.user_id = ba.user_id
+      WHERE ba.user_id = $1
+        AND ba.status = 'APPROVED'
+      ORDER BY ba.updated_at DESC, ba.created_at DESC
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(
+      404,
+      '승인된 양조장 기본 정보를 찾을 수 없습니다.',
+      `user_id=${userId}`,
+    );
+  }
+
+  return mapBreweryDashboardBasicInfo(rows[0]);
+};
+
+const updateBreweryProfileByUserId = async ({ userId, profile }) => {
+  await assertBreweryDashboardUser(userId);
+
+  const columns = ['user_id', 'application_id'];
+  const selectValues = ['$1', 'latest_application.application_id'];
+  const updateAssignments = ['application_id = EXCLUDED.application_id'];
+  const values = [userId];
+
+  const addProfileValue = (column, value) => {
+    if (value === undefined) {
+      return;
+    }
+
+    values.push(value);
+    columns.push(column);
+    selectValues.push(`$${values.length}`);
+    updateAssignments.push(`${column} = EXCLUDED.${column}`);
+  };
+
+  addProfileValue('profile_image_url', profile.profileImageUrl);
+  addProfileValue('brewery_name', profile.breweryName);
+  addProfileValue('one_line_introduction', profile.oneLineIntroduction);
+  addProfileValue('short_introduction', profile.shortIntroduction);
+  addProfileValue('brand_story', profile.brandStory);
+  addProfileValue('history', profile.history);
+  addProfileValue('established_year', profile.establishedYear);
+  addProfileValue('representative_name', profile.representativeName);
+  addProfileValue('address', profile.address);
+  addProfileValue('contact_email', profile.email);
+
+  if (columns.length === 2) {
+    throw createServiceError(
+      400,
+      '수정할 양조장 프로필 정보가 없습니다.',
+      'profileImageUrl, breweryName, oneLineIntroduction, shortIntroduction, brandStory, history, establishedYear, representativeName, address, email 중 하나 이상 필요합니다.',
+    );
+  }
+
+  const { rows } = await pool.query(
+    `
+      WITH latest_application AS (
+        SELECT
+          application_id,
+          user_id
+        FROM brewery_auth
+        WHERE user_id = $1
+          AND status = 'APPROVED'
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      ),
+      upserted AS (
+        INSERT INTO brewery_profiles (
+          ${columns.join(', ')}
+        )
+        SELECT
+          ${selectValues.join(', ')}
+        FROM latest_application
+        ON CONFLICT (user_id) DO UPDATE
+        SET
+          ${updateAssignments.join(', ')},
+          updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+      )
+      SELECT
+        ba.application_id,
+        ba.user_id,
+        COALESCE(upserted.brewery_name, ba.brewery_name) AS brewery_name,
+        ba.license_number,
+        ba.status,
+        ba.location,
+        ba.phone_number,
+        upserted.profile_image_url,
+        upserted.one_line_introduction,
+        upserted.short_introduction,
+        upserted.brand_story,
+        upserted.history,
+        upserted.established_year,
+        upserted.representative_name,
+        upserted.address AS profile_address,
+        upserted.contact_email,
+        u.email AS user_email,
+        u.phone_number AS user_phone_number,
+        u.profile_image AS user_profile_image
+      FROM upserted
+      JOIN brewery_auth ba ON ba.application_id = upserted.application_id
+      JOIN users u ON u.user_id = upserted.user_id
+    `,
+    values,
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(
+      404,
+      '승인된 양조장 프로필을 찾을 수 없습니다.',
+      `user_id=${userId}`,
+    );
+  }
+
+  return mapBreweryProfile(rows[0]);
+};
+
+const getBreweryNotificationsByUserId = async (userId) => {
+  await assertBreweryDashboardUser(userId);
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        notification_id,
+        user_id,
+        type,
+        title,
+        content,
+        link_url,
+        image_url,
+        is_read,
+        created_at
+      FROM brewery_dashboard_notifications
+      WHERE user_id = $1
+      ORDER BY created_at DESC, notification_id DESC
+    `,
+    [userId],
+  );
+
+  return rows.map(mapBreweryNotification);
+};
+
+const markBreweryNotificationRead = async ({ userId, notificationId }) => {
+  await assertBreweryDashboardUser(userId);
+
+  const { rows } = await pool.query(
+    `
+      UPDATE brewery_dashboard_notifications
+      SET
+        is_read = TRUE,
+        read_at = COALESCE(read_at, CURRENT_TIMESTAMP),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE notification_id = $1
+        AND user_id = $2
+      RETURNING
+        notification_id,
+        type,
+        title,
+        content,
+        link_url,
+        image_url,
+        is_read,
+        created_at
+    `,
+    [notificationId, userId],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(
+      404,
+      '알림을 찾을 수 없습니다.',
+      `notification_id=${notificationId}, user_id=${userId}`,
+    );
+  }
+
+  return mapBreweryNotification(rows[0]);
+};
+
+const markAllBreweryNotificationsRead = async (userId) => {
+  await assertBreweryDashboardUser(userId);
+
+  const { rows } = await pool.query(
+    `
+      UPDATE brewery_dashboard_notifications
+      SET
+        is_read = TRUE,
+        read_at = COALESCE(read_at, CURRENT_TIMESTAMP),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1
+        AND is_read = FALSE
+      RETURNING notification_id
+    `,
+    [userId],
+  );
+
+  return {
+    updatedCount: rows.length,
+  };
+};
+
 module.exports = {
   createApplication,
   getApplications,
@@ -652,4 +988,10 @@ module.exports = {
   approveApplication,
   rejectApplication,
   updateApprovedApplicationByUserId,
+  getBreweryProfileByUserId,
+  getBreweryDashboardBasicInfoByUserId,
+  updateBreweryProfileByUserId,
+  getBreweryNotificationsByUserId,
+  markBreweryNotificationRead,
+  markAllBreweryNotificationsRead,
 };
