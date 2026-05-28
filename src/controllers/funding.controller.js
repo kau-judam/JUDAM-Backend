@@ -5683,43 +5683,72 @@ const getFundingStats = async (req, res) => {
   try {
     const result = await pool.query(
       `
+      WITH paid_orders AS (
+        SELECT
+          order_id,
+          user_id,
+          funding_id,
+          total_amount
+        FROM orders
+        WHERE order_status = 'PAID'
+          AND funding_id IS NOT NULL
+      ),
+      paid_amounts_by_funding AS (
+        SELECT
+          funding_id,
+          COALESCE(SUM(total_amount), 0)::bigint AS paid_amount
+        FROM paid_orders
+        GROUP BY funding_id
+      ),
+      funding_with_paid_amount AS (
+        SELECT
+          fp.funding_id,
+          fp.status,
+          fp.end_date,
+          fp.goal_amount,
+          fp.current_amount,
+          COALESCE(pabf.paid_amount, 0)::bigint AS paid_amount
+        FROM funding_projects fp
+        LEFT JOIN paid_amounts_by_funding pabf ON pabf.funding_id = fp.funding_id
+      )
       SELECT
-        (
-          SELECT COUNT(*)::int
-          FROM funding_projects
-          WHERE status IN ('ONGOING', 'ACTIVE')
-          AND (end_date IS NULL OR end_date >= CURRENT_DATE)
-        ) AS available_funding_count,
+        COUNT(*) FILTER (
+          WHERE status IN ('ACTIVE', 'ONGOING')
+            AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+        )::int AS available_funding_count,
         (
           SELECT COUNT(DISTINCT user_id)::int
-          FROM orders
-          WHERE order_status = 'PAID'
+          FROM paid_orders
+          WHERE user_id IS NOT NULL
         ) AS total_supporter_count,
-        (
-          SELECT COUNT(*)::int
-          FROM funding_projects
+        COUNT(*) FILTER (
           WHERE goal_amount > 0
-          AND current_amount >= goal_amount
-        ) AS successful_project_count,
-        (
-          SELECT COALESCE(SUM(current_amount), 0)::bigint
-          FROM funding_projects
-        ) AS total_raised_amount
+            AND GREATEST(COALESCE(current_amount, 0), paid_amount) >= goal_amount
+        )::int AS successful_project_count,
+        COALESCE(SUM(GREATEST(COALESCE(current_amount, 0), paid_amount)), 0)::bigint AS total_raised_amount
+      FROM funding_with_paid_amount
       `
     );
 
     const stats = result.rows[0];
     const totalRaisedAmount = Number(stats.total_raised_amount || 0);
-
-    return res.status(200).json({
+    const responseData = {
       participationAvailableFunding: Number(stats.available_funding_count || 0),
+      availableFundingCount: Number(stats.available_funding_count || 0),
       totalSupporterCount: Number(stats.total_supporter_count || 0),
+      totalParticipantCount: Number(stats.total_supporter_count || 0),
       successfulProjectCount: Number(stats.successful_project_count || 0),
       totalRaisedAmount,
       totalRaisedHundredMillion: Number((totalRaisedAmount / 100000000).toFixed(1)),
       totalRaisedTenMillion: Number((totalRaisedAmount / 10000000).toFixed(1)),
       totalRaisedTenMillionUnit: '천만원',
+    };
+
+    return res.status(200).json({
+      status: 200,
       message: '펀딩 통계 조회 성공',
+      data: responseData,
+      ...responseData,
     });
   } catch (error) {
     return res.status(500).json({
