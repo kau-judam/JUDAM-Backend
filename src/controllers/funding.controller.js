@@ -5491,8 +5491,8 @@ const getFundingList = async (req, res) => {
 
   const baseFromClause = `
     FROM funding_projects fp
-    JOIN recipes r ON r.recipe_id = fp.recipe_id
-    JOIN users u ON u.user_id = fp.brewery_user_id
+    LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+    LEFT JOIN users u ON u.user_id = fp.brewery_user_id
     LEFT JOIN LATERAL (
       SELECT brewery_name
       FROM brewery_auth
