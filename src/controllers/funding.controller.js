@@ -1046,6 +1046,7 @@ const mapFundingReview = (review) => {
   const writerId = review.user_id === null || review.user_id === undefined
     ? null
     : Number(review.user_id);
+  const imageUrls = mapReviewImageUrls(review.image_urls);
 
   return {
     reviewId: Number(review.review_id),
@@ -1065,7 +1066,12 @@ const mapFundingReview = (review) => {
     title: review.title,
     content: review.content,
     detailReview: review.content,
-    imageUrls: mapReviewImageUrls(review.image_urls),
+    imageUrls,
+    images: imageUrls.map((imageUrl, index) => ({
+      imageId: index + 1,
+      imageUrl,
+      displayOrder: index + 1,
+    })),
     mood: review.mood,
     pairing: review.pairing,
     tags: mapReviewTags(review.tags),
