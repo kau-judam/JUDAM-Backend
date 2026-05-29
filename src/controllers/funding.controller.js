@@ -5,7 +5,10 @@ const {
   isAiFundingRegistrationStatus,
   registerFundingProjectToAiPool,
 } = require('../services/funding.service');
-const { updateAiTasteProfile } = require('../services/ai.service');
+const {
+  generateFundingDraftAiImageAndUpload,
+  updateAiTasteProfile,
+} = require('../services/ai.service');
 
 const AI_TASTE_RATING_KEYS = [
   'sweetness',
@@ -805,6 +808,55 @@ const mapFundingImageUrls = (imageUrls = []) =>
     imageUrl,
     displayOrder: index + 1,
   }));
+
+const extractFundingAiImageFlavorTags = (value) => {
+  const parsed = parseJsonFieldPreserveText(value, null);
+
+  if (Array.isArray(parsed) || typeof parsed === 'string') {
+    return parseFundingListField(parsed);
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    return parseFundingListField(
+      parsed.flavorTags ||
+      parsed.flavor_tags ||
+      parsed.flavorNotes ||
+      parsed.flavor_notes ||
+      []
+    );
+  }
+
+  return [];
+};
+
+const normalizeFundingAiImagePayload = (body = {}, draft = {}) => {
+  const requestFlavorTags = getBodyValue(body, ['flavorTags', 'flavor_tags']);
+  const flavorTags = requestFlavorTags !== undefined
+    ? parseFundingListField(requestFlavorTags)
+    : uniqueValues([
+        ...extractFundingAiImageFlavorTags(draft.flavor_notes),
+        ...parseFundingListField(draft.tags),
+      ]);
+
+  return {
+    name: toTrimmedString(
+      getBodyValue(body, ['name']) ||
+      draft.title ||
+      draft.short_title
+    ),
+    description: toTrimmedString(
+      getBodyValue(body, ['description']) ||
+      draft.summary ||
+      draft.introduction
+    ),
+    flavor_tags: flavorTags,
+    region: toTrimmedString(
+      getBodyValue(body, ['region']) ||
+      draft.region ||
+      draft.business_address
+    ),
+  };
+};
 
 const buildFundingSupportOptionsResponse = ({
   options = [],
@@ -4245,6 +4297,148 @@ const uploadFundingDraftFile = async (req, res) => {
   }
 };
 //프젝생성 추가3: 휴대폰 본인 인증 API
+const generateFundingDraftAiImage = async (req, res) => {
+  const { draftId } = req.params;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '임시저장 프로젝트 ID가 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    await assertFundingDraftOwner(draftId, req.user);
+
+    const draftResult = await pool.query(
+      `
+      SELECT
+        draft_id,
+        brewery_id,
+        funding_id,
+        title,
+        short_title,
+        summary,
+        introduction,
+        flavor_notes,
+        tags,
+        business_address,
+        thumbnail_url,
+        image_urls
+      FROM funding_drafts
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    const draft = draftResult.rows[0];
+
+    if (!draft) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const currentImageUrls = normalizeFundingImageUrlsInput(draft.image_urls);
+
+    if (currentImageUrls.length >= 5) {
+      return res.status(400).json({
+        status: 400,
+        message: '프로젝트 대표 이미지는 최대 5장까지 등록할 수 있습니다.',
+      });
+    }
+
+    const aiPayload = normalizeFundingAiImagePayload(req.body || {}, draft);
+
+    if (!aiPayload.name) {
+      return res.status(400).json({
+        status: 400,
+        message: 'AI 이미지 생성을 위한 프로젝트 이름이 필요합니다.',
+      });
+    }
+
+    const aiResult = await generateFundingDraftAiImageAndUpload({
+      payload: aiPayload,
+      userId: getAuthUserId(req.user) || draft.brewery_id,
+    });
+
+    const currentImageFields = buildImageFields(draft.thumbnail_url, currentImageUrls);
+
+    if (aiResult.aiStatus === 'prompt_only') {
+      return res.status(200).json({
+        status: 200,
+        message: aiResult.message || 'AI 이미지 생성이 프롬프트만 반환되었습니다.',
+        data: {
+          aiStatus: aiResult.aiStatus,
+          promptUsed: aiResult.promptUsed,
+          modelUsed: aiResult.modelUsed,
+          thumbnailUrl: currentImageFields.thumbnailUrl,
+          imageUrls: currentImageFields.imageUrls,
+          allImageUrls: currentImageFields.allImageUrls,
+          images: mapFundingImageUrls(currentImageFields.allImageUrls),
+        },
+      });
+    }
+
+    const nextImageFields = buildImageFields(
+      draft.thumbnail_url || aiResult.imageUrl,
+      [...currentImageUrls, aiResult.imageUrl]
+    );
+
+    const updateResult = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        thumbnail_url = $1,
+        image_urls = $2,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $3
+      RETURNING draft_id, thumbnail_url, image_urls, updated_at
+      `,
+      [
+        nextImageFields.thumbnailUrl,
+        normalizeJsonStorageValue(nextImageFields.allImageUrls, []),
+        Number(draftId),
+      ]
+    );
+
+    const updatedDraft = updateResult.rows[0];
+    await syncFundingProjectFieldsFromDraft(updatedDraft.draft_id);
+
+    return res.status(200).json({
+      status: 200,
+      message: 'AI 이미지 생성 성공',
+      data: {
+        imageUrl: aiResult.imageUrl,
+        imageKey: aiResult.imageKey,
+        mimeType: aiResult.mimeType,
+        promptUsed: aiResult.promptUsed,
+        modelUsed: aiResult.modelUsed,
+        thumbnailUrl: nextImageFields.thumbnailUrl,
+        imageUrls: nextImageFields.imageUrls,
+        allImageUrls: nextImageFields.allImageUrls,
+        images: mapFundingImageUrls(nextImageFields.allImageUrls),
+        updatedAt: updatedDraft.updated_at,
+      },
+    });
+  } catch (error) {
+    if (handleAuthorizationError(res, error)) {
+      return;
+    }
+
+    const status = error.statusCode || error.status || 500;
+    console.error(error.stack || error);
+
+    return res.status(status).json({
+      status,
+      message: status === 500
+        ? 'AI 이미지 생성 중 서버 오류가 발생했습니다.'
+        : error.message,
+    });
+  }
+};
+
 const verifyPhoneForFundingDraft = async (req, res) => {
   const { draftId } = req.params;
   const { contactPhone } = req.body;
@@ -10863,6 +11057,7 @@ module.exports = {
   saveBreweryInfo,
   loadBreweryInfo, //프젝생성추가1 부분
   uploadFundingDraftFile,
+  generateFundingDraftAiImage,
   verifyPhoneForFundingDraft,
   verifyAccountForFundingDraft,//추가4
   requestBankAccountVerification,
