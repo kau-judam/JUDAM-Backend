@@ -623,6 +623,14 @@ CREATE TABLE IF NOT EXISTS reviews (
     ON DELETE SET NULL
 );
 
+ALTER TABLE IF EXISTS reviews
+ALTER COLUMN rating TYPE NUMERIC(2,1)
+USING rating::numeric;
+
+ALTER TABLE IF EXISTS funding_reviews
+ALTER COLUMN rating TYPE NUMERIC(2,1)
+USING rating::numeric;
+
 CREATE TABLE IF NOT EXISTS taste_profiles (
   taste_profile_id BIGSERIAL PRIMARY KEY,
   funding_id BIGINT,
