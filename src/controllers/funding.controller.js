@@ -1139,6 +1139,7 @@ const mapFundingReview = (review) => {
     role: normalizeWriterRole(review.writer_role),
     isBrewery: isBreweryWriterRole(review.writer_role),
     writerIsBrewery: isBreweryWriterRole(review.writer_role),
+    isProjectOwner: Boolean(review.is_project_owner),
     rating: Number(review.rating),
     title: review.title,
     content: review.content,
@@ -1195,6 +1196,7 @@ const mapFundingReviewComment = (comment) => {
     role: normalizeWriterRole(comment.writer_role),
     isBrewery: isBreweryWriterRole(comment.writer_role),
     writerIsBrewery: isBreweryWriterRole(comment.writer_role),
+    isProjectOwner: Boolean(comment.is_project_owner),
     content: comment.content,
     likeCount: Number(comment.like_count || 0),
     liked: Boolean(comment.liked),
@@ -8059,6 +8061,7 @@ const getFundingReviews = async (req, res) => {
         fr.created_at,
         fr.updated_at,
         COALESCE(like_counts.like_count, 0) AS like_count,
+        (fr.user_id = fp.brewery_user_id) AS is_project_owner,
         EXISTS (
           SELECT 1
           FROM funding_review_likes my_like
@@ -8066,6 +8069,7 @@ const getFundingReviews = async (req, res) => {
           AND my_like.user_id = $4
         ) AS liked
       FROM funding_reviews fr
+      LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
       LEFT JOIN users u ON u.user_id = fr.user_id
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS like_count
@@ -8143,6 +8147,7 @@ const getFundingReviewDetail = async (req, res) => {
         fr.created_at,
         fr.updated_at,
         COALESCE(like_counts.like_count, 0) AS like_count,
+        (fr.user_id = fp.brewery_user_id) AS is_project_owner,
         EXISTS (
           SELECT 1
           FROM funding_review_likes my_like
@@ -8150,6 +8155,7 @@ const getFundingReviewDetail = async (req, res) => {
           AND my_like.user_id = $3
         ) AS liked
       FROM funding_reviews fr
+      LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
       LEFT JOIN users u ON u.user_id = fr.user_id
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS like_count
@@ -8212,6 +8218,7 @@ const getFundingReviewById = async ({ fundingId, reviewId, userId }) => {
       fr.created_at,
       fr.updated_at,
       COALESCE(like_counts.like_count, 0) AS like_count,
+      (fr.user_id = fp.brewery_user_id) AS is_project_owner,
       EXISTS (
         SELECT 1
         FROM funding_review_likes my_like
@@ -8219,6 +8226,7 @@ const getFundingReviewById = async ({ fundingId, reviewId, userId }) => {
         AND my_like.user_id = $3
       ) AS liked
     FROM funding_reviews fr
+    LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
     LEFT JOIN users u ON u.user_id = fr.user_id
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int AS like_count
@@ -9646,6 +9654,7 @@ const getFundingReviewComments = async (req, res) => {
         frc.created_at,
         frc.updated_at,
         COALESCE(like_counts.like_count, 0) AS like_count,
+        (frc.user_id = fp.brewery_user_id) AS is_project_owner,
         EXISTS (
           SELECT 1
           FROM funding_review_comment_likes my_like
@@ -9653,6 +9662,7 @@ const getFundingReviewComments = async (req, res) => {
           AND my_like.user_id = $3
         ) AS liked
       FROM funding_review_comments frc
+      LEFT JOIN funding_projects fp ON fp.funding_id = frc.funding_id
       LEFT JOIN users u ON u.user_id = frc.user_id
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS like_count
@@ -9753,8 +9763,10 @@ const createFundingReviewComment = async (req, res) => {
         inserted.created_at,
         inserted.updated_at,
         0::int AS like_count,
+        (inserted.user_id = fp.brewery_user_id) AS is_project_owner,
         false AS liked
       FROM inserted
+      LEFT JOIN funding_projects fp ON fp.funding_id = inserted.funding_id
       LEFT JOIN users u ON u.user_id = inserted.user_id
       `,
       [resolvedFundingId, Number(reviewId), userId, content]
@@ -9788,6 +9800,7 @@ const getFundingReviewCommentById = async ({ fundingId, reviewId, commentId, use
       frc.created_at,
       frc.updated_at,
       COALESCE(like_counts.like_count, 0) AS like_count,
+      (frc.user_id = fp.brewery_user_id) AS is_project_owner,
       EXISTS (
         SELECT 1
         FROM funding_review_comment_likes my_like
@@ -9795,6 +9808,7 @@ const getFundingReviewCommentById = async ({ fundingId, reviewId, commentId, use
         AND my_like.user_id = $4
       ) AS liked
     FROM funding_review_comments frc
+    LEFT JOIN funding_projects fp ON fp.funding_id = frc.funding_id
     LEFT JOIN users u ON u.user_id = frc.user_id
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int AS like_count
