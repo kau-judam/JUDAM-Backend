@@ -514,6 +514,71 @@ const generateAiImageAndUpload = async ({ payload, userId }) => {
   }
 };
 
+const generateFundingDraftAiImageAndUpload = async ({ payload, userId }) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/image/generate`, payload, {
+      timeout: AI_IMAGE_GENERATION_TIMEOUT_MS,
+    });
+    const aiResponse = response.data || {};
+    const aiStatus = aiResponse.status || null;
+    const promptUsed = aiResponse.prompt_used || aiResponse.prompt || null;
+    const modelUsed = aiResponse.model_used || null;
+
+    if (aiStatus === 'prompt_only') {
+      return {
+        aiStatus,
+        promptUsed,
+        modelUsed,
+        message: aiResponse.message || 'AI 이미지 생성이 프롬프트만 반환되었습니다.',
+      };
+    }
+
+    if (aiStatus && aiStatus !== 'success') {
+      throw createAiServiceError(502, aiResponse.message || 'AI 이미지 생성 결과가 올바르지 않습니다.');
+    }
+
+    const { buffer, mimeType } = parseBase64Image(
+      aiResponse.image_base64,
+      aiResponse.mime_type || DEFAULT_IMAGE_MIME_TYPE,
+    );
+    const extension = getImageExtension(mimeType);
+    const imageKey = `uploads/${userId}/funding-ai-images/${Date.now()}-generated.${extension}`;
+    const uploadedImage = await uploadBufferToS3(buffer, imageKey, mimeType);
+
+    return {
+      aiStatus: aiStatus || 'success',
+      imageUrl: uploadedImage.url,
+      imageKey: uploadedImage.key,
+      mimeType,
+      promptUsed,
+      modelUsed,
+    };
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 서버와 연결할 수 없습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
 module.exports = {
   checkAiServerHealth,
   requestAiChat,
@@ -525,4 +590,5 @@ module.exports = {
   registerFundingToAiPool,
   requestLawFilter,
   generateAiImageAndUpload,
+  generateFundingDraftAiImageAndUpload,
 };
