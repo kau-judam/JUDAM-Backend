@@ -760,6 +760,31 @@ const normalizeReviewImageUrlsInput = (value, fieldName = 'imageUrls') =>
       .filter(Boolean)
   );
 
+const REVIEW_RATING_ERROR_MESSAGE = 'rating은 0~5 사이의 0.5 단위 숫자여야 합니다.';
+
+const normalizeReviewRatingInput = (value, { required = false } = {}) => {
+  if (value === undefined || value === null || value === '') {
+    if (required) {
+      throw createHttpError(400, REVIEW_RATING_ERROR_MESSAGE);
+    }
+
+    return null;
+  }
+
+  const numberValue = Number(value);
+
+  if (
+    !Number.isFinite(numberValue) ||
+    numberValue < 0 ||
+    numberValue > 5 ||
+    !Number.isInteger(numberValue * 2)
+  ) {
+    throw createHttpError(400, REVIEW_RATING_ERROR_MESSAGE);
+  }
+
+  return Math.round(numberValue * 10) / 10;
+};
+
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
   const parsedImageUrls = normalizeFundingImageUrlsInput(imageUrlsValue);
   const normalizedThumbnailUrl = normalizePublicImageUrl(thumbnailUrl) || parsedImageUrls[0] || null;
@@ -9169,16 +9194,10 @@ const updateFundingReview = async (req, res) => {
     });
   }
 
-  if (rating !== undefined && (isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5)) {
-    return res.status(400).json({
-      status: 400,
-      message: '별점은 1점부터 5점까지 입력 가능합니다.',
-    });
-  }
-
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    const normalizedRating = normalizeReviewRatingInput(rating);
     const existingResult = await pool.query(
       `
       SELECT *
@@ -9222,7 +9241,7 @@ const updateFundingReview = async (req, res) => {
       `
       UPDATE funding_reviews
       SET
-        rating = COALESCE($1, rating),
+        rating = COALESCE($1::numeric, rating),
         title = COALESCE($2, title),
         content = $3,
         image_urls = $4,
@@ -9248,7 +9267,7 @@ const updateFundingReview = async (req, res) => {
         updated_at
       `,
       [
-        rating !== undefined ? Number(rating) : null,
+        normalizedRating,
         title || null,
         nextContent,
         JSON.stringify(nextImageUrls),
@@ -10508,13 +10527,6 @@ const createFundingReviewStable = async (req, res) => {
     });
   }
 
-  if (!rating || isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5) {
-    return res.status(400).json({
-      status: 400,
-      message: '별점은 1점부터 5점까지 입력 가능합니다.',
-    });
-  }
-
   const normalizedContent = toTrimmedString(content || detailReview);
 
   if (!normalizedContent) {
@@ -10527,6 +10539,7 @@ const createFundingReviewStable = async (req, res) => {
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    const normalizedRating = normalizeReviewRatingInput(rating, { required: true });
 
     const paidOrder = await findPaidFundingOrder(Number(fundingId), userId);
     if (!paidOrder) {
@@ -10595,7 +10608,7 @@ const createFundingReviewStable = async (req, res) => {
       [
         Number(fundingId),
         userId,
-        Number(rating),
+        normalizedRating,
         title || null,
         normalizedContent,
         JSON.stringify(normalizedImageUrls),
@@ -10688,16 +10701,10 @@ const updateFundingReviewStable = async (req, res) => {
     });
   }
 
-  if (rating !== undefined && (isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5)) {
-    return res.status(400).json({
-      status: 400,
-      message: '별점은 1점부터 5점까지 입력 가능합니다.',
-    });
-  }
-
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    const normalizedRating = normalizeReviewRatingInput(rating);
 
     const existingResult = await pool.query(
       `
@@ -10750,7 +10757,7 @@ const updateFundingReviewStable = async (req, res) => {
       `
       UPDATE funding_reviews
       SET
-        rating = COALESCE($1, rating),
+        rating = COALESCE($1::numeric, rating),
         title = COALESCE($2, title),
         content = $3,
         image_urls = $4,
@@ -10776,7 +10783,7 @@ const updateFundingReviewStable = async (req, res) => {
         updated_at
       `,
       [
-        rating !== undefined ? Number(rating) : null,
+        normalizedRating,
         title || null,
         nextContent,
         JSON.stringify(nextImageUrls),
