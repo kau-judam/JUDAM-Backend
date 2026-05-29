@@ -694,6 +694,72 @@ const normalizeFundingImageUrlsInput = (value) => {
   return [];
 };
 
+const parseReviewStringArrayField = (value, fieldName) => {
+  const invalidMessage = `${fieldName} 형식이 올바르지 않습니다.`;
+
+  const normalizeItems = (items) => {
+    if (!Array.isArray(items)) {
+      throw createHttpError(400, invalidMessage);
+    }
+
+    return items
+      .map((item) => {
+        if (item === undefined || item === null) {
+          return '';
+        }
+
+        if (typeof item === 'object') {
+          throw createHttpError(400, invalidMessage);
+        }
+
+        return String(item).trim();
+      })
+      .filter(Boolean);
+  };
+
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return normalizeItems(value);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return [];
+    }
+
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        return normalizeItems(JSON.parse(trimmed));
+      } catch (error) {
+        if (error.status) {
+          throw error;
+        }
+
+        throw createHttpError(400, invalidMessage);
+      }
+    }
+
+    return normalizeItems(trimmed.split(','));
+  }
+
+  throw createHttpError(400, invalidMessage);
+};
+
+const normalizeReviewTagsInput = (value) =>
+  uniqueValues(parseReviewStringArrayField(value, 'tags'));
+
+const normalizeReviewImageUrlsInput = (value, fieldName = 'imageUrls') =>
+  uniqueValues(
+    parseReviewStringArrayField(value, fieldName)
+      .map(normalizePublicImageUrl)
+      .filter(Boolean)
+  );
+
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
   const parsedImageUrls = normalizeFundingImageUrlsInput(imageUrlsValue);
   const normalizedThumbnailUrl = normalizePublicImageUrl(thumbnailUrl) || parsedImageUrls[0] || null;
@@ -960,6 +1026,22 @@ const mapFundingDocument = (document) => ({
   createdAt: document.created_at,
 });
 
+const mapReviewImageUrls = (value) => {
+  try {
+    return normalizeReviewImageUrlsInput(value);
+  } catch (error) {
+    return [];
+  }
+};
+
+const mapReviewTags = (value) => {
+  try {
+    return normalizeReviewTagsInput(value);
+  } catch (error) {
+    return [];
+  }
+};
+
 const mapFundingReview = (review) => {
   const writerId = review.user_id === null || review.user_id === undefined
     ? null
@@ -983,16 +1065,30 @@ const mapFundingReview = (review) => {
     title: review.title,
     content: review.content,
     detailReview: review.content,
-    imageUrls: parseJsonField(review.image_urls),
+    imageUrls: mapReviewImageUrls(review.image_urls),
     mood: review.mood,
     pairing: review.pairing,
-    tags: parseJsonField(review.tags),
+    tags: mapReviewTags(review.tags),
     recordVisibility: review.record_visibility,
     showRecord: review.record_visibility,
     likeCount: Number(review.like_count || 0),
     liked: Boolean(review.liked),
     createdAt: review.created_at,
     updatedAt: review.updated_at,
+  };
+};
+
+const buildFundingReviewResponse = ({ status, message, review, aiTasteUpdate = null }) => {
+  const data = {
+    ...mapFundingReview(review),
+    ...(aiTasteUpdate ? { aiTasteUpdate } : {}),
+  };
+
+  return {
+    ...data,
+    status,
+    message,
+    data,
   };
 };
 
@@ -10372,6 +10468,376 @@ const unlikeBreweryLogComment = async (req, res) => {
   }
 };
 
+const sendFundingReviewError = (res, error, fallbackMessage) => {
+  const status = error.status || 500;
+
+  console.error(error.stack || error);
+
+  return res.status(status).json({
+    status,
+    message: status === 500 ? fallbackMessage : error.message,
+  });
+};
+
+const createFundingReviewStable = async (req, res) => {
+  const { fundingId } = req.params;
+  const {
+    rating,
+    title,
+    content,
+    detailReview,
+    mood,
+    pairing,
+    tags,
+    recordVisibility = true,
+    showRecord,
+    imageUrls,
+  } = req.body || {};
+  const files = req.files || [];
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  if (!rating || isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5) {
+    return res.status(400).json({
+      status: 400,
+      message: '별점은 1점부터 5점까지 입력 가능합니다.',
+    });
+  }
+
+  const normalizedContent = toTrimmedString(content || detailReview);
+
+  if (!normalizedContent) {
+    return res.status(400).json({
+      status: 400,
+      message: '후기 내용을 입력해주세요.',
+    });
+  }
+
+  try {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    const paidOrder = await findPaidFundingOrder(Number(fundingId), userId);
+    if (!paidOrder) {
+      return res.status(403).json({
+        status: 403,
+        message: '후원 완료 후 후기를 작성할 수 있습니다.',
+      });
+    }
+
+    const existingReview = await findFundingReviewByUser(Number(fundingId), userId);
+    if (existingReview) {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 작성한 후기가 있습니다.',
+        data: {
+          reviewId: Number(existingReview.review_id),
+        },
+      });
+    }
+
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
+    }
+
+    const normalizedImageUrls = uniqueValues([
+      ...normalizeReviewImageUrlsInput(imageUrls),
+      ...normalizeReviewImageUrlsInput(uploadedImageUrls),
+    ]);
+    const normalizedTags = normalizeReviewTagsInput(tags);
+    const normalizedRecordVisibility =
+      parseOptionalBoolean(showRecord) ??
+      parseOptionalBoolean(recordVisibility) ??
+      true;
+
+    const result = await pool.query(
+      `
+      INSERT INTO funding_reviews (
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls,
+        mood,
+        pairing,
+        tags,
+        record_visibility
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING
+        review_id,
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls,
+        mood,
+        pairing,
+        tags,
+        record_visibility,
+        created_at,
+        updated_at
+      `,
+      [
+        Number(fundingId),
+        userId,
+        Number(rating),
+        title || null,
+        normalizedContent,
+        JSON.stringify(normalizedImageUrls),
+        mood || null,
+        pairing || null,
+        JSON.stringify(normalizedTags),
+        normalizedRecordVisibility,
+      ]
+    );
+
+    const createdReview = result.rows[0];
+    if (!createdReview) {
+      throw createHttpError(500, '후기 등록 결과를 확인할 수 없습니다.');
+    }
+
+    let review = createdReview;
+    try {
+      review = await getFundingReviewById({
+        fundingId: Number(fundingId),
+        reviewId: createdReview.review_id,
+        userId,
+      }) || createdReview;
+    } catch (lookupError) {
+      console.warn('Funding review lookup failed after create', {
+        fundingId: Number(fundingId),
+        reviewId: Number(createdReview.review_id),
+        userId,
+        message: lookupError.message,
+      });
+    }
+
+    let aiTasteUpdate = null;
+    try {
+      aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+        userId,
+        review,
+        requestBody: req.body || {},
+        isCreate: true,
+      });
+    } catch (aiError) {
+      console.warn('Funding review AI taste update failed after review create', {
+        fundingId: Number(fundingId),
+        reviewId: Number(createdReview.review_id),
+        userId,
+        message: aiError.message,
+      });
+      aiTasteUpdate = {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
+
+    return res.status(201).json(buildFundingReviewResponse({
+      status: 201,
+      message: '후기가 등록되었습니다.',
+      review,
+      aiTasteUpdate,
+    }));
+  } catch (error) {
+    return sendFundingReviewError(res, error, '후기 등록 중 서버 오류가 발생했습니다.');
+  }
+};
+
+const updateFundingReviewStable = async (req, res) => {
+  const { fundingId, reviewId } = req.params;
+  const {
+    rating,
+    title,
+    content,
+    detailReview,
+    mood,
+    pairing,
+    tags,
+    recordVisibility,
+    showRecord,
+    imageUrls,
+    deleteImageUrls,
+  } = req.body || {};
+  const files = req.files || [];
+
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !reviewId ||
+    isNaN(Number(reviewId))
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '후기 수정 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  if (rating !== undefined && (isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5)) {
+    return res.status(400).json({
+      status: 400,
+      message: '별점은 1점부터 5점까지 입력 가능합니다.',
+    });
+  }
+
+  try {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
+    const existingResult = await pool.query(
+      `
+      SELECT *
+      FROM funding_reviews
+      WHERE funding_id = $1
+        AND review_id = $2
+      `,
+      [Number(fundingId), Number(reviewId)]
+    );
+
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '후기를 찾을 수 없습니다.',
+      });
+    }
+
+    const current = existingResult.rows[0];
+    const writerId = Number(current.user_id);
+    if (writerId !== userId && !isAdminUser(req.user)) {
+      return res.status(403).json({
+        status: 403,
+        message: '후기를 수정할 권한이 없습니다.',
+      });
+    }
+
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
+    }
+
+    const deleteImageUrlSet = new Set(normalizeReviewImageUrlsInput(deleteImageUrls, 'deleteImageUrls'));
+    const currentImageUrls = normalizeReviewImageUrlsInput(current.image_urls);
+    const baseImageUrls = imageUrls !== undefined
+      ? normalizeReviewImageUrlsInput(imageUrls)
+      : currentImageUrls;
+    const nextImageUrls = uniqueValues([
+      ...baseImageUrls.filter((imageUrl) => !deleteImageUrlSet.has(imageUrl)),
+      ...normalizeReviewImageUrlsInput(uploadedImageUrls),
+    ]);
+    const nextTags = tags !== undefined ? normalizeReviewTagsInput(tags) : null;
+    const nextContent = toTrimmedString(content || detailReview) || current.content;
+    const nextRecordVisibility =
+      parseOptionalBoolean(showRecord) ??
+      parseOptionalBoolean(recordVisibility) ??
+      current.record_visibility;
+
+    const result = await pool.query(
+      `
+      UPDATE funding_reviews
+      SET
+        rating = COALESCE($1, rating),
+        title = COALESCE($2, title),
+        content = $3,
+        image_urls = $4,
+        mood = COALESCE($5, mood),
+        pairing = COALESCE($6, pairing),
+        tags = COALESCE($7, tags),
+        record_visibility = $8,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE review_id = $9
+      RETURNING
+        review_id,
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls,
+        mood,
+        pairing,
+        tags,
+        record_visibility,
+        created_at,
+        updated_at
+      `,
+      [
+        rating !== undefined ? Number(rating) : null,
+        title || null,
+        nextContent,
+        JSON.stringify(nextImageUrls),
+        mood || null,
+        pairing || null,
+        nextTags !== null ? JSON.stringify(nextTags) : null,
+        nextRecordVisibility,
+        Number(reviewId),
+      ]
+    );
+
+    const updatedReview = result.rows[0];
+    if (!updatedReview) {
+      return res.status(404).json({
+        status: 404,
+        message: '후기를 찾을 수 없습니다.',
+      });
+    }
+
+    let review = updatedReview;
+    try {
+      review = await getFundingReviewById({
+        fundingId: Number(fundingId),
+        reviewId: updatedReview.review_id,
+        userId,
+      }) || updatedReview;
+    } catch (lookupError) {
+      console.warn('Funding review lookup failed after update', {
+        fundingId: Number(fundingId),
+        reviewId: Number(updatedReview.review_id),
+        userId,
+        message: lookupError.message,
+      });
+    }
+
+    let aiTasteUpdate = null;
+    try {
+      aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+        userId: writerId || userId,
+        review,
+        requestBody: req.body || {},
+        isCreate: false,
+      });
+    } catch (aiError) {
+      console.warn('Funding review AI taste update failed after review update', {
+        fundingId: Number(fundingId),
+        reviewId: Number(updatedReview.review_id),
+        userId: writerId || userId,
+        message: aiError.message,
+      });
+      aiTasteUpdate = {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
+
+    return res.status(200).json(buildFundingReviewResponse({
+      status: 200,
+      message: '후기가 수정되었습니다.',
+      review,
+      aiTasteUpdate,
+    }));
+  } catch (error) {
+    return sendFundingReviewError(res, error, '후기 수정 중 서버 오류가 발생했습니다.');
+  }
+};
+
 module.exports = {
   saveAgreement,
   createFundingDraft,
@@ -10424,8 +10890,8 @@ module.exports = {
   getFundingShareLink,
   createFundingReport,
   getFundingReports,
-  createFundingReview,
-  updateFundingReview,
+  createFundingReview: createFundingReviewStable,
+  updateFundingReview: updateFundingReviewStable,
   deleteFundingReview,
   getFundingReviewComments,
   createFundingReviewComment,
