@@ -6055,6 +6055,8 @@ const mapFundingListRow = (row) => {
     matchPercent: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
     liked: row.liked,
     likeCount: Number(row.like_count || 0),
+    supporterCount: Number(row.supporter_count || 0),
+    supporter_count: Number(row.supporter_count || 0),
   };
 };
 
@@ -6258,6 +6260,7 @@ const getFundingList = async (req, res) => {
         fp.image_urls,
         fp.status,
         fp.current_amount,
+        fp.supporter_count,
         fp.goal_amount AS target_amount,
         fp.start_date,
         fp.end_date,
@@ -6455,6 +6458,7 @@ const getFundingDetail = async (req, res) => {
         COALESCE(NULLIF(fd.image_urls::text, '[]'), NULLIF(fp.image_urls::text, '[]')) AS image_urls,
         fp.status,
         fp.current_amount,
+        fp.supporter_count,
         COALESCE(fd.target_amount, fp.goal_amount) AS target_amount,
         COALESCE(fd.funding_start_date, fp.start_date) AS start_date,
         COALESCE(fd.funding_end_date, fp.end_date) AS end_date,
@@ -6742,6 +6746,8 @@ const getFundingDetail = async (req, res) => {
       tasteMatchScore: matchScore,
       liked: funding.liked,
       likeCount: Number(funding.like_count || 0),
+      supporterCount: Number(funding.supporter_count || 0),
+      supporter_count: Number(funding.supporter_count || 0),
       tasteProfile,
       legalInfo: {
         productType: funding.product_type,
