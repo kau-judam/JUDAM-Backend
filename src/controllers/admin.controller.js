@@ -3,6 +3,9 @@ const {
   registerFundingProjectToAiPool,
   settleExpiredFundings,
 } = require('../services/funding.service');
+const {
+  createFundingCreatedNotification,
+} = require('../services/breweryDashboardNotification.service');
 
 // 관리자 제출 프로젝트 목록 조회
 const getSubmittedFundingDrafts = async (req, res) => {
@@ -259,6 +262,15 @@ const approveFundingDraft = async (req, res) => {
       throw error;
     } finally {
       client.release();
+    }
+
+    try {
+      await createFundingCreatedNotification(funding.funding_id);
+    } catch (notificationError) {
+      console.warn('Failed to create funding created brewery notification', {
+        fundingId: funding.funding_id,
+        message: notificationError.message,
+      });
     }
 
     const aiRecommendation = await registerFundingProjectToAiPool(funding.funding_id);

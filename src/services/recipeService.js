@@ -1,5 +1,10 @@
 const { requestLawFilter } = require('./ai.service');
 const pool = require('../db');
+const {
+  createFundingCreatedNotification,
+  createRecipePopularNotification,
+  RECIPE_POPULAR_INTEREST_THRESHOLD,
+} = require('./breweryDashboardNotification.service');
 
 const INTEREST_THRESHOLD = 100;
 const LAW_FILTER_UNAVAILABLE_MESSAGE = '법률 검토 서비스가 일시적으로 unavailable하여 레시피를 등록할 수 없습니다.';
@@ -339,6 +344,17 @@ const addInterest = async (recipeId, userId) => {
   );
 
   const row = updated.rows[0];
+  if (Number(row.interest_count || 0) >= RECIPE_POPULAR_INTEREST_THRESHOLD) {
+    try {
+      await createRecipePopularNotification(recipeId);
+    } catch (notificationError) {
+      console.warn('Failed to create recipe popular brewery notifications', {
+        recipeId,
+        message: notificationError.message,
+      });
+    }
+  }
+
   return { ...row, recipe_id: Number(row.recipe_id) };
 };
 
@@ -465,9 +481,18 @@ const convertRecipeToFunding = async (recipeId, breweryUserId, body) => {
       [recipeId]
     );
 
+    const row = fundingResult.rows[0];
     await client.query('COMMIT');
 
-    const row = fundingResult.rows[0];
+    try {
+      await createFundingCreatedNotification(row.funding_id);
+    } catch (notificationError) {
+      console.warn('Failed to create funding created brewery notification', {
+        fundingId: row.funding_id,
+        message: notificationError.message,
+      });
+    }
+
     return {
       funding_id: Number(row.funding_id),
       recipe_id: Number(row.recipe_id),

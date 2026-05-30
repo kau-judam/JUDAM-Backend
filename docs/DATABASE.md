@@ -29,6 +29,19 @@ Applied to `judam`:
 - `database/20260525_funding_bank_account_verifications.sql`
 - `database/20260528_brewery_dashboard_profile_notifications.sql`
 
+Pending Judam DB application:
+
+- `database/20260530_funding_deliveries.sql`
+  - Creates `funding_deliveries` for completed funding delivery management.
+  - Stores one delivery row per `funding_id` through a unique constraint.
+- `database/20260530_brewery_log_video_url.sql`
+  - Adds `brewery_logs.video_url`, `brewery_logs.updated_at`, and `idx_brewery_logs_funding_id`.
+  - This table was previously owned by `judam_admin`, so owner/admin privileges may be required.
+- `database/20260530_brewery_dashboard_notification_events.sql`
+  - Adds event fields for brewery dashboard notification auto-generation.
+  - Adds unique event-key index for duplicate prevention.
+  - 2026-05-30 attempt could not connect because the local `localhost:5433` SSM tunnel was closed and the current IAM user was denied `ssm:StartSession`.
+
 Latest verification:
 
 - Rechecked after merge on 2026-05-25.

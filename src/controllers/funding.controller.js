@@ -1898,6 +1898,33 @@ const projectManagementColumnSelect = (columns, columnName, alias) =>
     ? `fp.${columnName} AS ${alias}`
     : `NULL::text AS ${alias}`;
 
+const BREWERY_LOG_OPTIONAL_COLUMNS = [
+  'video_url',
+  'updated_at',
+];
+
+let breweryLogOptionalColumnsCache = null;
+
+const getBreweryLogOptionalColumns = async () => {
+  if (breweryLogOptionalColumnsCache) {
+    return breweryLogOptionalColumnsCache;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'brewery_logs'
+      AND column_name = ANY($1::text[])
+    `,
+    [BREWERY_LOG_OPTIONAL_COLUMNS]
+  );
+
+  breweryLogOptionalColumnsCache = new Set(rows.map((row) => row.column_name));
+  return breweryLogOptionalColumnsCache;
+};
+
 const getFundingProjectRawMaterialsColumn = async () => {
   if (fundingProjectRawMaterialsColumnCache) {
     return fundingProjectRawMaterialsColumnCache;
@@ -1917,6 +1944,43 @@ const getFundingProjectRawMaterialsColumn = async () => {
   fundingProjectRawMaterialsColumnCache = rows[0] || null;
   return fundingProjectRawMaterialsColumnCache;
 };
+
+const normalizeBreweryLogVideoUrl = (value) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const trimmed = String(value).trim();
+  return trimmed || null;
+};
+
+const hasBreweryLogVideoUrlField = (body = {}) =>
+  hasOwn(body, 'videoUrl') || hasOwn(body, 'video_url') || hasOwn(body, 'url');
+
+const getBreweryLogVideoUrlFromBody = (body = {}) =>
+  normalizeBreweryLogVideoUrl(getBodyValue(body, ['videoUrl', 'video_url', 'url']));
+
+const mapBreweryLogImageUrls = (value) => uniqueValues(parseJsonArrayField(value));
+
+const mapBreweryLogResponse = (log, extra = {}) => ({
+  breweryLogId: Number(log.log_id),
+  logId: Number(log.log_id),
+  fundingId: Number(log.funding_id),
+  stage: log.step,
+  title: log.title,
+  content: log.content,
+  videoUrl: log.video_url || null,
+  imageUrls: mapBreweryLogImageUrls(log.image_urls),
+  likeCount: Number(extra.likeCount ?? log.like_count ?? 0),
+  liked: Boolean(extra.liked ?? log.liked ?? false),
+  commentCount: Number(extra.commentCount ?? log.comment_count ?? 0),
+  createdAt: log.created_at,
+  updatedAt: log.updated_at || log.created_at,
+});
 
 const recoverFundingDraftFromProject = async (fundingId) => {
   const managementColumns = await getFundingProjectManagementColumns();
@@ -6969,6 +7033,14 @@ const getBreweryLogs = async (req, res) => {
   }
 
   try {
+    const breweryLogColumns = await getBreweryLogOptionalColumns();
+    const videoUrlSelect = breweryLogColumns.has('video_url')
+      ? 'bl.video_url'
+      : 'NULL::text AS video_url';
+    const updatedAtSelect = breweryLogColumns.has('updated_at')
+      ? 'bl.updated_at'
+      : 'bl.created_at AS updated_at';
+
     const result = await pool.query(
       `
       SELECT
@@ -6977,8 +7049,10 @@ const getBreweryLogs = async (req, res) => {
         bl.step,
         bl.title,
         bl.content,
+        ${videoUrlSelect},
         bl.image_urls,
         bl.created_at,
+        ${updatedAtSelect},
         COALESCE(lc.like_count, 0) AS like_count,
         EXISTS (
           SELECT 1
@@ -7007,23 +7081,8 @@ const getBreweryLogs = async (req, res) => {
 
     return res.status(200).json({
       fundingId: resolvedFundingId,
-      logs: result.rows.map((log) => ({
-        breweryLogId: Number(log.log_id),
-        logId: Number(log.log_id),
-        fundingId: Number(log.funding_id),
-        stage: log.step,
-        title: log.title,
-        content: log.content,
-        imageUrls:
-          typeof log.image_urls === 'string'
-            ? JSON.parse(log.image_urls)
-            : log.image_urls,
-        likeCount: Number(log.like_count || 0),
-        liked: log.liked,
-        commentCount: Number(log.comment_count || 0),
-        createdAt: log.created_at,
-      })),
-      message: '?묒“?쇱? 議고쉶 ?깃났',
+      logs: result.rows.map((log) => mapBreweryLogResponse(log)),
+      message: '양조일지 조회 성공',
     });
   } catch (error) {
     console.error(error);
@@ -7038,7 +7097,8 @@ const getBreweryLogs = async (req, res) => {
 // ?묒“?쇱? ?깅줉
 const createBreweryLog = async (req, res) => {
   const { fundingId } = req.params;
-  const { stage, title, content, imageUrls } = req.body;
+  const { stage, title, content } = req.body;
+  const requestedImageUrls = getBodyValue(req.body, ['imageUrls', 'image_urls']);
   const files = req.files || [];
   const userId = requireUserId(req, res);
   if (!userId) return;
@@ -7074,13 +7134,25 @@ const createBreweryLog = async (req, res) => {
   }
 
   try {
+    const breweryLogColumns = await getBreweryLogOptionalColumns();
+    const hasVideoUrl = hasBreweryLogVideoUrlField(req.body);
+    const videoUrl = hasVideoUrl ? getBreweryLogVideoUrlFromBody(req.body) : null;
+
+    if (hasVideoUrl && !breweryLogColumns.has('video_url')) {
+      return res.status(500).json({
+        status: 500,
+        message: '양조일지 영상 URL 저장 컬럼이 아직 DB에 적용되지 않았습니다.',
+        migration: 'database/20260530_brewery_log_video_url.sql',
+      });
+    }
+
     const uploadedImageUrls = [];
     for (const file of files) {
       uploadedImageUrls.push(await storeUploadedFile(file, `brewery-logs/${resolvedFundingId}`, userId));
     }
 
-    const bodyImageUrls = parseJsonArrayField(imageUrls);
-    const normalizedImageUrls = [...bodyImageUrls, ...uploadedImageUrls];
+    const bodyImageUrls = mapBreweryLogImageUrls(requestedImageUrls);
+    const normalizedImageUrls = uniqueValues([...bodyImageUrls, ...uploadedImageUrls]);
 
     if (normalizedImageUrls.length > 5) {
       return res.status(400).json({
@@ -7089,52 +7161,58 @@ const createBreweryLog = async (req, res) => {
       });
     }
 
+    const insertColumns = [
+      'funding_id',
+      'step',
+      'title',
+      'content',
+      'image_urls',
+    ];
+    const insertValues = [
+      resolvedFundingId,
+      stage,
+      title,
+      content,
+      JSON.stringify(normalizedImageUrls),
+    ];
+
+    if (breweryLogColumns.has('video_url')) {
+      insertColumns.push('video_url');
+      insertValues.push(videoUrl);
+    }
+
+    const returningColumns = [
+      'log_id',
+      'funding_id',
+      'step',
+      'title',
+      'content',
+      breweryLogColumns.has('video_url') ? 'video_url' : 'NULL::text AS video_url',
+      'image_urls',
+      'created_at',
+      breweryLogColumns.has('updated_at') ? 'updated_at' : 'created_at AS updated_at',
+    ];
+
     const result = await pool.query(
       `
       INSERT INTO brewery_logs (
-        funding_id,
-        step,
-        title,
-        content,
-        image_urls
+        ${insertColumns.join(', ')}
       )
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES (${insertValues.map((_, index) => `$${index + 1}`).join(', ')})
       RETURNING
-        log_id,
-        funding_id,
-        step,
-        title,
-        content,
-        image_urls,
-        created_at
+        ${returningColumns.join(',\n        ')}
       `,
-      [
-        resolvedFundingId,
-        stage,
-        title,
-        content,
-        JSON.stringify(normalizedImageUrls),
-      ]
+      insertValues
     );
 
     const log = result.rows[0];
 
     return res.status(201).json({
-      breweryLogId: Number(log.log_id),
-      logId: Number(log.log_id),
-      fundingId: Number(log.funding_id),
-      stage:log.step,
-      title: log.title,
-      content: log.content,
-      imageUrls:
-        typeof log.image_urls === 'string'
-          ? JSON.parse(log.image_urls)
-          : log.image_urls,
+      ...mapBreweryLogResponse(log),
       likeCount: 0,
       liked: false,
       commentCount: 0,
-      createdAt: log.created_at,
-      message: '?묒“?쇱?媛 ?깅줉?섏뿀?듬땲??',
+      message: '양조일지가 등록되었습니다.',
     });
   } catch (error) {
     console.error(error);
@@ -7149,7 +7227,9 @@ const createBreweryLog = async (req, res) => {
 // ?묒“?쇱? ?섏젙
 const updateBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
-  const { stage, title, content, imageUrls } = req.body;
+  const { stage, title, content } = req.body;
+  const requestedImageUrls = getBodyValue(req.body, ['imageUrls', 'image_urls']);
+  const requestedDeleteImageUrls = getBodyValue(req.body, ['deleteImageUrls', 'delete_image_urls']);
   const files = req.files || [];
   const userId = requireUserId(req, res);
   if (!userId) return;
@@ -7174,7 +7254,20 @@ const updateBreweryLog = async (req, res) => {
     });
   }
 
-  if (!stage && !title && !content && !imageUrls && files.length === 0) {
+  const hasImageUrls = hasOwn(req.body, 'imageUrls') || hasOwn(req.body, 'image_urls');
+  const hasDeleteImageUrls =
+    hasOwn(req.body, 'deleteImageUrls') || hasOwn(req.body, 'delete_image_urls');
+  const hasVideoUrl = hasBreweryLogVideoUrlField(req.body);
+
+  if (
+    !stage &&
+    !title &&
+    !content &&
+    !hasImageUrls &&
+    !hasDeleteImageUrls &&
+    !hasVideoUrl &&
+    files.length === 0
+  ) {
     return res.status(400).json({
       status: 400,
       message: '?묒“?쇱? ?섏젙媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
@@ -7189,14 +7282,66 @@ const updateBreweryLog = async (req, res) => {
   }
 
   try {
-    const uploadedImageUrls = [];
-    for (const file of files) {
-      uploadedImageUrls.push(await storeUploadedFile(file, `brewery-logs/${fundingId}`, userId));
+    const resolvedFundingId = await resolveFundingId(fundingId);
+    const breweryLogColumns = await getBreweryLogOptionalColumns();
+    const videoUrl = getBreweryLogVideoUrlFromBody(req.body);
+
+    if (hasVideoUrl && !breweryLogColumns.has('video_url')) {
+      return res.status(500).json({
+        status: 500,
+        message: '양조일지 영상 URL 저장 컬럼이 아직 DB에 적용되지 않았습니다.',
+        migration: 'database/20260530_brewery_log_video_url.sql',
+      });
     }
 
-    const normalizedImageUrls = imageUrls || files.length > 0
-      ? [...parseJsonArrayField(imageUrls), ...uploadedImageUrls]
-      : null;
+    if (!resolvedFundingId) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const currentSelect = [
+      'log_id',
+      'funding_id',
+      'image_urls',
+      breweryLogColumns.has('video_url') ? 'video_url' : 'NULL::text AS video_url',
+    ];
+    const currentResult = await pool.query(
+      `
+      SELECT ${currentSelect.join(', ')}
+      FROM brewery_logs
+      WHERE funding_id = $1
+        AND log_id = $2
+      `,
+      [resolvedFundingId, Number(breweryLogId)]
+    );
+
+    if (currentResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '양조일지를 찾을 수 없습니다.',
+      });
+    }
+
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `brewery-logs/${resolvedFundingId}`, userId));
+    }
+
+    let normalizedImageUrls = null;
+    if (hasImageUrls || hasDeleteImageUrls || uploadedImageUrls.length > 0) {
+      const currentImageUrls = mapBreweryLogImageUrls(currentResult.rows[0].image_urls);
+      const baseImageUrls = hasImageUrls
+        ? mapBreweryLogImageUrls(requestedImageUrls)
+        : currentImageUrls;
+      const deleteImageUrlSet = new Set(
+        mapBreweryLogImageUrls(requestedDeleteImageUrls)
+      );
+      normalizedImageUrls = uniqueValues(
+        [...baseImageUrls, ...uploadedImageUrls].filter((imageUrl) => !deleteImageUrlSet.has(imageUrl))
+      );
+    }
 
     if (normalizedImageUrls && normalizedImageUrls.length > 5) {
       return res.status(400).json({
@@ -7205,33 +7350,50 @@ const updateBreweryLog = async (req, res) => {
       });
     }
 
+    const setClauses = [];
+    const values = [];
+    const addSet = (column, value) => {
+      values.push(value);
+      setClauses.push(`${column} = $${values.length}`);
+    };
+
+    if (stage) addSet('step', stage);
+    if (title) addSet('title', title);
+    if (content) addSet('content', content);
+    if (normalizedImageUrls) addSet('image_urls', JSON.stringify(normalizedImageUrls));
+    if (hasVideoUrl) addSet('video_url', videoUrl);
+    if (breweryLogColumns.has('updated_at')) {
+      setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    }
+
+    values.push(resolvedFundingId);
+    const fundingIdParam = `$${values.length}`;
+    values.push(Number(breweryLogId));
+    const logIdParam = `$${values.length}`;
+
+    const returningColumns = [
+      'log_id',
+      'funding_id',
+      'step',
+      'title',
+      'content',
+      breweryLogColumns.has('video_url') ? 'video_url' : 'NULL::text AS video_url',
+      'image_urls',
+      'created_at',
+      breweryLogColumns.has('updated_at') ? 'updated_at' : 'created_at AS updated_at',
+    ];
+
     const result = await pool.query(
       `
       UPDATE brewery_logs
       SET
-        step = COALESCE($1, step),
-        title = COALESCE($2, title),
-        content = COALESCE($3, content),
-        image_urls = COALESCE($4, image_urls)
-      WHERE funding_id = $5
-      AND log_id = $6
+        ${setClauses.join(',\n        ')}
+      WHERE funding_id = ${fundingIdParam}
+      AND log_id = ${logIdParam}
       RETURNING
-        log_id,
-        funding_id,
-        step,
-        title,
-        content,
-        image_urls,
-        created_at
+        ${returningColumns.join(',\n        ')}
       `,
-      [
-        stage || null,
-        title || null,
-        content || null,
-        normalizedImageUrls ? JSON.stringify(normalizedImageUrls) : null,
-        Number(fundingId),
-        Number(breweryLogId),
-      ]
+      values
     );
 
     if (result.rows.length === 0) {
@@ -7244,18 +7406,8 @@ const updateBreweryLog = async (req, res) => {
     const log = result.rows[0];
 
     return res.status(200).json({
-      breweryLogId: Number(log.log_id),
-      logId: Number(log.log_id),
-      fundingId: Number(log.funding_id),
-      stage: log.step,
-      title: log.title,
-      content: log.content,
-      imageUrls:
-        typeof log.image_urls === 'string'
-          ? JSON.parse(log.image_urls)
-          : log.image_urls,
-      createdAt: log.created_at,
-      message: '?묒“?쇱?媛 ?섏젙?섏뿀?듬땲??',
+      ...mapBreweryLogResponse(log),
+      message: '양조일지가 수정되었습니다.',
     });
   } catch (error) {
     console.error(error);
