@@ -1,9 +1,10 @@
-const crypto = require('crypto');
+﻿const crypto = require('crypto');
 const pool = require('../config/db');
 const { uploadFileToS3 } = require('../services/s3.service');
 const {
   isAiFundingRegistrationStatus,
   registerFundingProjectToAiPool,
+  KST_TIMEZONE,
 } = require('../services/funding.service');
 const {
   generateFundingDraftAiImageAndUpload,
@@ -303,7 +304,7 @@ const requireUserId = (req, res) => {
   if (!userId) {
     res.status(401).json({
       status: 401,
-      message: '로그인이 필요합니다.',
+      message: '濡쒓렇?몄씠 ?꾩슂?⑸땲??',
     });
     return null;
   }
@@ -311,8 +312,8 @@ const requireUserId = (req, res) => {
   return userId;
 };
 
-const FUNDING_OWNER_FORBIDDEN_MESSAGE = '해당 펀딩 프로젝트에 대한 권한이 없습니다.';
-const AUTH_REQUIRED_MESSAGE = '유효하지 않거나 만료된 토큰입니다.';
+const FUNDING_OWNER_FORBIDDEN_MESSAGE = '?대떦 ????꾨줈?앺듃?????沅뚰븳???놁뒿?덈떎.';
+const AUTH_REQUIRED_MESSAGE = '?좏슚?섏? ?딄굅??留뚮즺???좏겙?낅땲??';
 
 const createHttpError = (status, message) => {
   const error = new Error(message);
@@ -416,7 +417,7 @@ const assertFundingProjectOwner = async (fundingId, user) => {
   );
 
   if (rows.length === 0) {
-    throw createHttpError(404, '펀딩 프로젝트를 찾을 수 없습니다.');
+    throw createHttpError(404, '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.');
   }
 
   const funding = rows[0];
@@ -445,7 +446,7 @@ const assertFundingDraftOwner = async (draftId, user) => {
   );
 
   if (rows.length === 0) {
-    throw createHttpError(404, '임시저장 프로젝트를 찾을 수 없습니다.');
+    throw createHttpError(404, '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.');
   }
 
   const draft = rows[0];
@@ -698,7 +699,7 @@ const normalizeFundingImageUrlsInput = (value) => {
 };
 
 const parseReviewStringArrayField = (value, fieldName) => {
-  const invalidMessage = `${fieldName} 형식이 올바르지 않습니다.`;
+  const invalidMessage = `${fieldName} ?뺤떇???щ컮瑜댁? ?딆뒿?덈떎.`;
 
   const normalizeItems = (items) => {
     if (!Array.isArray(items)) {
@@ -763,7 +764,7 @@ const normalizeReviewImageUrlsInput = (value, fieldName = 'imageUrls') =>
       .filter(Boolean)
   );
 
-const REVIEW_RATING_ERROR_MESSAGE = 'rating은 0~5 사이의 0.5 단위 숫자여야 합니다.';
+const REVIEW_RATING_ERROR_MESSAGE = 'rating? 0~5 ?ъ씠??0.5 ?⑥쐞 ?レ옄?ъ빞 ?⑸땲??';
 
 const normalizeReviewRatingInput = (value, { required = false } = {}) => {
   if (value === undefined || value === null || value === '') {
@@ -897,7 +898,7 @@ const buildFundingSupportOptionsResponse = ({
 
   return [{
     optionId: null,
-    name: '기본 후원 옵션',
+    name: '湲곕낯 ?꾩썝 ?듭뀡',
     price: fallbackPrice,
     description: funding.summary || funding.description || null,
     volume: funding.volume ?? null,
@@ -917,8 +918,8 @@ const buildFundingSupportOptionsResponse = ({
 };
 
 const PLAN_GUIDES = {
-  budgetPlanGuide: '프로젝트 예산은 "- 프로젝트 예산임: 25만원" 형식으로 작성하면 UI에 잘 반영됩니다.',
-  schedulePlanGuide: '프로젝트 일정은 "- 프로젝트 일정: 일정내용" 형식으로 작성하면 UI에 잘 반영됩니다.',
+  budgetPlanGuide: '?꾨줈?앺듃 ?덉궛? "- ?꾨줈?앺듃 ?덉궛?? 25留뚯썝" ?뺤떇?쇰줈 ?묒꽦?섎㈃ UI????諛섏쁺?⑸땲??',
+  schedulePlanGuide: '?꾨줈?앺듃 ?쇱젙? "- ?꾨줈?앺듃 ?쇱젙: ?쇱젙?댁슜" ?뺤떇?쇰줈 ?묒꽦?섎㈃ UI????諛섏쁺?⑸땲??',
 };
 
 const parseTasteProfileExtras = (flavorNotesValue) => {
@@ -2487,7 +2488,7 @@ const storeUploadedFile = async (file, folder, ownerId = 'anonymous') => {
   }
 
   if (strictS3) {
-    throw new Error('S3 업로드 설정이 필요합니다.');
+    throw new Error('S3 ?낅줈???ㅼ젙???꾩슂?⑸땲??');
   }
 
   const base64 = file.buffer.toString('base64');
@@ -2529,7 +2530,7 @@ const REQUIRED_FUNDING_DOCUMENT_TYPES = [
 const normalizeFundingDocumentType = (documentType) =>
   DOCUMENT_TYPE_ALIASES[documentType] || null;
 
-// 펀딩 약관 동의
+// ????쎄? ?숈쓽
 const saveAgreement = async (req, res) => {
   const body = req.body || {};
   const breweryId = getBodyValue(body, ['breweryId', 'brewery_id']);
@@ -2578,7 +2579,7 @@ const saveAgreement = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '필수 약관에 모두 동의해야 합니다.',
+      message: '?꾩닔 ?쎄???紐⑤몢 ?숈쓽?댁빞 ?⑸땲??',
     });
   }
 
@@ -2632,18 +2633,18 @@ const saveAgreement = async (req, res) => {
         isIpPolicyAgreed,
         allRequiredTermsAgreed,
       },
-      message: '펀딩 약관 동의가 저장되었습니다.',
+      message: '????쎄? ?숈쓽媛 ??λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '펀딩 약관 동의 저장 중 서버 오류가 발생했습니다.',
+      message: '????쎄? ?숈쓽 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 펀딩 프로젝트 임시저장 생성(수정 버전)
+// ????꾨줈?앺듃 ?꾩떆????앹꽦(?섏젙 踰꾩쟾)
 const createFundingDraft = async (req, res) => {
   const bodyPayload = req.body || {};
   const currentUserId = getAuthUserId(req.user);
@@ -2668,7 +2669,7 @@ const createFundingDraft = async (req, res) => {
   if (!breweryId) {
     return res.status(400).json({
       status: 400,
-      message: '양조장 ID는 필수입니다.',
+      message: '?묒“??ID???꾩닔?낅땲??',
     });
   }
 
@@ -2677,21 +2678,21 @@ const createFundingDraft = async (req, res) => {
     if (imageUrls && !Array.isArray(imageUrls) && typeof imageUrls !== 'string') {
       return res.status(400).json({
         status: 400,
-        message: '대표 이미지 목록 입력값이 올바르지 않습니다.',
+        message: '????대?吏 紐⑸줉 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
       });
     }
 
     if (imageUrls && normalizeFundingImageUrlsInput(imageUrls).length > 5) {
       return res.status(400).json({
         status: 400,
-        message: '대표 이미지는 최대 5개까지 등록할 수 있습니다.',
+        message: '????대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
       });
     }
 
     if (tags && !Array.isArray(tags) && typeof tags !== 'string') {
       return res.status(400).json({
         status: 400,
-        message: '검색 태그 입력값이 올바르지 않습니다.',
+        message: '寃???쒓렇 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
       });
     }
 
@@ -2763,20 +2764,20 @@ const createFundingDraft = async (req, res) => {
     return res.status(201).json({
       ...payload,
       draft,
-      message: '펀딩 프로젝트가 임시저장되었습니다.',
+      message: '????꾨줈?앺듃媛 ?꾩떆??λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '펀딩 프로젝트 임시저장 중 서버 오류가 발생했습니다.',
+      message: '????꾨줈?앺듃 ?꾩떆???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 임시저장 프로젝트 수정 (임시저장 수정용!)
+// ?꾩떆????꾨줈?앺듃 ?섏젙 (?꾩떆????섏젙??)
 const updateFundingDraft = async (req, res) => {
   const { draftId } = req.params;
   const bodyPayload = req.body || {};
@@ -2841,7 +2842,7 @@ const updateFundingDraft = async (req, res) => {
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '입력값이 올바르지 않습니다.',
+      message: '?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -2858,7 +2859,7 @@ const updateFundingDraft = async (req, res) => {
   if (hasImageUrls && normalizedImageUrls.length > 5) {
     return res.status(400).json({
       status: 400,
-      message: '대표 이미지는 최대 5개까지 등록할 수 있습니다.',
+      message: '????대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
     });
   }
 
@@ -2890,7 +2891,7 @@ const updateFundingDraft = async (req, res) => {
     if (!updatedDraft) {
       return res.status(404).json({
         status: 404,
-        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+        message: '?袁⑸뻻?????袁⑥쨮??븍뱜??筌≪뼚??????곷뮸??덈뼄.',
       });
     }
 
@@ -2900,7 +2901,7 @@ const updateFundingDraft = async (req, res) => {
     return res.status(200).json({
       ...payload,
       draft: updatedDraft,
-      message: '?꾩떆????꾨줈?앺듃媛 ?섏젙?섏뿀?듬땲??',
+      message: '?袁⑸뻻?????袁⑥쨮??븍뱜揶쎛 ??륁젟??뤿???щ빍??',
     });
 
     const result = await pool.query(
@@ -2981,7 +2982,7 @@ const updateFundingDraft = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -3011,19 +3012,19 @@ const updateFundingDraft = async (req, res) => {
         schedulePlan: parseOriginalTextField(draft.schedule_plan),
         policy: selectProjectPolicyText(draft.refund_policy, draft.exchange_policy),
       },
-      message: '임시저장 프로젝트가 수정되었습니다.',
+      message: '?꾩떆????꾨줈?앺듃媛 ?섏젙?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '임시저장 프로젝트 수정 중 서버 오류가 발생했습니다.',
+      message: '?꾩떆????꾨줈?앺듃 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 프로젝트 기본정보 저장
+// ?꾨줈?앺듃 湲곕낯?뺣낫 ???
 const saveBasicInfo = async (req, res) => {
   const { draftId } = req.params;
 
@@ -3043,42 +3044,42 @@ const saveBasicInfo = async (req, res) => {
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '입력값이 올바르지 않습니다.',
+      message: '?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (!category || !title || !mainIngredient || !alcoholPercentage || !summary) {
     return res.status(400).json({
       status: 400,
-      message: '필수 기본정보를 모두 입력해야 합니다.',
+      message: '?꾩닔 湲곕낯?뺣낫瑜?紐⑤몢 ?낅젰?댁빞 ?⑸땲??',
     });
   }
 
   if (subIngredients && !Array.isArray(subIngredients) && typeof subIngredients !== 'string') {
     return res.status(400).json({
       status: 400,
-      message: '서브 재료 입력값이 올바르지 않습니다.',
+      message: '?쒕툕 ?щ즺 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (imageUrls && !Array.isArray(imageUrls) && typeof imageUrls !== 'string') {
     return res.status(400).json({
       status: 400,
-      message: '대표 이미지 목록 입력값이 올바르지 않습니다.',
+      message: '????대?吏 紐⑸줉 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (imageUrls && normalizeFundingImageUrlsInput(imageUrls).length > 5) {
     return res.status(400).json({
       status: 400,
-      message: '대표 이미지는 최대 5개까지 등록할 수 있습니다.',
+      message: '????대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
     });
   }
 
   if (tags && !Array.isArray(tags) && typeof tags !== 'string') {
     return res.status(400).json({
       status: 400,
-      message: '검색 태그 입력값이 올바르지 않습니다.',
+      message: '寃???쒓렇 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3139,7 +3140,7 @@ const saveBasicInfo = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -3166,19 +3167,19 @@ const saveBasicInfo = async (req, res) => {
       },
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
-      message: '기본정보가 저장되었습니다.',
+      message: '湲곕낯?뺣낫媛 ??λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '기본정보 저장 중 서버 오류가 발생했습니다.',
+      message: '湲곕낯?뺣낫 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 목표금액 & 일정 저장
+// 紐⑺몴湲덉븸 & ?쇱젙 ???
 const saveSchedule = async (req, res) => {
   const { draftId } = req.params;
 
@@ -3203,7 +3204,7 @@ const saveSchedule = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '입력값이 올바르지 않습니다.',
+      message: '?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3231,7 +3232,7 @@ const saveSchedule = async (req, res) => {
   if (Number.isNaN(startDate.getTime())) {
     return res.status(400).json({
       status: 400,
-      message: '펀딩 시작일 형식이 올바르지 않습니다.',
+      message: '????쒖옉???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3243,14 +3244,14 @@ const saveSchedule = async (req, res) => {
   if (Number.isNaN(deliveryDate.getTime())) {
     return res.status(400).json({
       status: 400,
-      message: '예상 배송 시작일 형식이 올바르지 않습니다.',
+      message: '?덉긽 諛곗넚 ?쒖옉???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (deliveryDate <= endDate) {
     return res.status(400).json({
       status: 400,
-      message: '예상 배송 시작일은 펀딩 종료일 이후여야 합니다.',
+      message: '?덉긽 諛곗넚 ?쒖옉?쇱? ???醫낅즺???댄썑?ъ빞 ?⑸땲??',
     });
   }
 
@@ -3271,7 +3272,7 @@ const saveSchedule = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '수수료 또는 배송비 입력값이 올바르지 않습니다.',
+      message: '?섏닔猷??먮뒗 諛곗넚鍮??낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3330,7 +3331,7 @@ const saveSchedule = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -3357,19 +3358,19 @@ const saveSchedule = async (req, res) => {
       shippingFee: draft.shipping_fee,
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
-      message: '목표 금액 및 일정이 저장되었습니다.',
+      message: '紐⑺몴 湲덉븸 諛??쇱젙????λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '목표 금액 및 일정 저장 중 서버 오류가 발생했습니다.',
+      message: '紐⑺몴 湲덉븸 諛??쇱젙 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 법적 고시 정보 저장
+// 踰뺤쟻 怨좎떆 ?뺣낫 ???
 const saveLegalInfo = async (req, res) => {
   const { draftId } = req.params;
 
@@ -3390,7 +3391,7 @@ const saveLegalInfo = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '법적 고시 정보 입력이 올바르지 않습니다.',
+      message: '踰뺤쟻 怨좎떆 ?뺣낫 ?낅젰???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3401,14 +3402,14 @@ const saveLegalInfo = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '용량 또는 도수 입력값이 올바르지 않습니다.',
+      message: '?⑸웾 ?먮뒗 ?꾩닔 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (normalizedRawMaterials.length === 0) {
     return res.status(400).json({
       status: 400,
-      message: '최소 1개 이상의 원재료를 입력해야 합니다.',
+      message: '理쒖냼 1媛??댁긽???먯옱猷뚮? ?낅젰?댁빞 ?⑸땲??',
     });
   }
 
@@ -3419,7 +3420,7 @@ const saveLegalInfo = async (req, res) => {
   if (hasInvalidMaterial) {
     return res.status(400).json({
       status: 400,
-      message: '법적 고시 정보 입력이 올바르지 않습니다.',
+      message: '踰뺤쟻 怨좎떆 ?뺣낫 ?낅젰???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3458,7 +3459,7 @@ const saveLegalInfo = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -3474,20 +3475,20 @@ const saveLegalInfo = async (req, res) => {
       rawMaterials: parseFundingRawMaterialsField(draft.raw_materials),
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
-      message: '법적 고시 정보가 저장되었습니다.',
+      message: '踰뺤쟻 怨좎떆 ?뺣낫媛 ??λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '법적 고시 정보 저장 중 서버 오류가 발생했습니다.',
+      message: '踰뺤쟻 怨좎떆 ?뺣낫 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 맛지표 저장
+// 留쏆??????
 const saveTasteProfile = async (req, res) => {
   const { draftId } = req.params;
   const bodyPayload = req.body || {};
@@ -3524,7 +3525,7 @@ const saveTasteProfile = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '맛지표 입력값이 올바르지 않습니다.',
+      message: '留쏆????낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3551,21 +3552,21 @@ const saveTasteProfile = async (req, res) => {
   if (isOutOfRange) {
     return res.status(400).json({
       status: 400,
-      message: '맛지표는 0부터 100 사이의 값이어야 합니다.',
+      message: '留쏆??쒕뒗 0遺??100 ?ъ씠??媛믪씠?댁빞 ?⑸땲??',
     });
   }
 
   if (flavorNotes && !Array.isArray(flavorNotes) && typeof flavorNotes !== 'string') {
     return res.status(400).json({
       status: 400,
-      message: '맛지표 입력값이 올바르지 않습니다.',
+      message: '留쏆????낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (flavorTags && !Array.isArray(flavorTags) && typeof flavorTags !== 'string') {
     return res.status(400).json({
       status: 400,
-      message: '留쏆????낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      message: '筌띿룇?????낆젾揶쏅?????而?몴?? ??녿뮸??덈뼄.',
     });
   }
 
@@ -3633,7 +3634,7 @@ const saveTasteProfile = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -3646,20 +3647,20 @@ const saveTasteProfile = async (req, res) => {
       tasteProfile: buildTasteProfileResponse(draft),
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
-      message: '맛지표 정보가 저장되었습니다.',
+      message: '留쏆????뺣낫媛 ??λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '맛지표 저장 중 서버 오류가 발생했습니다.',
+      message: '留쏆??????以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 프로젝트 계획 정보 저장 API
+// ?꾨줈?앺듃 怨꾪쉷 ?뺣낫 ???API
 const savePlan = async (req, res) => {
   const { draftId } = req.params;
   const bodyPayload = req.body || {};
@@ -3682,7 +3683,7 @@ const savePlan = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '프로젝트 계획 입력값이 올바르지 않습니다.',
+      message: '?꾨줈?앺듃 怨꾪쉷 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3731,7 +3732,7 @@ const savePlan = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -3755,20 +3756,20 @@ const savePlan = async (req, res) => {
       },
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
-      message: '프로젝트 계획 정보가 저장되었습니다.',
+      message: '?꾨줈?앺듃 怨꾪쉷 ?뺣낫媛 ??λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '프로젝트 계획 정보 저장 중 서버 오류가 발생했습니다.',
+      message: '?꾨줈?앺듃 怨꾪쉷 ?뺣낫 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 창작자/정산/사업자 정보 저장
+// 李쎌옉???뺤궛/?ъ뾽???뺣낫 ???
 const saveBreweryInfo = async (req, res) => {
   const { draftId } = req.params;
   const body = req.body || {};
@@ -3834,7 +3835,7 @@ const saveBreweryInfo = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '양조장 정보 입력값이 올바르지 않습니다.',
+      message: '?묒“???뺣낫 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -3845,21 +3846,21 @@ const saveBreweryInfo = async (req, res) => {
   if (!/^\d{10}$/.test(normalizedBusinessNumber)) {
     return res.status(400).json({
       status: 400,
-      message: '사업자등록번호 형식이 올바르지 않습니다.',
+      message: '?ъ뾽?먮벑濡앸쾲???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (!/^01\d{8,9}$/.test(normalizedPhone)) {
     return res.status(400).json({
       status: 400,
-      message: '전화번호 형식이 올바르지 않습니다.',
+      message: '?꾪솕踰덊샇 ?뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (normalizedAccountNumber.length < 8) {
     return res.status(400).json({
       status: 400,
-      message: '계좌번호는 숫자 8자리 이상이어야 합니다.',
+      message: '怨꾩쥖踰덊샇???レ옄 8?먮━ ?댁긽?댁뼱???⑸땲??',
     });
   }
 
@@ -3891,7 +3892,7 @@ const saveBreweryInfo = async (req, res) => {
       if (verificationResult.rows.length === 0) {
         return res.status(400).json({
           status: 400,
-          message: '계좌 인증 토큰이 올바르지 않습니다.',
+          message: '怨꾩쥖 ?몄쬆 ?좏겙???щ컮瑜댁? ?딆뒿?덈떎.',
         });
       }
 
@@ -3952,7 +3953,7 @@ const saveBreweryInfo = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -3983,25 +3984,25 @@ const saveBreweryInfo = async (req, res) => {
       accountVerified: draft.account_verified,
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
-      message: '창작자/정산/사업자 정보가 저장되었습니다.',
+      message: '李쎌옉???뺤궛/?ъ뾽???뺣낫媛 ??λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '창작자/정산/사업자 정보 저장 중 서버 오류가 발생했습니다.',
+      message: '李쎌옉???뺤궛/?ъ뾽???뺣낫 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 프젝생성 추가1: 양조장 정보 불러오기
+// ?꾩젥?앹꽦 異붽?1: ?묒“???뺣낫 遺덈윭?ㅺ린
 const loadBreweryInfo = async (req, res) => {
   const { draftId } = req.params;
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '요청한 draftId가 유효하지 않습니다.',
+      message: '?붿껌??draftId媛 ?좏슚?섏? ?딆뒿?덈떎.',
     });
   }
 
@@ -4068,7 +4069,7 @@ const loadBreweryInfo = async (req, res) => {
     if (rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '펀딩 초안 정보를 찾을 수 없습니다.',
+        message: '???珥덉븞 ?뺣낫瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -4077,7 +4078,7 @@ const loadBreweryInfo = async (req, res) => {
     if (!info.approved_application_id) {
       return res.status(404).json({
         status: 404,
-        message: '승인된 양조장 정보를 찾을 수 없습니다.',
+        message: '?뱀씤???묒“???뺣낫瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -4114,7 +4115,7 @@ const loadBreweryInfo = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '양조장 정보 불러오기 성공',
+      message: '?묒“???뺣낫 遺덈윭?ㅺ린 ?깃났',
       data: {
         breweryName,
         representativeName,
@@ -4141,7 +4142,7 @@ const loadBreweryInfo = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '양조장 정보 조회 중 오류가 발생했습니다.',
+      message: '?묒“???뺣낫 議고쉶 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -4162,21 +4163,21 @@ const uploadFundingDraftFile = async (req, res) => {
   if (!draftId || isNaN(Number(draftId)) || !fileType) {
     return res.status(400).json({
       status: 400,
-      message: '파일 업로드 요청값이 올바르지 않습니다.',
+      message: '?뚯씪 ?낅줈???붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (!allowedFileTypes.includes(fileType)) {
     return res.status(400).json({
       status: 400,
-      message: '지원하지 않는 파일 유형입니다.',
+      message: '吏?먰븯吏 ?딅뒗 ?뚯씪 ?좏삎?낅땲??',
     });
   }
 
   if (!file) {
     return res.status(400).json({
       status: 400,
-      message: '업로드할 파일이 필요합니다.',
+      message: '?낅줈?쒗븷 ?뚯씪???꾩슂?⑸땲??',
     });
   }
 
@@ -4214,7 +4215,7 @@ const uploadFundingDraftFile = async (req, res) => {
       if (!currentDraft) {
         return res.status(404).json({
           status: 404,
-          message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+          message: '?袁⑸뻻?????袁⑥쨮??븍뱜??筌≪뼚??????곷뮸??덈뼄.',
         });
       }
 
@@ -4223,7 +4224,7 @@ const uploadFundingDraftFile = async (req, res) => {
       if (currentImageUrls.length >= 5) {
         return res.status(400).json({
           status: 400,
-          message: '????대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
+          message: '???????筌왖??筌ㅼ뮆? 5揶쏆뮄?댐쭪? ?源낆쨯??????됰뮸??덈뼄.',
         });
       }
 
@@ -4261,7 +4262,7 @@ const uploadFundingDraftFile = async (req, res) => {
         allImageUrls: nextImageFields.allImageUrls,
         images: mapFundingImageUrls(nextImageFields.allImageUrls),
         updatedAt: draft.updated_at,
-        message: '?뚯씪???낅줈?쒕릺?덉뒿?덈떎.',
+        message: '???뵬????낆쨮??뺣┷??됰뮸??덈뼄.',
       });
     }
 
@@ -4279,7 +4280,7 @@ const uploadFundingDraftFile = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -4288,24 +4289,24 @@ const uploadFundingDraftFile = async (req, res) => {
       fileType,
       fileUrl,
       updatedAt: result.rows[0].updated_at,
-      message: '파일이 업로드되었습니다.',
+      message: '?뚯씪???낅줈?쒕릺?덉뒿?덈떎.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '파일 업로드 중 서버 오류가 발생했습니다.',
+      message: '?뚯씪 ?낅줈??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-//프젝생성 추가3: 휴대폰 본인 인증 API
+//?꾩젥?앹꽦 異붽?3: ?대???蹂몄씤 ?몄쬆 API
 const generateFundingDraftAiImage = async (req, res) => {
   const { draftId } = req.params;
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '임시저장 프로젝트 ID가 올바르지 않습니다.',
+      message: '?꾩떆????꾨줈?앺듃 ID媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -4338,7 +4339,7 @@ const generateFundingDraftAiImage = async (req, res) => {
     if (!draft) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -4347,7 +4348,7 @@ const generateFundingDraftAiImage = async (req, res) => {
     if (currentImageUrls.length >= 5) {
       return res.status(400).json({
         status: 400,
-        message: '프로젝트 대표 이미지는 최대 5장까지 등록할 수 있습니다.',
+        message: '?꾨줈?앺듃 ????대?吏??理쒕? 5?κ퉴吏 ?깅줉?????덉뒿?덈떎.',
       });
     }
 
@@ -4356,7 +4357,7 @@ const generateFundingDraftAiImage = async (req, res) => {
     if (!aiPayload.name) {
       return res.status(400).json({
         status: 400,
-        message: 'AI 이미지 생성을 위한 프로젝트 이름이 필요합니다.',
+        message: 'AI ?대?吏 ?앹꽦???꾪븳 ?꾨줈?앺듃 ?대쫫???꾩슂?⑸땲??',
       });
     }
 
@@ -4370,7 +4371,7 @@ const generateFundingDraftAiImage = async (req, res) => {
     if (aiResult.aiStatus === 'prompt_only') {
       return res.status(200).json({
         status: 200,
-        message: aiResult.message || 'AI 이미지 생성이 프롬프트만 반환되었습니다.',
+        message: aiResult.message || 'AI ?대?吏 ?앹꽦???꾨＼?꾪듃留?諛섑솚?섏뿀?듬땲??',
         data: {
           aiStatus: aiResult.aiStatus,
           promptUsed: aiResult.promptUsed,
@@ -4410,7 +4411,7 @@ const generateFundingDraftAiImage = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: 'AI 이미지 생성 성공',
+      message: 'AI ?대?吏 ?앹꽦 ?깃났',
       data: {
         imageUrl: aiResult.imageUrl,
         imageKey: aiResult.imageKey,
@@ -4435,7 +4436,7 @@ const generateFundingDraftAiImage = async (req, res) => {
     return res.status(status).json({
       status,
       message: status === 500
-        ? 'AI 이미지 생성 중 서버 오류가 발생했습니다.'
+        ? 'AI ?대?吏 ?앹꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.'
         : error.message,
     });
   }
@@ -4448,7 +4449,7 @@ const verifyPhoneForFundingDraft = async (req, res) => {
   if (!draftId || isNaN(Number(draftId)) || !contactPhone) {
     return res.status(400).json({
       status: 400,
-      message: '휴대폰 인증 요청값이 올바르지 않습니다.',
+      message: '?대????몄쬆 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -4471,7 +4472,7 @@ const verifyPhoneForFundingDraft = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -4483,17 +4484,17 @@ const verifyPhoneForFundingDraft = async (req, res) => {
       contactPhone: draft.contact_phone,
       phoneVerified: draft.phone_verified,
       updatedAt: draft.updated_at,
-      message: '휴대폰 본인 인증이 완료되었습니다.',
+      message: '?대???蹂몄씤 ?몄쬆???꾨즺?섏뿀?듬땲??',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '휴대폰 인증 처리 중 서버 오류가 발생했습니다.',
+      message: '?대????몄쬆 泥섎━ 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-//프젝생성 추가4: 입금계좌 인증처리
+//?꾩젥?앹꽦 異붽?4: ?낃툑怨꾩쥖 ?몄쬆泥섎━
 const verifyAccountForFundingDraft = async (req, res) => {
   const { draftId } = req.params;
   const {
@@ -4523,7 +4524,7 @@ const verifyAccountForFundingDraft = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '계좌 인증 요청값이 올바르지 않습니다.',
+      message: '怨꾩쥖 ?몄쬆 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -4552,7 +4553,7 @@ const verifyAccountForFundingDraft = async (req, res) => {
     if (verificationResult.rows.length === 0) {
       return res.status(400).json({
         status: 400,
-        message: '계좌 인증 토큰이 올바르지 않습니다.',
+        message: '怨꾩쥖 ?몄쬆 ?좏겙???щ컮瑜댁? ?딆뒿?덈떎.',
       });
     }
 
@@ -4580,7 +4581,7 @@ const verifyAccountForFundingDraft = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -4593,12 +4594,12 @@ const verifyAccountForFundingDraft = async (req, res) => {
       accountHolder: draft.account_holder,
       accountVerified: draft.account_verified,
       updatedAt: draft.updated_at,
-      message: '입금 계좌 인증이 완료되었습니다.',
+      message: '?낃툑 怨꾩쥖 ?몄쬆???꾨즺?섏뿀?듬땲??',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '계좌 인증 처리 중 서버 오류가 발생했습니다.',
+      message: '怨꾩쥖 ?몄쬆 泥섎━ 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -4616,7 +4617,7 @@ const requestBankAccountVerification = async (req, res) => {
   if (!bankName || !accountNumber || !normalizedAccountNumber || !accountHolder) {
     return res.status(400).json({
       status: 400,
-      message: '계좌 인증 요청값이 올바르지 않습니다.',
+      message: '怨꾩쥖 ?몄쬆 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -4692,19 +4693,19 @@ const requestBankAccountVerification = async (req, res) => {
       status: verification.status,
       requestedAt: verification.requested_at,
       expiresAt: verification.expires_at,
-      message: '계좌 인증 요청이 생성되었습니다.',
+      message: '怨꾩쥖 ?몄쬆 ?붿껌???앹꽦?섏뿀?듬땲??',
     };
 
     if (shouldExposeBankVerificationCode()) {
       response.verificationCode = verificationCode;
-      response.devMessage = '실제 1원 송금 제공사 연동 전까지 개발/로컬 확인용 인증번호입니다.';
+      response.devMessage = '?ㅼ젣 1???↔툑 ?쒓났???곕룞 ?꾧퉴吏 媛쒕컻/濡쒖뺄 ?뺤씤???몄쬆踰덊샇?낅땲??';
     }
 
     return res.status(201).json(response);
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '계좌 인증 요청 생성 중 서버 오류가 발생했습니다.',
+      message: '怨꾩쥖 ?몄쬆 ?붿껌 ?앹꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -4733,7 +4734,7 @@ const confirmBankAccountVerification = async (req, res) => {
   if (!bankName || !accountNumber || !normalizedAccountNumber || !accountHolder || !verificationCode) {
     return res.status(400).json({
       status: 400,
-      message: '계좌 인증 확인 요청값이 올바르지 않습니다.',
+      message: '怨꾩쥖 ?몄쬆 ?뺤씤 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -4780,7 +4781,7 @@ const confirmBankAccountVerification = async (req, res) => {
     if (verificationResult.rows.length === 0) {
       return res.status(400).json({
         status: 400,
-        message: '계좌 인증 요청을 찾을 수 없거나 만료되었습니다.',
+        message: '怨꾩쥖 ?몄쬆 ?붿껌??李얠쓣 ???녾굅??留뚮즺?섏뿀?듬땲??',
       });
     }
 
@@ -4789,7 +4790,7 @@ const confirmBankAccountVerification = async (req, res) => {
     if (verification.verification_code !== verificationCode) {
       return res.status(400).json({
         status: 400,
-        message: '계좌 인증번호가 올바르지 않습니다.',
+        message: '怨꾩쥖 ?몄쬆踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
       });
     }
 
@@ -4827,18 +4828,18 @@ const confirmBankAccountVerification = async (req, res) => {
       bankVerificationToken: confirmed.verification_token,
       status: confirmed.status,
       confirmedAt: confirmed.confirmed_at,
-      message: '계좌 인증이 완료되었습니다.',
+      message: '怨꾩쥖 ?몄쬆???꾨즺?섏뿀?듬땲??',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '계좌 인증 확인 중 서버 오류가 발생했습니다.',
+      message: '怨꾩쥖 ?몄쬆 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 환불/교환/성인인증/리스크 안내 저장
+// ?섎텋/援먰솚/?깆씤?몄쬆/由ъ뒪???덈궡 ???
 const saveNotices = async (req, res) => {
   const { draftId } = req.params;
   const bodyPayload = req.body || {};
@@ -4861,7 +4862,7 @@ const saveNotices = async (req, res) => {
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '안내사항 입력값이 올바르지 않습니다.',
+      message: '?덈궡?ы빆 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -4873,7 +4874,7 @@ const saveNotices = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '필수 안내사항을 모두 입력해야 합니다.',
+      message: '?꾩닔 ?덈궡?ы빆??紐⑤몢 ?낅젰?댁빞 ?⑸땲??',
     });
   }
 
@@ -4912,7 +4913,7 @@ const saveNotices = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -4930,20 +4931,20 @@ const saveNotices = async (req, res) => {
       riskNotice: draft.risk_notice,
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
-      message: '안내사항 정보가 저장되었습니다.',
+      message: '?덈궡?ы빆 ?뺣낫媛 ??λ릺?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '안내사항 저장 중 서버 오류가 발생했습니다.',
+      message: '?덈궡?ы빆 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 필수 서류 업로드
+// ?꾩닔 ?쒕쪟 ?낅줈??
 const uploadDocument = async (req, res) => {
   const { draftId } = req.params;
   const { documentType } = req.body || {};
@@ -4953,21 +4954,21 @@ const uploadDocument = async (req, res) => {
   if (!draftId || isNaN(Number(draftId)) || !documentType) {
     return res.status(400).json({
       status: 400,
-      message: '서류 업로드 요청값이 올바르지 않습니다.',
+      message: '?쒕쪟 ?낅줈???붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (!normalizedDocumentType) {
     return res.status(400).json({
       status: 400,
-      message: '서류 업로드 요청값이 올바르지 않습니다.',
+      message: '?쒕쪟 ?낅줈???붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (!file) {
     return res.status(400).json({
       status: 400,
-      message: '업로드할 파일이 필요합니다.',
+      message: '?낅줈?쒗븷 ?뚯씪???꾩슂?⑸땲??',
     });
   }
 
@@ -4976,7 +4977,7 @@ const uploadDocument = async (req, res) => {
   if (!allowedMimeTypes.includes(file.mimetype)) {
     return res.status(400).json({
       status: 400,
-      message: '지원하지 않는 파일 형식입니다.',
+      message: '吏?먰븯吏 ?딅뒗 ?뚯씪 ?뺤떇?낅땲??',
     });
   }
 
@@ -5070,29 +5071,29 @@ const uploadDocument = async (req, res) => {
       progressRate,
       createdAt: document.created_at,
       message: isAllRequiredDocumentsUploaded
-        ? '필수 서류가 모두 업로드되어 프로젝트 작성이 100% 완료되었습니다.'
-        : '필수 서류가 업로드되었습니다.',
+        ? '?꾩닔 ?쒕쪟媛 紐⑤몢 ?낅줈?쒕릺???꾨줈?앺듃 ?묒꽦??100% ?꾨즺?섏뿀?듬땲??'
+        : '?꾩닔 ?쒕쪟媛 ?낅줈?쒕릺?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '필수 서류 업로드 중 서버 오류가 발생했습니다.',
+      message: '?꾩닔 ?쒕쪟 ?낅줈??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//펀딩프로젝트 제출 (새로 추가!!)
-// 펀딩 프로젝트 제출 + 실제 펀딩 게시글 생성
+//??⑺봽濡쒖젥???쒖텧 (?덈줈 異붽?!!)
+// ????꾨줈?앺듃 ?쒖텧 + ?ㅼ젣 ???寃뚯떆湲 ?앹꽦
 const submitFundingDraft = async (req, res) => {
   const { draftId } = req.params;
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '제출 요청값이 올바르지 않습니다.',
+      message: '?쒖텧 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -5111,7 +5112,7 @@ const submitFundingDraft = async (req, res) => {
     if (draftResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -5169,7 +5170,7 @@ const submitFundingDraft = async (req, res) => {
 
         return res.status(200).json({
           status: 200,
-          message: '이미 제출된 펀딩 프로젝트입니다.',
+          message: '?대? ?쒖텧??????꾨줈?앺듃?낅땲??',
           data: responseData,
           draftId: responseData.draftId,
           fundingId: responseData.fundingId,
@@ -5186,14 +5187,14 @@ const submitFundingDraft = async (req, res) => {
 
       return res.status(400).json({
         status: 400,
-        message: '이미 제출된 프로젝트입니다.',
+        message: '?대? ?쒖텧???꾨줈?앺듃?낅땲??',
       });
     }
 
     if (Number(draft.progress_rate) < 100) {
       return res.status(400).json({
         status: 400,
-        message: '필수 정보를 모두 입력한 후 제출할 수 있습니다.',
+        message: '?꾩닔 ?뺣낫瑜?紐⑤몢 ?낅젰?????쒖텧?????덉뒿?덈떎.',
       });
     }
 
@@ -5216,7 +5217,7 @@ const submitFundingDraft = async (req, res) => {
     if (!hasAllRequiredDocuments) {
       return res.status(400).json({
         status: 400,
-        message: '필수 인증 서류를 모두 업로드해야 제출할 수 있습니다.',
+        message: '?꾩닔 ?몄쬆 ?쒕쪟瑜?紐⑤몢 ?낅줈?쒗빐???쒖텧?????덉뒿?덈떎.',
         requiredDocuments: REQUIRED_FUNDING_DOCUMENT_TYPES,
         uploadedDocuments: uploadedTypes,
       });
@@ -5233,14 +5234,14 @@ const submitFundingDraft = async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({
           status: 400,
-          message: '양조장 사용자 정보가 없어 제출할 수 없습니다.',
+          message: '?묒“???ъ슜???뺣낫媛 ?놁뼱 ?쒖텧?????놁뒿?덈떎.',
         });
       }
 
       /**
-       * 현재 funding_projects 테이블 기준으로 필요한 최소 필드만 생성
-       * 네 기존 목록/상세 API가 funding_projects + recipes를 JOIN하고 있어서
-       * 임시 recipe도 같이 생성해준다.
+       * ?꾩옱 funding_projects ?뚯씠釉?湲곗??쇰줈 ?꾩슂??理쒖냼 ?꾨뱶留??앹꽦
+       * ??湲곗〈 紐⑸줉/?곸꽭 API媛 funding_projects + recipes瑜?JOIN?섍퀬 ?덉뼱??
+       * ?꾩떆 recipe??媛숈씠 ?앹꽦?댁???
        */
       const recipeResult = await client.query(
         `
@@ -5468,7 +5469,7 @@ const submitFundingDraft = async (req, res) => {
           shippingFee: funding.shipping_fee,
           createdAt: funding.created_at,
         },
-        message: '펀딩 프로젝트가 제출되었고 심사 중 게시글이 생성되었습니다.',
+        message: '????꾨줈?앺듃媛 ?쒖텧?섏뿀怨??ъ궗 以?寃뚯떆湲???앹꽦?섏뿀?듬땲??',
       });
     } catch (error) {
       await client.query('ROLLBACK');
@@ -5481,20 +5482,20 @@ const submitFundingDraft = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '펀딩 프로젝트 제출 중 서버 오류가 발생했습니다.',
+      message: '????꾨줈?앺듃 ?쒖텧 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 임시저장 단건 조회
+// ?꾩떆????④굔 議고쉶
 const getFundingDraft = async (req, res) => {
   const { draftId } = req.params;
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '임시저장 조회 요청값이 올바르지 않습니다.',
+      message: '?꾩떆???議고쉶 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -5513,7 +5514,7 @@ const getFundingDraft = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -5539,12 +5540,12 @@ const getFundingDraft = async (req, res) => {
     return res.status(200).json({
       draft: result.rows[0],
       ...payload,
-      message: '임시저장 프로젝트 조회 성공',
+      message: '?꾩떆????꾨줈?앺듃 議고쉶 ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '임시저장 프로젝트 조회 중 서버 오류가 발생했습니다.',
+      message: '?꾩떆????꾨줈?앺듃 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -5557,7 +5558,7 @@ const getFundingDraftByFundingId = async (req, res) => {
   if (!resolvedFundingId) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -5569,7 +5570,7 @@ const getFundingDraftByFundingId = async (req, res) => {
     if (!draft) {
       return res.status(404).json({
         status: 404,
-        message: '연결된 임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?곌껐???꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -5584,19 +5585,19 @@ const getFundingDraftByFundingId = async (req, res) => {
       ...payload,
       status: 200,
       draftStatus: payload.status,
-      message: '연결된 임시저장 프로젝트 조회 성공',
+      message: '?곌껐???꾩떆????꾨줈?앺듃 議고쉶 ?깃났',
       data: responseData,
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '펀딩 프로젝트 관리 데이터 조회 중 서버 오류가 발생했습니다.',
+      message: '????꾨줈?앺듃 愿由??곗씠??議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 임시저장 목록 조회
+// ?꾩떆???紐⑸줉 議고쉶
 const getFundingDraftList = async (req, res) => {
   const { breweryId } = req.query;
 
@@ -5617,7 +5618,7 @@ const getFundingDraftList = async (req, res) => {
   if (!Number.isInteger(requestedBreweryId) || requestedBreweryId <= 0) {
     return res.status(400).json({
       status: 400,
-      message: '양조장 ID가 올바르지 않습니다.',
+      message: '?묒“??ID媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -5650,25 +5651,25 @@ const getFundingDraftList = async (req, res) => {
 
     return res.status(200).json({
       drafts: result.rows,
-      message: '임시저장 목록 조회 성공',
+      message: '?꾩떆???紐⑸줉 議고쉶 ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '임시저장 목록 조회 중 서버 오류가 발생했습니다.',
+      message: '?꾩떆???紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 임시저장 삭제
+// ?꾩떆?????젣
 const deleteFundingDraft = async (req, res) => {
   const { draftId } = req.params;
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '임시저장 삭제 요청값이 올바르지 않습니다.',
+      message: '?꾩떆?????젣 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -5694,7 +5695,7 @@ const deleteFundingDraft = async (req, res) => {
     if (!draft) {
       return res.status(404).json({
         status: 404,
-        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+        message: '?袁⑸뻻?????袁⑥쨮??븍뱜??筌≪뼚??????곷뮸??덈뼄.',
       });
     }
 
@@ -5717,7 +5718,7 @@ const deleteFundingDraft = async (req, res) => {
     if (isManagementDraft) {
       return res.status(409).json({
         status: 409,
-        message: '등록/제출된 펀딩의 관리용 임시저장은 삭제할 수 없습니다.',
+        message: '?깅줉/?쒖텧????⑹쓽 愿由ъ슜 ?꾩떆??μ? ??젣?????놁뒿?덈떎.',
         data: {
           draftId: Number(draft.draft_id),
           fundingId: draft.funding_id === null || draft.funding_id === undefined
@@ -5750,31 +5751,31 @@ const deleteFundingDraft = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
     return res.status(200).json({
       draftId: result.rows[0].draft_id,
-      message: '임시저장 프로젝트가 삭제되었습니다.',
+      message: '?꾩떆????꾨줈?앺듃媛 ??젣?섏뿀?듬땲??',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '임시저장 삭제 중 서버 오류가 발생했습니다.',
+      message: '?꾩떆?????젣 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 프로젝트 미리보기
+// ?꾨줈?앺듃 誘몃━蹂닿린
 const getFundingDraftPreview = async (req, res) => {
   const { draftId } = req.params;
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '미리보기 요청값이 올바르지 않습니다.',
+      message: '誘몃━蹂닿린 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -5793,7 +5794,7 @@ const getFundingDraftPreview = async (req, res) => {
     if (draftResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -5828,18 +5829,18 @@ const getFundingDraftPreview = async (req, res) => {
       status: 200,
       draftStatus: payload.status,
       data: responseData,
-      message: '프로젝트 미리보기 조회 성공',
+      message: '?꾨줈?앺듃 誘몃━蹂닿린 議고쉶 ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '프로젝트 미리보기 조회 중 서버 오류가 발생했습니다.',
+      message: '?꾨줈?앺듃 誘몃━蹂닿린 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 공개된 펀딩 프로젝트 수정
+// 怨듦컻??????꾨줈?앺듃 ?섏젙
 const updateFundingProject = async (req, res) => {
   const { fundingId } = req.params;
 
@@ -5859,7 +5860,7 @@ const updateFundingProject = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '?섎せ???붿껌?낅땲??',
     });
   }
 
@@ -5868,7 +5869,7 @@ const updateFundingProject = async (req, res) => {
   if (status && !allowedStatuses.includes(status)) {
     return res.status(400).json({
       status: 400,
-      message: '펀딩 상태값이 올바르지 않습니다.',
+      message: '????곹깭媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -5878,7 +5879,7 @@ const updateFundingProject = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '목표 금액 입력값이 올바르지 않습니다.',
+      message: '紐⑺몴 湲덉븸 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -5888,7 +5889,7 @@ const updateFundingProject = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '병당 가격 입력값이 올바르지 않습니다.',
+      message: '蹂묐떦 媛寃??낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -5898,21 +5899,21 @@ const updateFundingProject = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '배송비 입력값이 올바르지 않습니다.',
+      message: '諛곗넚鍮??낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (imageUrls !== undefined && !Array.isArray(imageUrls) && typeof imageUrls !== 'string') {
     return res.status(400).json({
       status: 400,
-      message: '????대?吏 紐⑸줉 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      message: '???????筌왖 筌뤴뫖以???낆젾揶쏅?????而?몴?? ??녿뮸??덈뼄.',
     });
   }
 
   if (imageUrls && normalizeFundingImageUrlsInput(imageUrls).length > 5) {
     return res.status(400).json({
       status: 400,
-      message: '????대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
+      message: '???????筌왖??筌ㅼ뮆? 5揶쏆뮄?댐쭪? ?源낆쨯??????됰뮸??덈뼄.',
     });
   }
 
@@ -5978,7 +5979,7 @@ const updateFundingProject = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+        message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -6003,20 +6004,20 @@ const updateFundingProject = async (req, res) => {
       images: mapFundingImageUrls(buildImageFields(funding.thumbnail_url, funding.image_urls).allImageUrls),
       status: funding.status,
       ...(aiRecommendation ? { aiRecommendation } : {}),
-      message: '펀딩 프로젝트가 수정되었습니다.',
+      message: '????꾨줈?앺듃媛 ?섏젙?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '펀딩 프로젝트 수정 중 서버 오류가 발생했습니다.',
+      message: '????꾨줈?앺듃 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 펀딩프로젝트 목록 조회
+// ??⑺봽濡쒖젥??紐⑸줉 議고쉶
 const mapFundingListRow = (row) => {
   const currentAmount = Number(row.current_amount || 0);
   const targetAmount = Number(row.target_amount || 0);
@@ -6126,7 +6127,7 @@ const getFundingList = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청 파라미터입니다.',
+      message: '?섎せ???붿껌 ?뚮씪誘명꽣?낅땲??',
     });
   }
 
@@ -6348,7 +6349,7 @@ const getFundingList = async (req, res) => {
     res.set('Cache-Control', 'no-store');
     return res.status(200).json({
       status: 200,
-      message: '펀딩 목록 조회 성공',
+      message: '???紐⑸줉 議고쉶 ?깃났',
       data: fundings,
       page: requestedPageNumber,
       size: requestedSizeNumber,
@@ -6360,7 +6361,7 @@ const getFundingList = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '서버 내부 오류',
+      message: '?쒕쾭 ?대? ?ㅻ쪟',
       error: error.message,
     });
   }
@@ -6409,25 +6410,25 @@ const getFundingStats = async (req, res) => {
       totalRaisedAmount,
       totalRaisedHundredMillion: Number((totalRaisedAmount / 100000000).toFixed(1)),
       totalRaisedTenMillion: Number((totalRaisedAmount / 10000000).toFixed(1)),
-      totalRaisedTenMillionUnit: '천만원',
+      totalRaisedTenMillionUnit: '泥쒕쭔??',
     };
 
     return res.status(200).json({
       status: 200,
-      message: '펀딩 통계 조회 성공',
+      message: '????듦퀎 議고쉶 ?깃났',
       data: responseData,
       ...responseData,
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '펀딩 통계 조회 중 서버 오류가 발생했습니다.',
+      message: '????듦퀎 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 펀딩 프로젝트 상세조회
+// ????꾨줈?앺듃 ?곸꽭議고쉶
 const getFundingDetail = async (req, res) => {
   const { fundingId } = req.params;
 
@@ -6436,7 +6437,7 @@ const getFundingDetail = async (req, res) => {
   if (!resolvedFundingId) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -6578,7 +6579,7 @@ const getFundingDetail = async (req, res) => {
     if (fundingResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+        message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -6713,8 +6714,8 @@ const getFundingDetail = async (req, res) => {
       shortTitle: funding.short_title,
       mainIngredient,
       primaryIngredient: mainIngredient,
-      mainIngredientLabel: '메인 재료',
-      primaryIngredientLabel: '메인 재료',
+      mainIngredientLabel: '硫붿씤 ?щ즺',
+      primaryIngredientLabel: '硫붿씤 ?щ즺',
       subIngredient: subIngredients[0] || null,
       subIngredients,
       ingredients,
@@ -6837,22 +6838,22 @@ const getFundingDetail = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '펀딩 상세 조회 중 서버 오류가 발생했습니다.',
+      message: '????곸꽭 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//프로젝트 소개 조회
+//?꾨줈?앺듃 ?뚭컻 議고쉶
 const getFundingIntro = async (req, res) => {
   const { fundingId } = req.params;
   const resolvedFundingId = await resolveFundingId(fundingId);
 
-  // 유효성 검증
+  // ?좏슚??寃利?
   if (!resolvedFundingId) {
     return res.status(404).json({
       status: 404,
-      message: '프로젝트를 찾을 수 없습니다.',
+      message: '?꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -6907,7 +6908,7 @@ const getFundingIntro = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '프로젝트를 찾을 수 없습니다.',
+        message: '?꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -6927,8 +6928,8 @@ const getFundingIntro = async (req, res) => {
       story: funding.description || funding.recipe_content || funding.concept || '',
       mainIngredient,
       primaryIngredient: mainIngredient,
-      mainIngredientLabel: '메인 재료',
-      primaryIngredientLabel: '메인 재료',
+      mainIngredientLabel: '硫붿씤 ?щ즺',
+      primaryIngredientLabel: '硫붿씤 ?щ즺',
       subIngredient: subIngredients[0] || null,
       subIngredients,
       ingredients,
@@ -6948,13 +6949,13 @@ const getFundingIntro = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '프로젝트 소개 조회 중 서버 오류가 발생했습니다.',
+      message: '?꾨줈?앺듃 ?뚭컻 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//양조일지 조회
+//?묒“?쇱? 議고쉶
 const getBreweryLogs = async (req, res) => {
   const { fundingId } = req.params;
   const userId = getUserId(req);
@@ -6963,7 +6964,7 @@ const getBreweryLogs = async (req, res) => {
   if (!resolvedFundingId) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -7022,19 +7023,19 @@ const getBreweryLogs = async (req, res) => {
         commentCount: Number(log.comment_count || 0),
         createdAt: log.created_at,
       })),
-      message: '양조일지 조회 성공',
+      message: '?묒“?쇱? 議고쉶 ?깃났',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '양조일지 조회 중 서버 오류가 발생했습니다.',
+      message: '?묒“?쇱? 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 양조일지 등록
+// ?묒“?쇱? ?깅줉
 const createBreweryLog = async (req, res) => {
   const { fundingId } = req.params;
   const { stage, title, content, imageUrls } = req.body;
@@ -7054,21 +7055,21 @@ const createBreweryLog = async (req, res) => {
   if (!resolvedFundingId) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
   if (!stage || !title || !content) {
     return res.status(400).json({
       status: 400,
-      message: '양조일지 제목과 내용을 입력해야 합니다.',
+      message: '?묒“?쇱? ?쒕ぉ怨??댁슜???낅젰?댁빞 ?⑸땲??',
     });
   }
 
   if (!allowedStages.includes(stage)) {
     return res.status(400).json({
       status: 400,
-      message: '양조 진행 단계가 올바르지 않습니다.',
+      message: '?묒“ 吏꾪뻾 ?④퀎媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -7084,7 +7085,7 @@ const createBreweryLog = async (req, res) => {
     if (normalizedImageUrls.length > 5) {
       return res.status(400).json({
         status: 400,
-        message: '이미지는 최대 5개까지 등록할 수 있습니다.',
+        message: '?대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
       });
     }
 
@@ -7133,19 +7134,19 @@ const createBreweryLog = async (req, res) => {
       liked: false,
       commentCount: 0,
       createdAt: log.created_at,
-      message: '양조일지가 등록되었습니다.',
+      message: '?묒“?쇱?媛 ?깅줉?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '양조일지 등록 중 서버 오류가 발생했습니다.',
+      message: '?묒“?쇱? ?깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 양조일지 수정
+// ?묒“?쇱? ?섏젙
 const updateBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
   const { stage, title, content, imageUrls } = req.body;
@@ -7169,21 +7170,21 @@ const updateBreweryLog = async (req, res) => {
   ) {
     return res.status(404).json({
       status: 404,
-      message: '양조일지를 찾을 수 없습니다.',
+      message: '?묒“?쇱?瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
   if (!stage && !title && !content && !imageUrls && files.length === 0) {
     return res.status(400).json({
       status: 400,
-      message: '양조일지 수정값이 올바르지 않습니다.',
+      message: '?묒“?쇱? ?섏젙媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (stage && !allowedStages.includes(stage)) {
     return res.status(400).json({
       status: 400,
-      message: '양조 진행 단계가 올바르지 않습니다.',
+      message: '?묒“ 吏꾪뻾 ?④퀎媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -7200,7 +7201,7 @@ const updateBreweryLog = async (req, res) => {
     if (normalizedImageUrls && normalizedImageUrls.length > 5) {
       return res.status(400).json({
         status: 400,
-        message: '이미지는 최대 5개까지 등록할 수 있습니다.',
+        message: '?대?吏??理쒕? 5媛쒓퉴吏 ?깅줉?????덉뒿?덈떎.',
       });
     }
 
@@ -7236,7 +7237,7 @@ const updateBreweryLog = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '양조일지를 찾을 수 없습니다.',
+        message: '?묒“?쇱?瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -7254,19 +7255,19 @@ const updateBreweryLog = async (req, res) => {
           ? JSON.parse(log.image_urls)
           : log.image_urls,
       createdAt: log.created_at,
-      message: '양조일지가 수정되었습니다.',
+      message: '?묒“?쇱?媛 ?섏젙?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '양조일지 수정 중 서버 오류가 발생했습니다.',
+      message: '?묒“?쇱? ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 양조일지 삭제
+// ?묒“?쇱? ??젣
 const deleteBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
 
@@ -7278,7 +7279,7 @@ const deleteBreweryLog = async (req, res) => {
   ) {
     return res.status(404).json({
       status: 404,
-      message: '양조일지를 찾을 수 없습니다.',
+      message: '?묒“?쇱?瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -7324,26 +7325,26 @@ const deleteBreweryLog = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '양조일지를 찾을 수 없습니다.',
+        message: '?묒“?쇱?瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
     return res.status(200).json({
       breweryLogId: Number(result.rows[0].log_id),
       fundingId: Number(result.rows[0].funding_id),
-      message: '양조일지가 삭제되었습니다.',
+      message: '?묒“?쇱?媛 ??젣?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '양조일지 삭제 중 서버 오류가 발생했습니다.',
+      message: '?묒“?쇱? ??젣 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-//qna 목록 조회
+//qna 紐⑸줉 議고쉶
 const getFundingQuestions = async (req, res) => {
   const { fundingId } = req.params;
   const { page = 0, size = 10, answered } = req.query;
@@ -7352,7 +7353,7 @@ const getFundingQuestions = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -7367,14 +7368,14 @@ const getFundingQuestions = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청 파라미터입니다.',
+      message: '?섎せ???붿껌 ?뚮씪誘명꽣?낅땲??',
     });
   }
 
   if (answered !== undefined && answered !== 'true' && answered !== 'false') {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청 파라미터입니다.',
+      message: '?섎せ???붿껌 ?뚮씪誘명꽣?낅땲??',
     });
   }
 
@@ -7555,20 +7556,20 @@ const getFundingQuestions = async (req, res) => {
       size: sizeNumber,
       totalElements,
       totalPages: Math.ceil(totalElements / sizeNumber),
-      message: 'Q&A 목록 조회 성공',
+      message: 'Q&A 紐⑸줉 議고쉶 ?깃났',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: 'Q&A 목록 조회 중 서버 오류가 발생했습니다.',
+      message: 'Q&A 紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//qna 질문등록
+//qna 吏덈Ц?깅줉
 const createFundingQuestion = async (req, res) => {
   const { fundingId } = req.params;
   const {
@@ -7580,14 +7581,14 @@ const createFundingQuestion = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
   if (!content || typeof content !== 'string' || content.trim() === '') {
     return res.status(400).json({
       status: 400,
-      message: '질문 입력값이 올바르지 않습니다.',
+      message: '吏덈Ц ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -7647,29 +7648,29 @@ const createFundingQuestion = async (req, res) => {
       isPrivate: question.is_private,
       answered: question.answered,
       createdAt: question.created_at,
-      message: "Q&A 질문이 등록되었습니다."
+      message: "Q&A 吏덈Ц???깅줉?섏뿀?듬땲??"
     });
 
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
-      message: "Q&A 질문 등록 실패"
+      message: "Q&A 吏덈Ц ?깅줉 ?ㅽ뙣"
     });
   }
 };
 
-//qna 답글 등록
+//qna ?듦? ?깅줉
 const createFundingReply = async (req, res) => {
   const { fundingId, questionId } = req.params;
   const { content } = req.body;
 
   if (!fundingId || isNaN(Number(fundingId)) || !questionId || isNaN(Number(questionId))) {
-    return res.status(404).json({ status: 404, message: '질문 또는 프로젝트를 찾을 수 없습니다.' });
+    return res.status(404).json({ status: 404, message: '吏덈Ц ?먮뒗 ?꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.' });
   }
 
   if (!content || typeof content !== 'string' || content.trim() === '') {
-    return res.status(400).json({ status: 400, message: '답변 입력값이 올바르지 않습니다.' });
+    return res.status(400).json({ status: 400, message: '?듬? ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.' });
   }
 
   try {
@@ -7730,13 +7731,13 @@ const createFundingReply = async (req, res) => {
       likeCount: 0,
       liked: false,
       createdAt: reply.created_at,
-      message: '답변이 등록되었습니다.',
+      message: '?듬????깅줉?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
     return res.status(500).json({
       status: 500,
-      message: '답변 등록 중 서버 오류가 발생했습니다.',
+      message: '?듬? ?깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -7750,7 +7751,7 @@ const likeFundingQuestion = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId)) || !questionId || isNaN(Number(questionId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '?섎せ???붿껌?낅땲??',
     });
   }
 
@@ -7768,7 +7769,7 @@ const likeFundingQuestion = async (req, res) => {
     if (questionResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '질문을 찾을 수 없습니다.',
+        message: '吏덈Ц??李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -7798,12 +7799,12 @@ const likeFundingQuestion = async (req, res) => {
       questionId: Number(questionId),
       liked: true,
       likeCount: countResult.rows[0].like_count,
-      message: 'Q&A 좋아요를 등록했습니다.',
+      message: 'Q&A 醫뗭븘?붾? ?깅줉?덉뒿?덈떎.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: 'Q&A 좋아요 등록 중 서버 오류가 발생했습니다.',
+      message: 'Q&A 醫뗭븘???깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -7817,7 +7818,7 @@ const unlikeFundingQuestion = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId)) || !questionId || isNaN(Number(questionId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '?섎せ???붿껌?낅땲??',
     });
   }
 
@@ -7845,12 +7846,12 @@ const unlikeFundingQuestion = async (req, res) => {
       questionId: Number(questionId),
       liked: false,
       likeCount: countResult.rows[0].like_count,
-      message: 'Q&A 좋아요를 취소했습니다.',
+      message: 'Q&A 醫뗭븘?붾? 痍⑥냼?덉뒿?덈떎.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: 'Q&A 좋아요 취소 중 서버 오류가 발생했습니다.',
+      message: 'Q&A 醫뗭븘??痍⑥냼 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -7871,7 +7872,7 @@ const likeFundingQuestionReply = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '?섎せ???붿껌?낅땲??',
     });
   }
 
@@ -7890,7 +7891,7 @@ const likeFundingQuestionReply = async (req, res) => {
     if (replyResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: 'Q&A 답글을 찾을 수 없습니다.',
+        message: 'Q&A ?듦???李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -7921,12 +7922,12 @@ const likeFundingQuestionReply = async (req, res) => {
       replyId: Number(replyId),
       liked: true,
       likeCount: Number(countResult.rows[0].like_count || 0),
-      message: '답글 좋아요 처리 성공',
+      message: '?듦? 醫뗭븘??泥섎━ ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: 'Q&A 답글 좋아요 등록 중 서버 오류가 발생했습니다.',
+      message: 'Q&A ?듦? 醫뗭븘???깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -7947,7 +7948,7 @@ const unlikeFundingQuestionReply = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '?섎せ???붿껌?낅땲??',
     });
   }
 
@@ -7976,18 +7977,18 @@ const unlikeFundingQuestionReply = async (req, res) => {
       replyId: Number(replyId),
       liked: false,
       likeCount: Number(countResult.rows[0].like_count || 0),
-      message: '답글 좋아요 처리 성공',
+      message: '?듦? 醫뗭븘??泥섎━ ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: 'Q&A 답글 좋아요 취소 중 서버 오류가 발생했습니다.',
+      message: 'Q&A ?듦? 醫뗭븘??痍⑥냼 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 후기 목록 조회
+// ?꾧린 紐⑸줉 議고쉶
 const getFundingReviews = async (req, res) => {
   const { fundingId } = req.params;
   const { page = 0, size = 10, sort = 'LATEST' } = req.query;
@@ -7997,7 +7998,7 @@ const getFundingReviews = async (req, res) => {
   if (!resolvedFundingId) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -8012,7 +8013,7 @@ const getFundingReviews = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청 파라미터입니다.',
+      message: '?섎せ???붿껌 ?뚮씪誘명꽣?낅땲??',
     });
   }
 
@@ -8020,7 +8021,7 @@ const getFundingReviews = async (req, res) => {
   if (!allowedSorts.includes(sort)) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청 파라미터입니다.',
+      message: '?섎せ???붿껌 ?뚮씪誘명꽣?낅땲??',
     });
   }
 
@@ -8097,14 +8098,14 @@ const getFundingReviews = async (req, res) => {
       myReviewId: reviewWriteState.existingReview
         ? Number(reviewWriteState.existingReview.review_id)
         : null,
-      message: '후기 목록 조회 성공',
+      message: '?꾧린 紐⑸줉 議고쉶 ?깃났',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '후기 목록 조회 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -8122,7 +8123,7 @@ const getFundingReviewDetail = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '후기 상세 요청값이 올바르지 않습니다.',
+      message: '?꾧린 ?곸꽭 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -8171,7 +8172,7 @@ const getFundingReviewDetail = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '후기를 찾을 수 없습니다.',
+        message: '?꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -8186,12 +8187,12 @@ const getFundingReviewDetail = async (req, res) => {
       myReviewId: reviewWriteState.existingReview
         ? Number(reviewWriteState.existingReview.review_id)
         : null,
-      message: '후기 상세 조회 성공',
+      message: '?꾧린 ?곸꽭 議고쉶 ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '후기 상세 조회 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 ?곸꽭 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -8251,7 +8252,7 @@ const likeFundingReview = async (req, res) => {
   if (!resolvedFundingId || !reviewId || isNaN(Number(reviewId))) {
     return res.status(400).json({
       status: 400,
-      message: '후기 좋아요 요청값이 올바르지 않습니다.',
+      message: '?꾧린 醫뗭븘???붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -8265,7 +8266,7 @@ const likeFundingReview = async (req, res) => {
     if (!review) {
       return res.status(404).json({
         status: 404,
-        message: '후기를 찾을 수 없습니다.',
+        message: '?꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -8290,12 +8291,12 @@ const likeFundingReview = async (req, res) => {
     return res.status(201).json({
       ...mapFundingReview(likedReview),
       liked: true,
-      message: '후기 좋아요 처리 성공',
+      message: '?꾧린 醫뗭븘??泥섎━ ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '후기 좋아요 등록 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 醫뗭븘???깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -8310,7 +8311,7 @@ const unlikeFundingReview = async (req, res) => {
   if (!resolvedFundingId || !reviewId || isNaN(Number(reviewId))) {
     return res.status(400).json({
       status: 400,
-      message: '후기 좋아요 요청값이 올바르지 않습니다.',
+      message: '?꾧린 醫뗭븘???붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -8324,7 +8325,7 @@ const unlikeFundingReview = async (req, res) => {
     if (!review) {
       return res.status(404).json({
         status: 404,
-        message: '후기를 찾을 수 없습니다.',
+        message: '?꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -8346,25 +8347,25 @@ const unlikeFundingReview = async (req, res) => {
     return res.status(200).json({
       ...mapFundingReview(unlikedReview),
       liked: false,
-      message: '후기 좋아요 취소 성공',
+      message: '?꾧린 醫뗭븘??痍⑥냼 ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '후기 좋아요 취소 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 醫뗭븘??痍⑥냼 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//후원옵션조회
+//?꾩썝?듭뀡議고쉶
 const getSupportOptions = async (req, res) => {
   const { fundingId } = req.params;
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -8406,7 +8407,7 @@ const getSupportOptions = async (req, res) => {
     if (fundingResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+        message: '?????袁⑥쨮??븍뱜??筌≪뼚??????곷뮸??덈뼄.',
       });
     }
 
@@ -8442,8 +8443,8 @@ const getSupportOptions = async (req, res) => {
       alcoholPercentage: funding.alcohol_percentage,
       mainIngredient,
       primaryIngredient: mainIngredient,
-      mainIngredientLabel: '메인 재료',
-      primaryIngredientLabel: '메인 재료',
+      mainIngredientLabel: '硫붿씤 ?щ즺',
+      primaryIngredientLabel: '硫붿씤 ?щ즺',
       subIngredient: subIngredients[0] || null,
       subIngredients,
       ingredients,
@@ -8460,13 +8461,13 @@ const getSupportOptions = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '후원 옵션 조회 중 서버 오류가 발생했습니다.',
+      message: '?꾩썝 ?듭뀡 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 후원 주문 생성
+// ?꾩썝 二쇰Ц ?앹꽦
 const logFundingOrderValidationFailure = ({
   req,
   fundingId,
@@ -8493,7 +8494,55 @@ const logFundingOrderValidationFailure = ({
   });
 };
 
+const FUNDING_ORDER_CLOSED_MESSAGE = '종료된 펀딩에는 후원할 수 없습니다.';
+
+const getFundingOrderAvailability = async (fundingId) => {
+  const numericFundingId = Number(fundingId);
+
+  if (!Number.isInteger(numericFundingId) || numericFundingId <= 0) {
+    return { canCreate: true };
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT
+      funding_id,
+      status,
+      end_date::date < ((CURRENT_TIMESTAMP AT TIME ZONE $2)::date) AS is_expired
+    FROM funding_projects
+    WHERE funding_id = $1
+    LIMIT 1
+    `,
+    [numericFundingId, KST_TIMEZONE]
+  );
+
+  const funding = rows[0];
+
+  if (!funding) {
+    return { canCreate: true };
+  }
+
+  if (funding.status !== 'ACTIVE' || funding.is_expired) {
+    return {
+      canCreate: false,
+      status: 400,
+      message: FUNDING_ORDER_CLOSED_MESSAGE,
+    };
+  }
+
+  return { canCreate: true };
+};
+
 const createFundingOrder = async (req, res) => {
+  const fundingOrderAvailability = await getFundingOrderAvailability(req.params.fundingId);
+
+  if (!fundingOrderAvailability.canCreate) {
+    return res.status(fundingOrderAvailability.status).json({
+      status: fundingOrderAvailability.status,
+      message: fundingOrderAvailability.message,
+    });
+  }
+
   const { fundingId } = req.params;
   const body = req.body || {};
 
@@ -8541,7 +8590,7 @@ const createFundingOrder = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -8589,7 +8638,7 @@ const createFundingOrder = async (req, res) => {
 
     return res.status(400).json({
       status: 400,
-      message: '주문 입력값이 올바르지 않습니다.',
+      message: '二쇰Ц ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
       missingFields,
       invalidFields,
     });
@@ -8598,21 +8647,21 @@ const createFundingOrder = async (req, res) => {
   if (!adultVerified) {
     return res.status(400).json({
       status: 400,
-      message: '주류 후원을 위해 성인인증이 필요합니다.',
+      message: '二쇰쪟 ?꾩썝???꾪빐 ?깆씤?몄쬆???꾩슂?⑸땲??',
     });
   }
 
   if (!noticeAgreed) {
     return res.status(400).json({
       status: 400,
-      message: '환불/교환/리스크 안내에 동의해야 합니다.',
+      message: '?섎텋/援먰솚/由ъ뒪???덈궡???숈쓽?댁빞 ?⑸땲??',
     });
   }
 
   if (!privacyAgreed) {
     return res.status(400).json({
       status: 400,
-      message: '개인정보 제3자 제공에 동의해야 합니다.',
+      message: '媛쒖씤?뺣낫 ?????쒓났???숈쓽?댁빞 ?⑸땲??',
     });
   }
 
@@ -8633,7 +8682,7 @@ const createFundingOrder = async (req, res) => {
 
     return res.status(400).json({
       status: 400,
-      message: '추가 후원금 입력값이 올바르지 않습니다.',
+      message: '異붽? ?꾩썝湲??낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
       missingFields: [],
       invalidFields: ['additionalSupportAmount'],
     });
@@ -8656,7 +8705,7 @@ const createFundingOrder = async (req, res) => {
     if (fundingResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+        message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -8677,7 +8726,7 @@ const createFundingOrder = async (req, res) => {
       if (optionResult.rows.length === 0) {
         return res.status(404).json({
           status: 404,
-          message: '선택한 후원 옵션을 찾을 수 없습니다.',
+          message: '?좏깮???꾩썝 ?듭뀡??李얠쓣 ???놁뒿?덈떎.',
         });
       }
 
@@ -8691,7 +8740,7 @@ const createFundingOrder = async (req, res) => {
     if (!Number.isFinite(pricePerBottle) || pricePerBottle <= 0) {
       return res.status(400).json({
         status: 400,
-        message: '후원 옵션 가격이 설정되어 있지 않습니다.',
+        message: '?꾩썝 ?듭뀡 媛寃⑹씠 ?ㅼ젙?섏뼱 ?덉? ?딆뒿?덈떎.',
       });
     }
 
@@ -8866,33 +8915,33 @@ const createFundingOrder = async (req, res) => {
       noticeAgreed: order.notice_agreed,
       createdAt: order.created_at,
       privacyAgreed: order.privacy_agreed,
-      message: '후원 주문 생성 성공',
+      message: '?꾩썝 二쇰Ц ?앹꽦 ?깃났',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '후원 주문 생성 중 서버 오류가 발생했습니다.',
+      message: '?꾩썝 二쇰Ц ?앹꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//양조장문의등록
+//?묒“?λЦ?섎벑濡?
 const createFundingInquiry = (req, res) => {
   const { fundingId } = req.params;
   const { title, content } = req.body;
 
-  // fundingId 검증
+  // fundingId 寃利?
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
-  // 입력값 검증
+  // ?낅젰媛?寃利?
   if (
     !title ||
     !content ||
@@ -8903,27 +8952,27 @@ const createFundingInquiry = (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '문의 입력값이 올바르지 않습니다.',
+      message: '臾몄쓽 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   return res.status(201).json({
     fundingId: Number(fundingId),
     inquiryId: 21,
-    message: '문의가 등록되었습니다.',
+    message: '臾몄쓽媛 ?깅줉?섏뿀?듬땲??',
   });
 };
 
 
-//추가4: 펀딩 공유 링크 조회
+//異붽?4: ???怨듭쑀 留곹겕 議고쉶
 const getFundingShareLink = async (req, res) => {
   const { fundingId } = req.params;
 
-  // fundingId 검증
+  // fundingId 寃利?
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -8944,7 +8993,7 @@ const getFundingShareLink = async (req, res) => {
     if (fundingResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+        message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -9009,18 +9058,18 @@ const getFundingShareLink = async (req, res) => {
       summary: funding.summary,
       thumbnailImageUrl: funding.thumbnail_url,
       shareCount,
-      message: '공유 링크가 생성되었습니다.',
+      message: '怨듭쑀 留곹겕媛 ?앹꽦?섏뿀?듬땲??',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '공유 링크 생성 중 서버 오류가 발생했습니다.',
+      message: '怨듭쑀 留곹겕 ?앹꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//추가부분5: 펀딩 신고 등록
+//異붽?遺遺?: ????좉퀬 ?깅줉
 const createFundingReport = async (req, res) => {
   const { fundingId } = req.params;
   const { reason, content } = req.body || {};
@@ -9032,25 +9081,25 @@ const createFundingReport = async (req, res) => {
     COPYRIGHT: 'COPYRIGHT',
     FRAUD: 'FRAUD',
     ETC: 'ETC',
-    '허위 정보': 'FALSE_INFORMATION',
-    '부적절한 내용': 'INAPPROPRIATE_CONTENT',
-    '저작권 침해': 'COPYRIGHT',
-    '사기 의심': 'FRAUD',
-    기타: 'ETC',
+    '?덉쐞 ?뺣낫': 'FALSE_INFORMATION',
+    '遺?곸젅???댁슜': 'INAPPROPRIATE_CONTENT',
+    '??묎텒 移⑦빐': 'COPYRIGHT',
+    '?ш린 ?섏떖': 'FRAUD',
+    '기타': 'ETC',
   };
   const normalizedReason = reasonMap[reason];
 
   if (!resolvedFundingId) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
   if (!normalizedReason) {
     return res.status(400).json({
       status: 400,
-      message: '신고 입력값이 올바르지 않습니다.',
+      message: '?좉퀬 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -9081,18 +9130,18 @@ const createFundingReport = async (req, res) => {
       content: report.content,
       status: report.status,
       createdAt: report.created_at,
-      message: '신고가 접수되었습니다.',
+      message: '?좉퀬媛 ?묒닔?섏뿀?듬땲??',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '신고 접수 중 서버 오류가 발생했습니다.',
+      message: '?좉퀬 ?묒닔 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//추가부분6: 펀딩 신고 목록 조회
+//異붽?遺遺?: ????좉퀬 紐⑸줉 議고쉶
 const getFundingReports = async (req, res) => {
   const { status, page = 0, size = 10 } = req.query;
 
@@ -9101,14 +9150,14 @@ const getFundingReports = async (req, res) => {
   if (status && !allowedStatuses.includes(status)) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청 파라미터입니다.',
+      message: '?섎せ???붿껌 ?뚮씪誘명꽣?낅땲??',
     });
   }
 
   if (isNaN(Number(page)) || isNaN(Number(size))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청 파라미터입니다.',
+      message: '?섎せ???붿껌 ?뚮씪誘명꽣?낅땲??',
     });
   }
 
@@ -9182,14 +9231,14 @@ const getFundingReports = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '신고 목록 조회 중 서버 오류가 발생했습니다.',
+      message: '?좉퀬 紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//추가부분8: 후기작성
-// 후기 작성
+//異붽?遺遺?: ?꾧린?묒꽦
+// ?꾧린 ?묒꽦
 const createFundingReview = async (req, res) => {
   const { fundingId } = req.params;
   const {
@@ -9209,14 +9258,14 @@ const createFundingReview = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
   if (!rating || isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5) {
     return res.status(400).json({
       status: 400,
-      message: '별점은 1점부터 5점까지 입력 가능합니다.',
+      message: '蹂꾩젏? 1?먮???5?먭퉴吏 ?낅젰 媛?ν빀?덈떎.',
     });
   }
 
@@ -9225,7 +9274,7 @@ const createFundingReview = async (req, res) => {
   if (!normalizedContent) {
     return res.status(400).json({
       status: 400,
-      message: '상세 후기를 입력해주세요.',
+      message: '?곸꽭 ?꾧린瑜??낅젰?댁＜?몄슂.',
     });
   }
 
@@ -9237,7 +9286,7 @@ const createFundingReview = async (req, res) => {
     if (!paidOrder) {
       return res.status(403).json({
         status: 403,
-        message: '후원 완료 후 후기를 작성할 수 있습니다.',
+        message: '?꾩썝 ?꾨즺 ???꾧린瑜??묒꽦?????덉뒿?덈떎.',
       });
     }
 
@@ -9245,7 +9294,7 @@ const createFundingReview = async (req, res) => {
     if (existingReview) {
       return res.status(409).json({
         status: 409,
-        message: '이미 작성한 후기가 있습니다.',
+        message: '?대? ?묒꽦???꾧린媛 ?덉뒿?덈떎.',
         data: {
           reviewId: Number(existingReview.review_id),
         },
@@ -9316,7 +9365,7 @@ const createFundingReview = async (req, res) => {
     if (!createdReview) {
       return res.status(500).json({
         status: 500,
-        message: '후기 등록 결과를 확인할 수 없습니다.',
+        message: '?꾧린 ?깅줉 寃곌낵瑜??뺤씤?????놁뒿?덈떎.',
       });
     }
 
@@ -9353,21 +9402,21 @@ const createFundingReview = async (req, res) => {
       });
       aiTasteUpdate = {
         updated: false,
-        message: 'AI 취향 업데이트에 실패했습니다.',
+        message: 'AI 痍⑦뼢 ?낅뜲?댄듃???ㅽ뙣?덉뒿?덈떎.',
       };
     }
 
     return res.status(201).json({
       ...mapFundingReview(review),
       ...(aiTasteUpdate ? { aiTasteUpdate } : {}),
-      message: '후기가 등록되었습니다.',
+      message: '?꾧린媛 ?깅줉?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '후기 등록 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 ?깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -9398,7 +9447,7 @@ const updateFundingReview = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '후기 수정 요청값이 올바르지 않습니다.',
+      message: '?꾧린 ?섏젙 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -9420,7 +9469,7 @@ const updateFundingReview = async (req, res) => {
     if (existingResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '수정할 후기를 찾을 수 없습니다.',
+        message: '?섏젙???꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -9492,7 +9541,7 @@ const updateFundingReview = async (req, res) => {
     if (!updatedReview) {
       return res.status(404).json({
         status: 404,
-        message: '수정할 후기를 찾을 수 없습니다.',
+        message: '?섏젙???꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -9529,21 +9578,21 @@ const updateFundingReview = async (req, res) => {
       });
       aiTasteUpdate = {
         updated: false,
-        message: 'AI 취향 업데이트에 실패했습니다.',
+        message: 'AI 痍⑦뼢 ?낅뜲?댄듃???ㅽ뙣?덉뒿?덈떎.',
       };
     }
 
     return res.status(200).json({
       ...mapFundingReview(review),
       ...(aiTasteUpdate ? { aiTasteUpdate } : {}),
-      message: '후기가 수정되었습니다.',
+      message: '?꾧린媛 ?섏젙?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '후기 수정 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -9560,7 +9609,7 @@ const deleteFundingReview = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '후기 삭제 요청값이 올바르지 않습니다.',
+      message: '?꾧린 ??젣 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -9581,7 +9630,7 @@ const deleteFundingReview = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '삭제할 후기를 찾을 수 없습니다.',
+        message: '??젣???꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -9595,12 +9644,12 @@ const deleteFundingReview = async (req, res) => {
       userId: writerId,
       user_id: writerId,
       deleted: true,
-      message: '후기가 삭제되었습니다.',
+      message: '?꾧린媛 ??젣?섏뿀?듬땲??',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '후기 삭제 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 ??젣 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -9618,7 +9667,7 @@ const getFundingReviewComments = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '후기 댓글 목록 요청값이 올바르지 않습니다.',
+      message: '?꾧린 ?볤? 紐⑸줉 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -9636,7 +9685,7 @@ const getFundingReviewComments = async (req, res) => {
     if (reviewResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '후기를 찾을 수 없습니다.',
+        message: '?꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -9678,12 +9727,12 @@ const getFundingReviewComments = async (req, res) => {
 
     return res.status(200).json({
       content: result.rows.map(mapFundingReviewComment),
-      message: '후기 댓글 목록 조회 성공',
+      message: '?꾧린 ?볤? 紐⑸줉 議고쉶 ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '후기 댓글 목록 조회 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 ?볤? 紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -9703,14 +9752,14 @@ const createFundingReviewComment = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '후기 댓글 작성 요청값이 올바르지 않습니다.',
+      message: '?꾧린 ?볤? ?묒꽦 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (!content) {
     return res.status(400).json({
       status: 400,
-      message: '댓글 내용을 입력해주세요.',
+      message: '?볤? ?댁슜???낅젰?댁＜?몄슂.',
     });
   }
 
@@ -9728,7 +9777,7 @@ const createFundingReviewComment = async (req, res) => {
     if (reviewResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '후기를 찾을 수 없습니다.',
+        message: '?꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -9774,12 +9823,12 @@ const createFundingReviewComment = async (req, res) => {
 
     return res.status(201).json({
       ...mapFundingReviewComment(result.rows[0]),
-      message: '후기 댓글이 등록되었습니다.',
+      message: '?꾧린 ?볤????깅줉?섏뿀?듬땲??',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '후기 댓글 작성 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 ?볤? ?묒꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -9840,7 +9889,7 @@ const likeFundingReviewComment = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '후기 댓글 좋아요 요청값이 올바르지 않습니다.',
+      message: '?꾧린 ?볤? 醫뗭븘???붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -9855,7 +9904,7 @@ const likeFundingReviewComment = async (req, res) => {
     if (!comment) {
       return res.status(404).json({
         status: 404,
-        message: '후기 댓글을 찾을 수 없습니다.',
+        message: '?꾧린 ?볤???李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -9881,12 +9930,12 @@ const likeFundingReviewComment = async (req, res) => {
     return res.status(201).json({
       ...mapFundingReviewComment(likedComment),
       liked: true,
-      message: '후기 댓글 좋아요 처리 성공',
+      message: '?꾧린 ?볤? 醫뗭븘??泥섎━ ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '후기 댓글 좋아요 등록 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 ?볤? 醫뗭븘???깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -9907,7 +9956,7 @@ const unlikeFundingReviewComment = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '후기 댓글 좋아요 요청값이 올바르지 않습니다.',
+      message: '?꾧린 ?볤? 醫뗭븘???붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -9922,7 +9971,7 @@ const unlikeFundingReviewComment = async (req, res) => {
     if (!comment) {
       return res.status(404).json({
         status: 404,
-        message: '후기 댓글을 찾을 수 없습니다.',
+        message: '?꾧린 ?볤???李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -9945,18 +9994,18 @@ const unlikeFundingReviewComment = async (req, res) => {
     return res.status(200).json({
       ...mapFundingReviewComment(unlikedComment),
       liked: false,
-      message: '후기 댓글 좋아요 취소 성공',
+      message: '?꾧린 ?볤? 醫뗭븘??痍⑥냼 ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '후기 댓글 좋아요 취소 중 서버 오류가 발생했습니다.',
+      message: '?꾧린 ?볤? 醫뗭븘??痍⑥냼 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//추가부분9: 펀딩 찜 등록
+//異붽?遺遺?: ???李??깅줉
 const likeFundingProject = async (req, res) => {
   const { fundingId } = req.params;
   const resolvedFundingId = await resolveFundingId(fundingId);
@@ -9964,7 +10013,7 @@ const likeFundingProject = async (req, res) => {
   if (!resolvedFundingId) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 펀딩 ID입니다.',
+      message: '?섎せ?????ID?낅땲??',
     });
   }
 
@@ -9997,20 +10046,20 @@ const likeFundingProject = async (req, res) => {
       fundingId: resolvedFundingId,
       liked: true,
       likeCount: countResult.rows[0].like_count,
-      message: '펀딩 프로젝트를 찜했습니다.',
+      message: '????꾨줈?앺듃瑜?李쒗뻽?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '찜 등록 중 서버 오류가 발생했습니다.',
+      message: '李??깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-//추가부분10: 펀딩 찜 해제
+//異붽?遺遺?0: ???李??댁젣
 const unlikeFundingProject = async (req, res) => {
   const { fundingId } = req.params;
   const resolvedFundingId = await resolveFundingId(fundingId);
@@ -10018,7 +10067,7 @@ const unlikeFundingProject = async (req, res) => {
   if (!resolvedFundingId) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 펀딩 ID입니다.',
+      message: '?섎せ?????ID?낅땲??',
     });
   }
 
@@ -10048,19 +10097,19 @@ const unlikeFundingProject = async (req, res) => {
       fundingId: resolvedFundingId,
       liked: false,
       likeCount: countResult.rows[0].like_count,
-      message: '펀딩 프로젝트 찜을 해제했습니다.',
+      message: '????꾨줈?앺듃 李쒖쓣 ?댁젣?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '찜 해제 중 서버 오류가 발생했습니다.',
+      message: '李??댁젣 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 양조일지 좋아요 등록
+// ?묒“?쇱? 醫뗭븘???깅줉
 const likeBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
   const userId = requireUserId(req, res);
@@ -10069,7 +10118,7 @@ const likeBreweryLog = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId)) || !breweryLogId || isNaN(Number(breweryLogId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '?섎せ???붿껌?낅땲??',
     });
   }
 
@@ -10087,7 +10136,7 @@ const likeBreweryLog = async (req, res) => {
     if (logResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '양조일지를 찾을 수 없습니다.',
+        message: '?묒“?쇱?瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -10117,20 +10166,20 @@ const likeBreweryLog = async (req, res) => {
       breweryLogId: Number(breweryLogId),
       liked: true,
       likeCount: countResult.rows[0].like_count,
-      message: '양조일지 좋아요를 등록했습니다.',
+      message: '?묒“?쇱? 醫뗭븘?붾? ?깅줉?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '양조일지 좋아요 등록 중 서버 오류가 발생했습니다.',
+      message: '?묒“?쇱? 醫뗭븘???깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 양조일지 좋아요 취소
+// ?묒“?쇱? 醫뗭븘??痍⑥냼
 const unlikeBreweryLog = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
   const userId = requireUserId(req, res);
@@ -10139,7 +10188,7 @@ const unlikeBreweryLog = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId)) || !breweryLogId || isNaN(Number(breweryLogId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 요청입니다.',
+      message: '?섎せ???붿껌?낅땲??',
     });
   }
 
@@ -10167,19 +10216,19 @@ const unlikeBreweryLog = async (req, res) => {
       breweryLogId: Number(breweryLogId),
       liked: false,
       likeCount: countResult.rows[0].like_count,
-      message: '양조일지 좋아요를 취소했습니다.',
+      message: '?묒“?쇱? 醫뗭븘?붾? 痍⑥냼?덉뒿?덈떎.',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '양조일지 좋아요 취소 중 서버 오류가 발생했습니다.',
+      message: '?묒“?쇱? 醫뗭븘??痍⑥냼 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 양조일지 댓글 등록
+// ?묒“?쇱? ?볤? ?깅줉
 const createBreweryLogComment = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
   const { content } = req.body;
@@ -10192,7 +10241,7 @@ const createBreweryLogComment = async (req, res) => {
   ) {
     return res.status(404).json({
       status: 404,
-      message: '양조일지를 찾을 수 없습니다.',
+      message: '?묒“?쇱?瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -10203,7 +10252,7 @@ const createBreweryLogComment = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '댓글 내용을 입력해야 합니다.',
+      message: '?볤? ?댁슜???낅젰?댁빞 ?⑸땲??',
     });
   }
 
@@ -10211,7 +10260,7 @@ const createBreweryLogComment = async (req, res) => {
   if (!userId) return;
 
   try {
-    // 양조일지 존재 확인
+    // ?묒“?쇱? 議댁옱 ?뺤씤
     const breweryLogResult = await pool.query(
       `
       SELECT log_id
@@ -10225,7 +10274,7 @@ const createBreweryLogComment = async (req, res) => {
     if (breweryLogResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '양조일지를 찾을 수 없습니다.',
+        message: '?묒“?쇱?瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -10290,19 +10339,19 @@ const createBreweryLogComment = async (req, res) => {
       createdAt: comment.created_at,
       updatedAt: comment.updated_at,
       replies: [],
-      message: '양조일지 댓글이 등록되었습니다.',
+      message: '?묒“?쇱? ?볤????깅줉?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '양조일지 댓글 등록 중 서버 오류가 발생했습니다.',
+      message: '?묒“?쇱? ?볤? ?깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 양조일지 답글 등록
+// ?묒“?쇱? ?듦? ?깅줉
 const createBreweryLogReply = async (req, res) => {
   const { fundingId, breweryLogId, commentId } = req.params;
   const { content } = req.body;
@@ -10317,7 +10366,7 @@ const createBreweryLogReply = async (req, res) => {
   ) {
     return res.status(404).json({
       status: 404,
-      message: '댓글을 찾을 수 없습니다.',
+      message: '?볤???李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -10328,7 +10377,7 @@ const createBreweryLogReply = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '답글 내용을 입력해야 합니다.',
+      message: '?듦? ?댁슜???낅젰?댁빞 ?⑸땲??',
     });
   }
 
@@ -10336,7 +10385,7 @@ const createBreweryLogReply = async (req, res) => {
   if (!userId) return;
 
   try {
-    // 부모 댓글 조회
+    // 遺紐??볤? 議고쉶
     const parentCommentResult = await pool.query(
       `
       SELECT
@@ -10352,17 +10401,17 @@ const createBreweryLogReply = async (req, res) => {
     if (parentCommentResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '부모 댓글을 찾을 수 없습니다.',
+        message: '遺紐??볤???李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
     const parentComment = parentCommentResult.rows[0];
 
-    // 답글의 답글 방지
+    // ?듦????듦? 諛⑹?
     if (parentComment.parent_comment_id !== null) {
       return res.status(400).json({
         status: 400,
-        message: '답글에는 추가 답글을 작성할 수 없습니다.',
+        message: '?듦??먮뒗 異붽? ?듦????묒꽦?????놁뒿?덈떎.',
       });
     }
 
@@ -10432,19 +10481,19 @@ const createBreweryLogReply = async (req, res) => {
       liked: false,
       createdAt: reply.created_at,
       updatedAt: reply.updated_at,
-      message: '답글이 등록되었습니다.',
+      message: '?듦????깅줉?섏뿀?듬땲??',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '답글 등록 중 서버 오류가 발생했습니다.',
+      message: '?듦? ?깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 양조일지 댓글 목록 조회
+// ?묒“?쇱? ?볤? 紐⑸줉 議고쉶
 const getBreweryLogComments = async (req, res) => {
   const { fundingId, breweryLogId } = req.params;
   const userId = getUserId(req);
@@ -10457,7 +10506,7 @@ const getBreweryLogComments = async (req, res) => {
   ) {
     return res.status(404).json({
       status: 404,
-      message: '양조일지를 찾을 수 없습니다.',
+      message: '?묒“?쇱?瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -10565,19 +10614,19 @@ const getBreweryLogComments = async (req, res) => {
       breweryLogId: Number(breweryLogId),
       comments: content,
       commentCount: content.length,
-      message: '양조일지 댓글 목록 조회 성공',
+      message: '?묒“?쇱? ?볤? 紐⑸줉 議고쉶 ?깃났',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '양조일지 댓글 목록 조회 중 서버 오류가 발생했습니다.',
+      message: '?묒“?쇱? ?볤? 紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
-// 양조일지 댓글/답글 좋아요 등록
+// ?묒“?쇱? ?볤?/?듦? 醫뗭븘???깅줉
 const likeBreweryLogComment = async (req, res) => {
   const { fundingId, breweryLogId, commentId, replyId } = req.params;
   const targetCommentId = replyId || commentId;
@@ -10587,7 +10636,7 @@ const likeBreweryLogComment = async (req, res) => {
   if (!targetCommentId || isNaN(Number(targetCommentId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 댓글 ID입니다.',
+      message: '?섎せ???볤? ID?낅땲??',
     });
   }
 
@@ -10613,7 +10662,7 @@ const likeBreweryLogComment = async (req, res) => {
     if (commentResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '댓글을 찾을 수 없습니다.',
+        message: '?볤???李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -10645,18 +10694,18 @@ const likeBreweryLogComment = async (req, res) => {
       replyId: replyId ? Number(replyId) : undefined,
       liked: true,
       likeCount: Number(countResult.rows[0].like_count || 0),
-      message: '댓글 좋아요를 등록했습니다.',
+      message: '?볤? 醫뗭븘?붾? ?깅줉?덉뒿?덈떎.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '댓글 좋아요 등록 중 서버 오류가 발생했습니다.',
+      message: '?볤? 醫뗭븘???깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
 };
 
-// 양조일지 댓글/답글 좋아요 취소
+// ?묒“?쇱? ?볤?/?듦? 醫뗭븘??痍⑥냼
 const unlikeBreweryLogComment = async (req, res) => {
   const { fundingId, breweryLogId, commentId, replyId } = req.params;
   const targetCommentId = replyId || commentId;
@@ -10666,7 +10715,7 @@ const unlikeBreweryLogComment = async (req, res) => {
   if (!targetCommentId || isNaN(Number(targetCommentId))) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 댓글 ID입니다.',
+      message: '?섎せ???볤? ID?낅땲??',
     });
   }
 
@@ -10696,12 +10745,12 @@ const unlikeBreweryLogComment = async (req, res) => {
       replyId: replyId ? Number(replyId) : undefined,
       liked: false,
       likeCount: Number(countResult.rows[0].like_count || 0),
-      message: '댓글 좋아요를 취소했습니다.',
+      message: '?볤? 醫뗭븘?붾? 痍⑥냼?덉뒿?덈떎.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '댓글 좋아요 취소 중 서버 오류가 발생했습니다.',
+      message: '?볤? 醫뗭븘??痍⑥냼 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
       error: error.message,
     });
   }
@@ -10737,7 +10786,7 @@ const createFundingReviewStable = async (req, res) => {
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(404).json({
       status: 404,
-      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
@@ -10746,7 +10795,7 @@ const createFundingReviewStable = async (req, res) => {
   if (!normalizedContent) {
     return res.status(400).json({
       status: 400,
-      message: '후기 내용을 입력해주세요.',
+      message: '?꾧린 ?댁슜???낅젰?댁＜?몄슂.',
     });
   }
 
@@ -10759,7 +10808,7 @@ const createFundingReviewStable = async (req, res) => {
     if (!paidOrder) {
       return res.status(403).json({
         status: 403,
-        message: '후원 완료 후 후기를 작성할 수 있습니다.',
+        message: '?꾩썝 ?꾨즺 ???꾧린瑜??묒꽦?????덉뒿?덈떎.',
       });
     }
 
@@ -10767,7 +10816,7 @@ const createFundingReviewStable = async (req, res) => {
     if (existingReview) {
       return res.status(409).json({
         status: 409,
-        message: '이미 작성한 후기가 있습니다.',
+        message: '?대? ?묒꽦???꾧린媛 ?덉뒿?덈떎.',
         data: {
           reviewId: Number(existingReview.review_id),
         },
@@ -10835,7 +10884,7 @@ const createFundingReviewStable = async (req, res) => {
 
     const createdReview = result.rows[0];
     if (!createdReview) {
-      throw createHttpError(500, '후기 등록 결과를 확인할 수 없습니다.');
+      throw createHttpError(500, '?꾧린 ?깅줉 寃곌낵瑜??뺤씤?????놁뒿?덈떎.');
     }
 
     let review = createdReview;
@@ -10871,18 +10920,18 @@ const createFundingReviewStable = async (req, res) => {
       });
       aiTasteUpdate = {
         updated: false,
-        message: 'AI 취향 업데이트에 실패했습니다.',
+        message: 'AI 痍⑦뼢 ?낅뜲?댄듃???ㅽ뙣?덉뒿?덈떎.',
       };
     }
 
     return res.status(201).json(buildFundingReviewResponse({
       status: 201,
-      message: '후기가 등록되었습니다.',
+      message: '?꾧린媛 ?깅줉?섏뿀?듬땲??',
       review,
       aiTasteUpdate,
     }));
   } catch (error) {
-    return sendFundingReviewError(res, error, '후기 등록 중 서버 오류가 발생했습니다.');
+    return sendFundingReviewError(res, error, '?꾧린 ?깅줉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.');
   }
 };
 
@@ -10911,7 +10960,7 @@ const updateFundingReviewStable = async (req, res) => {
   ) {
     return res.status(400).json({
       status: 400,
-      message: '후기 수정 요청값이 올바르지 않습니다.',
+      message: '?꾧린 ?섏젙 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -10933,7 +10982,7 @@ const updateFundingReviewStable = async (req, res) => {
     if (existingResult.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '후기를 찾을 수 없습니다.',
+        message: '?꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -10942,7 +10991,7 @@ const updateFundingReviewStable = async (req, res) => {
     if (writerId !== userId && !isAdminUser(req.user)) {
       return res.status(403).json({
         status: 403,
-        message: '후기를 수정할 권한이 없습니다.',
+        message: '?꾧린瑜??섏젙??沅뚰븳???놁뒿?덈떎.',
       });
     }
 
@@ -11013,7 +11062,7 @@ const updateFundingReviewStable = async (req, res) => {
     if (!updatedReview) {
       return res.status(404).json({
         status: 404,
-        message: '후기를 찾을 수 없습니다.',
+        message: '?꾧린瑜?李얠쓣 ???놁뒿?덈떎.',
       });
     }
 
@@ -11050,18 +11099,18 @@ const updateFundingReviewStable = async (req, res) => {
       });
       aiTasteUpdate = {
         updated: false,
-        message: 'AI 취향 업데이트에 실패했습니다.',
+        message: 'AI 痍⑦뼢 ?낅뜲?댄듃???ㅽ뙣?덉뒿?덈떎.',
       };
     }
 
     return res.status(200).json(buildFundingReviewResponse({
       status: 200,
-      message: '후기가 수정되었습니다.',
+      message: '?꾧린媛 ?섏젙?섏뿀?듬땲??',
       review,
       aiTasteUpdate,
     }));
   } catch (error) {
-    return sendFundingReviewError(res, error, '후기 수정 중 서버 오류가 발생했습니다.');
+    return sendFundingReviewError(res, error, '?꾧린 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.');
   }
 };
 
@@ -11075,22 +11124,22 @@ module.exports = {
   saveTasteProfile,
   savePlan,
   saveBreweryInfo,
-  loadBreweryInfo, //프젝생성추가1 부분
+  loadBreweryInfo, //?꾩젥?앹꽦異붽?1 遺遺?
   uploadFundingDraftFile,
   generateFundingDraftAiImage,
   verifyPhoneForFundingDraft,
-  verifyAccountForFundingDraft,//추가4
+  verifyAccountForFundingDraft,//異붽?4
   requestBankAccountVerification,
   confirmBankAccountVerification,
   saveNotices,
   uploadDocument,
-  submitFundingDraft, //프로젝트제출
-  getFundingDraft,    //임시저장 단건 조회
+  submitFundingDraft, //?꾨줈?앺듃?쒖텧
+  getFundingDraft,    //?꾩떆????④굔 議고쉶
   getFundingDraftByFundingId,
-  getFundingDraftList, //임시저장 목록 조회
-  deleteFundingDraft,  //임시저장 삭제
-  getFundingDraftPreview,  //프로젝트 미리보기
-  updateFundingProject, // 공개된 펀딩 프로젝트 수정
+  getFundingDraftList, //?꾩떆???紐⑸줉 議고쉶
+  deleteFundingDraft,  //?꾩떆?????젣
+  getFundingDraftPreview,  //?꾨줈?앺듃 誘몃━蹂닿린
+  updateFundingProject, // 怨듦컻??????꾨줈?앺듃 ?섏젙
   getFundingList,
   getFundingStats,
   getFundingDetail,

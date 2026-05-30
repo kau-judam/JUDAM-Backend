@@ -1,5 +1,8 @@
 const pool = require('../config/db');
-const { registerFundingProjectToAiPool } = require('../services/funding.service');
+const {
+  registerFundingProjectToAiPool,
+  settleExpiredFundings,
+} = require('../services/funding.service');
 
 // 관리자 제출 프로젝트 목록 조회
 const getSubmittedFundingDrafts = async (req, res) => {
@@ -358,8 +361,36 @@ const rejectFundingDraft = async (req, res) => {
   }
 };
 
+const settleExpiredFundingsManually = async (req, res) => {
+  try {
+    const settlementResult = await settleExpiredFundings();
+
+    console.log('[funding-settlement] manual settlement completed', {
+      successCount: settlementResult.successCount,
+      failedCount: settlementResult.failedCount,
+      processedCount: settlementResult.processedFundings.length,
+      adminUserId: req.user?.userId || req.user?.id || null,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '마감 펀딩 정산 완료',
+      data: settlementResult,
+    });
+  } catch (error) {
+    console.error('[funding-settlement] manual settlement failed', error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '마감 펀딩 정산 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getSubmittedFundingDrafts,
   approveFundingDraft,
   rejectFundingDraft,
+  settleExpiredFundingsManually,
 };
