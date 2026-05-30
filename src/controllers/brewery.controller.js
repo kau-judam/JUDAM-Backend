@@ -11,6 +11,8 @@ const {
   uploadBreweryProfileImageByUserId,
   getBreweryFundingSummaryByUserId,
   getBreweryDashboardFundingsByUserId,
+  getBreweryFundingDeliveryByUserId,
+  upsertBreweryFundingDeliveryByUserId,
   getBreweryNotificationsByUserId,
 } = require('../services/brewery.service');
 const { verifyAuthPhoneVerificationToken } = require('../services/auth-phone.service');
@@ -31,6 +33,19 @@ const sendError = (res, status, message, error) => {
 };
 
 const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
+
+const parsePositiveIntegerParam = (value, name) => {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    const error = new Error(`${name} 값이 올바르지 않습니다.`);
+    error.statusCode = 400;
+    error.detail = `${name}는 1 이상의 정수여야 합니다.`;
+    throw error;
+  }
+
+  return parsed;
+};
 
 const normalizeAccountNumber = (value) => normalizeString(value).replace(/\D/g, '');
 
@@ -327,6 +342,95 @@ const getMyBreweryDashboardFundings = async (req, res) => {
       res,
       error.statusCode || 500,
       error.message || '양조장 대시보드 펀딩 목록 조회에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const getMyBreweryDashboardFundingDelivery = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  let fundingId;
+
+  try {
+    fundingId = parsePositiveIntegerParam(req.params.fundingId, 'fundingId');
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 400,
+      error.message,
+      error.detail || error.message,
+    );
+  }
+
+  try {
+    const delivery = await getBreweryFundingDeliveryByUserId({
+      userId,
+      fundingId,
+    });
+
+    return res.status(200).json(delivery);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '펀딩 배송 정보 조회에 실패했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const upsertMyBreweryDashboardFundingDelivery = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  const body = req.body || {};
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+  }
+
+  let fundingId;
+
+  try {
+    fundingId = parsePositiveIntegerParam(req.params.fundingId, 'fundingId');
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 400,
+      error.message,
+      error.detail || error.message,
+    );
+  }
+
+  const courier = normalizeString(body.courier);
+  const trackingNumber = normalizeString(body.trackingNumber || body.tracking_number);
+
+  if (!courier || !trackingNumber) {
+    return sendError(
+      res,
+      400,
+      '배송 정보 입력값이 올바르지 않습니다.',
+      'courier, trackingNumber는 필수입니다.',
+    );
+  }
+
+  try {
+    const delivery = await upsertBreweryFundingDeliveryByUserId({
+      userId,
+      fundingId,
+      courier,
+      trackingNumber,
+    });
+
+    return res.status(200).json(delivery);
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '펀딩 배송 정보 저장에 실패했습니다.',
       error.detail || error.message,
     );
   }
@@ -665,6 +769,8 @@ module.exports = {
   uploadMyBreweryProfileImage,
   getMyBreweryDashboardFundingSummary,
   getMyBreweryDashboardFundings,
+  getMyBreweryDashboardFundingDelivery,
+  upsertMyBreweryDashboardFundingDelivery,
   getMyBreweryDashboardNotifications,
   verifyBreweryAccount,
   createBreweryApplication,

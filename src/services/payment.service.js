@@ -1,5 +1,8 @@
 const axios = require('axios');
 const pool = require('../config/db');
+const {
+  createFundingProgressNotificationsForReachedThresholds,
+} = require('./breweryDashboardNotification.service');
 
 const normalizeNumericOrderId = (orderId) => {
   const normalized = String(orderId || '').trim().replace(/^order_/i, '');
@@ -268,8 +271,6 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       [fundingAmounts.fundingAmount, order.funding_id]
     );
 
-    await client.query('COMMIT');
-
     const payment = paymentResult.rows[0];
     const funding = fundingResult.rows[0] || {};
     const currentAmount = Number(funding.current_amount || 0);
@@ -278,6 +279,18 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       targetAmount > 0
         ? Math.floor((currentAmount / targetAmount) * 100)
         : 0;
+
+    await client.query('COMMIT');
+
+    try {
+      await createFundingProgressNotificationsForReachedThresholds(order.funding_id);
+    } catch (notificationError) {
+      console.warn('Failed to create funding progress brewery notifications', {
+        fundingId: order.funding_id,
+        orderId: order.order_id,
+        message: notificationError.message,
+      });
+    }
 
     return {
       orderId: String(order.order_id),

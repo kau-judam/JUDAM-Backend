@@ -95,7 +95,7 @@ Checked on 2026-05-22 from repository code, SQL files, and the `judam` DB throug
 | 14 | Support order | Partial | Order creation exists with major fields. Some requested agreement fields are missing or simplified. |
 | 15 | Payment/Toss | Partial | Payment request returns `paymentUrl`/`checkoutUrl`; Toss confirm updates payment/order/funding amount. Request URL is still mocked in `order.controller.js`. |
 | 16 | Likes | Improved | Like/unlike and liked list exist. Funding routes use optional auth; public GET returns `liked=false` when unauthenticated, and write APIs now require an authenticated user instead of falling back to user id `1`. |
-| 17 | Brewery logs | Improved | CRUD, like, comments, replies exist with unique `log_id`. Image upload now stores a usable URL fallback. No `videoUrl` handling in controller yet. |
+| 17 | Brewery logs | Improved | CRUD, like, comments, replies exist with unique `log_id`. Image upload stores usable URLs. `videoUrl` is handled as a separate string field for create/update/list once `brewery_logs.video_url` migration is applied. |
 | 18 | Q&A | Improved | List/create/reply, question like/unlike, and reply like/unlike exist. Replies include writer, `likeCount`, and `liked`. |
 | 19 | Reviews | Improved | List/detail/create/update/delete exist. Responses include writer id aliases plus `detailReview`/`showRecord`. Review like/unlike exist. Detail comments list/create/like/unlike exist. Update supports multipart images, JSON-string `tags`, and `deleteImageUrls`. Eligibility checks are still missing. |
 | 20 | Share/report | Implemented | Share link and reports are DB-backed. Share count increments and reports persist selected reason/detail content. |

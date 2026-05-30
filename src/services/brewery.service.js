@@ -181,6 +181,61 @@ const mapBreweryFundingSummary = (row) => ({
   totalParticipantCount: Number(row.total_participant_count || 0),
 });
 
+const BREWERY_DASHBOARD_ACTIVE_FUNDING_CONDITION = `
+  (
+    fp.status IN ('READY', 'SCHEDULED', 'APPROVED', 'ACTIVE', 'ONGOING', 'ACHIEVED', 'GOAL_ACHIEVED')
+    OR (
+      fp.goal_amount > 0
+      AND fp.current_amount >= fp.goal_amount
+      AND fp.status NOT IN (
+        'SUCCESSFUL',
+        'SUCCESS',
+        'FUNDING_SUCCESS',
+        'ENDED',
+        'COMPLETED',
+        'DELIVERED',
+        'DONE',
+        'FAILED',
+        'FAILURE',
+        'PRODUCTION',
+        'IN_PRODUCTION',
+        'PRODUCING',
+        'MAKING',
+        'SHIPPING',
+        'DELIVERING',
+        'CANCELLED',
+        'CANCELED'
+      )
+    )
+  )
+  AND (fp.end_date IS NULL OR fp.end_date >= CURRENT_DATE)
+`;
+
+const BREWERY_DASHBOARD_COMPLETED_FUNDING_CONDITION = `
+  (
+    fp.status IN (
+      'ENDED',
+      'COMPLETED',
+      'DELIVERED',
+      'DONE',
+      'SUCCESSFUL',
+      'SUCCESS',
+      'FUNDING_SUCCESS',
+      'FAILED',
+      'FAILURE',
+      'PRODUCTION',
+      'IN_PRODUCTION',
+      'PRODUCING',
+      'MAKING',
+      'SHIPPING',
+      'DELIVERING',
+      'CANCELLED',
+      'CANCELED'
+    )
+    OR (fp.end_date IS NOT NULL AND fp.end_date < CURRENT_DATE)
+  )
+`;
+
 const mapBreweryNotification = (row) => ({
   notificationId: Number(row.notification_id),
   type: row.type,
@@ -190,6 +245,23 @@ const mapBreweryNotification = (row) => ({
   isRead: Boolean(row.is_read),
   linkUrl: row.link_url || null,
   imageUrl: row.image_url || null,
+  fundingId: row.funding_id === null || row.funding_id === undefined
+    ? null
+    : Number(row.funding_id),
+  recipeId: row.recipe_id === null || row.recipe_id === undefined
+    ? null
+    : Number(row.recipe_id),
+  progressThreshold: row.progress_threshold === null || row.progress_threshold === undefined
+    ? null
+    : Number(row.progress_threshold),
+  metadata: row.metadata || {},
+});
+
+const mapFundingDelivery = (row, fundingId) => ({
+  fundingId: Number(row?.funding_id || fundingId),
+  courier: row?.courier || null,
+  trackingNumber: row?.tracking_number || null,
+  updatedAt: row?.updated_at || null,
 });
 
 const createServiceError = (statusCode, message, detail) => {
@@ -197,6 +269,54 @@ const createServiceError = (statusCode, message, detail) => {
   error.statusCode = statusCode;
   error.detail = detail;
   return error;
+};
+
+let notificationEventColumnsCheckedAt = 0;
+let notificationEventColumnsAvailable = false;
+
+const hasBreweryNotificationEventColumns = async () => {
+  const now = Date.now();
+
+  if (notificationEventColumnsCheckedAt && now - notificationEventColumnsCheckedAt < 60_000) {
+    return notificationEventColumnsAvailable;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT COUNT(*)::int AS column_count
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'brewery_dashboard_notifications'
+      AND column_name = ANY($1)
+    `,
+    [[
+      'funding_id',
+      'recipe_id',
+      'progress_threshold',
+      'metadata',
+    ]],
+  );
+
+  notificationEventColumnsAvailable = Number(rows[0]?.column_count || 0) === 4;
+  notificationEventColumnsCheckedAt = now;
+
+  return notificationEventColumnsAvailable;
+};
+
+const getBreweryNotificationEventSelect = async () => {
+  if (await hasBreweryNotificationEventColumns()) {
+    return `
+        funding_id,
+        recipe_id,
+        progress_threshold,
+        metadata,`;
+  }
+
+  return `
+        NULL::bigint AS funding_id,
+        NULL::bigint AS recipe_id,
+        NULL::int AS progress_threshold,
+        '{}'::jsonb AS metadata,`;
 };
 
 const validateBusinessLicenseFile = (file) => {
@@ -1098,13 +1218,19 @@ const getBreweryFundingSummaryByUserId = async (userId) => {
     `
       SELECT
         COUNT(DISTINCT fp.funding_id) FILTER (
-          WHERE fp.status IN ('ONGOING', 'ACTIVE')
-            AND (fp.end_date IS NULL OR fp.end_date >= CURRENT_DATE)
+          WHERE ${BREWERY_DASHBOARD_ACTIVE_FUNDING_CONDITION}
         )::int AS active_funding_count,
-        COUNT(DISTINCT fp.funding_id)::int AS total_funding_count,
+        COUNT(DISTINCT fp.funding_id) FILTER (
+          WHERE (${BREWERY_DASHBOARD_ACTIVE_FUNDING_CONDITION})
+             OR (${BREWERY_DASHBOARD_COMPLETED_FUNDING_CONDITION})
+        )::int AS total_funding_count,
         COUNT(DISTINCT o.user_id) FILTER (
           WHERE o.order_status = 'PAID'
             AND o.user_id IS NOT NULL
+            AND (
+              (${BREWERY_DASHBOARD_ACTIVE_FUNDING_CONDITION})
+              OR (${BREWERY_DASHBOARD_COMPLETED_FUNDING_CONDITION})
+            )
         )::int AS total_participant_count
       FROM funding_projects fp
       LEFT JOIN orders o ON o.funding_id = fp.funding_id
@@ -1126,59 +1252,8 @@ const getBreweryDashboardFundingsByUserId = async ({
 
   const normalizedStatus = String(status || '').trim().toLowerCase();
   const statusConditions = {
-    active: `
-      (
-        fp.status IN ('READY', 'SCHEDULED', 'APPROVED', 'ACTIVE', 'ONGOING', 'ACHIEVED', 'GOAL_ACHIEVED')
-        OR (
-          fp.goal_amount > 0
-          AND fp.current_amount >= fp.goal_amount
-          AND fp.status NOT IN (
-            'SUCCESSFUL',
-            'SUCCESS',
-            'FUNDING_SUCCESS',
-            'ENDED',
-            'COMPLETED',
-            'DELIVERED',
-            'DONE',
-            'FAILED',
-            'FAILURE',
-            'PRODUCTION',
-            'IN_PRODUCTION',
-            'PRODUCING',
-            'MAKING',
-            'SHIPPING',
-            'DELIVERING',
-            'CANCELLED',
-            'CANCELED'
-          )
-        )
-      )
-      AND (fp.end_date IS NULL OR fp.end_date >= CURRENT_DATE)
-    `,
-    completed: `
-      (
-        fp.status IN (
-          'ENDED',
-          'COMPLETED',
-          'DELIVERED',
-          'DONE',
-          'SUCCESSFUL',
-          'SUCCESS',
-          'FUNDING_SUCCESS',
-          'FAILED',
-          'FAILURE',
-          'PRODUCTION',
-          'IN_PRODUCTION',
-          'PRODUCING',
-          'MAKING',
-          'SHIPPING',
-          'DELIVERING',
-          'CANCELLED',
-          'CANCELED'
-        )
-        OR (fp.end_date IS NOT NULL AND fp.end_date < CURRENT_DATE)
-      )
-    `,
+    active: BREWERY_DASHBOARD_ACTIVE_FUNDING_CONDITION,
+    completed: BREWERY_DASHBOARD_COMPLETED_FUNDING_CONDITION,
   };
 
   const statusCondition = statusConditions[normalizedStatus];
@@ -1272,8 +1347,130 @@ const getBreweryDashboardFundingsByUserId = async ({
   };
 };
 
+const getBreweryOwnedFundingForDashboard = async ({ userId, fundingId }) => {
+  await assertBreweryDashboardUser(userId);
+
+  const numericFundingId = Number(fundingId);
+
+  if (!Number.isInteger(numericFundingId) || numericFundingId <= 0) {
+    throw createServiceError(400, '펀딩 ID가 올바르지 않습니다.', `funding_id=${fundingId}`);
+  }
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        fp.funding_id,
+        fp.brewery_user_id,
+        fp.status,
+        fp.end_date,
+        (${BREWERY_DASHBOARD_COMPLETED_FUNDING_CONDITION}) AS is_completed
+      FROM funding_projects fp
+      WHERE fp.funding_id = $1
+      LIMIT 1
+    `,
+    [numericFundingId],
+  );
+
+  if (rows.length === 0) {
+    throw createServiceError(
+      404,
+      '펀딩 프로젝트를 찾을 수 없습니다.',
+      `funding_id=${numericFundingId}`,
+    );
+  }
+
+  const funding = rows[0];
+
+  if (Number(funding.brewery_user_id) !== Number(userId)) {
+    throw createServiceError(
+      403,
+      '해당 펀딩의 배송 정보에 접근할 권한이 없습니다.',
+      `funding_id=${numericFundingId}, user_id=${userId}`,
+    );
+  }
+
+  return {
+    fundingId: Number(funding.funding_id),
+    breweryUserId: Number(funding.brewery_user_id),
+    status: funding.status,
+    endDate: funding.end_date,
+    isCompleted: Boolean(funding.is_completed),
+  };
+};
+
+const getBreweryFundingDeliveryByUserId = async ({ userId, fundingId }) => {
+  const funding = await getBreweryOwnedFundingForDashboard({ userId, fundingId });
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        funding_id,
+        courier,
+        tracking_number,
+        updated_at
+      FROM funding_deliveries
+      WHERE funding_id = $1
+      LIMIT 1
+    `,
+    [funding.fundingId],
+  );
+
+  return mapFundingDelivery(rows[0], funding.fundingId);
+};
+
+const upsertBreweryFundingDeliveryByUserId = async ({
+  userId,
+  fundingId,
+  courier,
+  trackingNumber,
+}) => {
+  const funding = await getBreweryOwnedFundingForDashboard({ userId, fundingId });
+
+  if (!funding.isCompleted) {
+    throw createServiceError(
+      400,
+      '종료된 펀딩만 배송 정보를 저장할 수 있습니다.',
+      `funding_id=${funding.fundingId}, status=${funding.status}`,
+    );
+  }
+
+  const { rows } = await pool.query(
+    `
+      INSERT INTO funding_deliveries (
+        funding_id,
+        brewery_user_id,
+        courier,
+        tracking_number,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT (funding_id) DO UPDATE
+      SET
+        brewery_user_id = EXCLUDED.brewery_user_id,
+        courier = EXCLUDED.courier,
+        tracking_number = EXCLUDED.tracking_number,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING
+        funding_id,
+        courier,
+        tracking_number,
+        updated_at
+    `,
+    [
+      funding.fundingId,
+      Number(userId),
+      courier,
+      trackingNumber,
+    ],
+  );
+
+  return mapFundingDelivery(rows[0], funding.fundingId);
+};
+
 const getBreweryNotificationsByUserId = async (userId) => {
   await assertBreweryDashboardUser(userId);
+  const eventSelect = await getBreweryNotificationEventSelect();
 
   const { rows } = await pool.query(
     `
@@ -1285,6 +1482,7 @@ const getBreweryNotificationsByUserId = async (userId) => {
         content,
         link_url,
         image_url,
+        ${eventSelect}
         is_read,
         created_at
       FROM brewery_dashboard_notifications
@@ -1299,6 +1497,7 @@ const getBreweryNotificationsByUserId = async (userId) => {
 
 const markBreweryNotificationRead = async ({ userId, notificationId }) => {
   await assertBreweryDashboardUser(userId);
+  const eventSelect = await getBreweryNotificationEventSelect();
 
   const { rows } = await pool.query(
     `
@@ -1316,6 +1515,7 @@ const markBreweryNotificationRead = async ({ userId, notificationId }) => {
         content,
         link_url,
         image_url,
+        ${eventSelect}
         is_read,
         created_at
     `,
@@ -1368,6 +1568,8 @@ module.exports = {
   uploadBreweryProfileImageByUserId,
   getBreweryFundingSummaryByUserId,
   getBreweryDashboardFundingsByUserId,
+  getBreweryFundingDeliveryByUserId,
+  upsertBreweryFundingDeliveryByUserId,
   getBreweryNotificationsByUserId,
   markBreweryNotificationRead,
   markAllBreweryNotificationsRead,
