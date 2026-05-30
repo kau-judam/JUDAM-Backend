@@ -1,4 +1,7 @@
 const pool = require('../config/db');
+const {
+  createFundingProgressNotificationsForReachedThresholds,
+} = require('../services/breweryDashboardNotification.service');
 
 const normalizeNumericOrderId = (orderId) => {
   const normalized = String(orderId || '').trim().replace(/^order_/i, '');
@@ -398,6 +401,16 @@ const completePayment = async (req, res) => {
       `,
       [payment.amount, order.funding_id]
     );
+
+    try {
+      await createFundingProgressNotificationsForReachedThresholds(order.funding_id);
+    } catch (notificationError) {
+      console.warn('Failed to create funding progress brewery notifications', {
+        fundingId: order.funding_id,
+        orderId: order.order_id,
+        message: notificationError.message,
+      });
+    }
 
     return res.status(200).json({
       status: 200,

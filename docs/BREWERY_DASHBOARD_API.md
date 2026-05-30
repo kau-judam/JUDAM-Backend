@@ -1,6 +1,6 @@
 # Brewery Dashboard API
 
-Last updated: 2026-05-28
+Last updated: 2026-05-30
 
 All APIs require:
 
@@ -236,10 +236,16 @@ Data source:
 
 Aggregation rules:
 
-- `activeFundingCount`: current user's `funding_projects` where `status IN ('ONGOING', 'ACTIVE')` and `end_date >= CURRENT_DATE`.
-- `totalFundingCount`: all `funding_projects` where `brewery_user_id` is the authenticated user.
-- `totalParticipantCount`: distinct paid order users across the authenticated user's fundings.
+- `activeFundingCount`: same condition as `GET /api/breweries/me/dashboard/fundings?status=active`.
+- `totalFundingCount`: active + completed dashboard-visible fundings for the authenticated brewery user.
+- `totalParticipantCount`: distinct paid order users across the authenticated brewery user's active + completed dashboard-visible fundings.
 - Paid orders are counted from `orders.order_status = 'PAID'`.
+
+Consistency rules:
+
+- `funding-summary.activeFundingCount` equals `fundings?status=active` `totalElements`.
+- `funding-summary.totalFundingCount` equals `fundings?status=active` `totalElements` + `fundings?status=completed` `totalElements`.
+- Reviewing/submitted/draft-only statuses that are not part of the active/completed dashboard tabs are excluded from `totalFundingCount`.
 
 Migration:
 
@@ -332,6 +338,104 @@ Migration:
 - No new migration is required for this endpoint.
 - It uses existing `funding_projects`, `recipes`, `brewery_profiles`, and `brewery_auth`.
 
+## Funding Delivery
+
+Used by the delivery management modal on completed funding cards.
+
+### Get Funding Delivery
+
+```http
+GET /api/breweries/me/dashboard/fundings/:fundingId/delivery
+```
+
+Response when delivery info exists:
+
+```json
+{
+  "fundingId": 1,
+  "courier": "CJ대한통운",
+  "trackingNumber": "123456789012",
+  "updatedAt": "2026-05-30T10:00:00.000Z"
+}
+```
+
+Response when delivery info does not exist:
+
+```json
+{
+  "fundingId": 1,
+  "courier": null,
+  "trackingNumber": null,
+  "updatedAt": null
+}
+```
+
+### Save Or Update Funding Delivery
+
+```http
+PATCH /api/breweries/me/dashboard/fundings/:fundingId/delivery
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "courier": "CJ대한통운",
+  "trackingNumber": "123456789012"
+}
+```
+
+Response:
+
+```json
+{
+  "fundingId": 1,
+  "courier": "CJ대한통운",
+  "trackingNumber": "123456789012",
+  "updatedAt": "2026-05-30T10:00:00.000Z"
+}
+```
+
+Validation:
+
+- Requires `Authorization: Bearer {accessToken}`.
+- Only the authenticated brewery owner of the funding can access the delivery info.
+- Unknown `fundingId` returns `404`.
+- Other brewery owner's funding returns `403`.
+- `PATCH` is allowed only for completed fundings using the same completed condition as `GET /api/breweries/me/dashboard/fundings?status=completed`.
+- Empty `courier` or `trackingNumber` returns `400`.
+
+Completed funding condition:
+
+- Status is one of `ENDED`, `COMPLETED`, `DELIVERED`, `DONE`, `SUCCESSFUL`, `SUCCESS`, `FUNDING_SUCCESS`, `FAILED`, `FAILURE`, `PRODUCTION`, `IN_PRODUCTION`, `PRODUCING`, `MAKING`, `SHIPPING`, `DELIVERING`, `CANCELLED`, `CANCELED`
+- Or `end_date` is earlier than `CURRENT_DATE`
+
+Migration:
+
+```text
+database/20260530_funding_deliveries.sql
+```
+
+Table:
+
+- `funding_deliveries`
+
+Columns:
+
+- `delivery_id`
+- `funding_id`
+- `brewery_user_id`
+- `courier`
+- `tracking_number`
+- `created_at`
+- `updated_at`
+
+Constraint:
+
+- `funding_id` is unique, so one funding has one delivery row.
+- `PATCH` uses insert-or-update behavior.
+
 ## Notifications
 
 ### Get Dashboard Notifications
@@ -352,8 +456,15 @@ Response:
       "content": "펀딩 프로젝트가 등록되었습니다.",
       "createdAt": "2026-05-28T10:00:00.000Z",
       "isRead": false,
-      "linkUrl": "/fundings/1",
-      "imageUrl": "https://example.com/funding.png"
+      "linkUrl": "/funding/1",
+      "imageUrl": "https://example.com/funding.png",
+      "fundingId": 1,
+      "recipeId": null,
+      "progressThreshold": null,
+      "metadata": {
+        "fundingId": 1,
+        "title": "코코 시그니처 막걸리"
+      }
     }
   ],
   "content": [
@@ -364,8 +475,15 @@ Response:
       "content": "펀딩 프로젝트가 등록되었습니다.",
       "createdAt": "2026-05-28T10:00:00.000Z",
       "isRead": false,
-      "linkUrl": "/fundings/1",
-      "imageUrl": "https://example.com/funding.png"
+      "linkUrl": "/funding/1",
+      "imageUrl": "https://example.com/funding.png",
+      "fundingId": 1,
+      "recipeId": null,
+      "progressThreshold": null,
+      "metadata": {
+        "fundingId": 1,
+        "title": "코코 시그니처 막걸리"
+      }
     }
   ],
   "unreadCount": 1
@@ -381,6 +499,136 @@ Notification type values:
 - `FUNDING_ENDED`
 - `FUNDING_SUCCESS`
 - `RECIPE_POPULAR`
+
+## Automatic Notification Creation
+
+Notification rows are created in `brewery_dashboard_notifications`.
+
+Additional event columns are managed by:
+
+```text
+database/20260530_brewery_dashboard_notification_events.sql
+```
+
+The migration adds:
+
+- `event_key`
+- `funding_id`
+- `recipe_id`
+- `progress_threshold`
+- `metadata`
+
+Duplicate prevention:
+
+- Unique index: `uq_brewery_dashboard_notifications_user_event_key`
+- Scope: one notification per authenticated brewery user and event key.
+- Examples:
+  - `funding:1:created`
+  - `funding:1:progress:30`
+  - `funding:1:progress:50`
+  - `funding:1:progress:80`
+  - `funding:1:ended`
+  - `funding:1:success`
+  - `recipe:10:popular`
+
+### Created Funding
+
+Type:
+
+- `FUNDING_CREATED`
+
+Created when:
+
+- An admin approves a submitted funding draft and the linked `funding_projects` row becomes public/ongoing.
+- A brewery converts a recipe to a funding project through the recipe funding conversion flow.
+
+Target:
+
+- `funding_projects.brewery_user_id`
+
+Stored data:
+
+- `linkUrl`: `/funding/{fundingId}`
+- `imageUrl`: funding thumbnail, first funding image, or recipe image fallback
+- `fundingId`: numeric funding id
+
+### Funding Progress
+
+Type:
+
+- `FUNDING_PROGRESS`
+
+Created when:
+
+- Payment completion increases `funding_projects.current_amount`.
+- The funding achievement rate reaches each threshold for the first time.
+
+Thresholds:
+
+- `30`
+- `50`
+- `80`
+
+Payment flows currently connected:
+
+- `POST /api/payments/toss/confirm`
+- `PATCH /api/orders/:orderId/payment/complete`
+
+Target:
+
+- `funding_projects.brewery_user_id`
+
+Stored data:
+
+- `linkUrl`: `/funding/{fundingId}`
+- `fundingId`: numeric funding id
+- `progressThreshold`: `30`, `50`, or `80`
+- `metadata.currentAmount`
+- `metadata.targetAmount`
+- `metadata.achievementRate`
+
+### Funding Ended And Funding Success
+
+Types:
+
+- `FUNDING_ENDED`
+- `FUNDING_SUCCESS`
+
+Current status:
+
+- Reusable functions are implemented for the future funding close/success judgment API.
+- They are not automatically called yet because the close/success judgment API is not implemented.
+
+Functions:
+
+- `createFundingEndedNotification(fundingId)`
+- `createFundingSuccessNotification(fundingId)`
+
+### Popular Recipe
+
+Type:
+
+- `RECIPE_POPULAR`
+
+Created when:
+
+- `POST /api/recipes/:recipeId/interests` increases `recipes.interest_count`.
+- `recipes.interest_count >= 30`.
+
+Target:
+
+- All users with an approved `brewery_auth` application.
+
+Duplicate prevention:
+
+- Each approved brewery user receives at most one `RECIPE_POPULAR` notification for the same `recipeId`.
+
+Stored data:
+
+- `linkUrl`: `/recipe/{recipeId}`
+- `recipeId`: numeric recipe id
+- `metadata.interestCount`
+- `metadata.threshold = 30`
 
 ### Mark One Notification As Read
 
@@ -398,7 +646,7 @@ Response:
   "content": "펀딩 프로젝트가 등록되었습니다.",
   "createdAt": "2026-05-28T10:00:00.000Z",
   "isRead": true,
-  "linkUrl": "/fundings/1",
+  "linkUrl": "/funding/1",
   "imageUrl": "https://example.com/funding.png"
 }
 ```
@@ -429,6 +677,7 @@ Migration file:
 
 ```text
 database/20260528_brewery_dashboard_profile_notifications.sql
+database/20260530_brewery_dashboard_notification_events.sql
 ```
 
 Current connected `judam` DB status:
@@ -446,6 +695,7 @@ Current connected `judam` DB status:
   - `idx_brewery_dashboard_notifications_user_created`
   - `idx_brewery_dashboard_notifications_user_read`
   - `idx_brewery_profiles_user`
+- 2026-05-30 note: `database/20260530_brewery_dashboard_notification_events.sql` is written, but local SSM/RDS tunnel was not available during this turn, so connected Judam DB application could not be completed here.
 
 Production/staging status:
 

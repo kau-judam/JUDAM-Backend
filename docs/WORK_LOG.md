@@ -604,6 +604,101 @@
 - `node --check src/controllers/notification.controller.js` 통과
 - `node --check src/routes/brewery.routes.js`, `src/routes/notification.routes.js`, `src/routes/index.js` 통과
 
+### Brewery Dashboard Notification Auto Creation
+
+완료:
+
+- 양조장 대시보드 알림 자동 생성용 서비스를 추가했습니다.
+  - `createBreweryDashboardNotification`
+  - `createFundingCreatedNotification`
+  - `createFundingProgressNotification`
+  - `createFundingProgressNotificationsForReachedThresholds`
+  - `createFundingEndedNotification`
+  - `createFundingSuccessNotification`
+  - `createRecipePopularNotification`
+- 관리자 펀딩 승인 시 `FUNDING_CREATED` 알림을 생성하도록 연결했습니다.
+- 레시피에서 펀딩 전환 시 `FUNDING_CREATED` 알림을 생성하도록 연결했습니다.
+- Toss 결제 승인 및 결제 완료 처리 후 달성률 30/50/80% 구간 알림을 생성하도록 연결했습니다.
+- 레시피 관심 등록 후 관심 수가 30개 이상이면 모든 승인 양조장 계정에 `RECIPE_POPULAR` 알림을 생성하도록 연결했습니다.
+- 펀딩 종료/성공 판정 API에서 호출할 수 있도록 `FUNDING_ENDED`, `FUNDING_SUCCESS` 생성 함수를 분리했습니다.
+- 알림 목록 응답에 `fundingId`, `recipeId`, `progressThreshold`, `metadata`를 추가했습니다.
+- 중복 방지를 위해 알림 이벤트 컬럼/인덱스 마이그레이션을 추가했습니다.
+
+문서/마이그레이션:
+
+- `src/services/breweryDashboardNotification.service.js`
+- `database/20260530_brewery_dashboard_notification_events.sql`
+- `docs/BREWERY_DASHBOARD_API.md`
+- `docs/DATABASE.md`
+
+검증/주의:
+
+- 로컬 `localhost:5433` SSM 터널이 닫혀 있고 현재 IAM 사용자에 `ssm:StartSession` 권한이 없어 Judam DB 적용은 이 턴에서 완료하지 못했습니다.
+- 터널/권한 복구 후 `database/20260530_brewery_dashboard_notification_events.sql`을 Judam DB에 적용해야 서버에서 새 알림 응답 필드와 자동 생성 로직이 정상 동작합니다.
+
+### Brewery Log Video URL
+
+완료:
+
+- 양조일지 생성/수정 API에서 `videoUrl`, `video_url`, `url` 문자열 필드를 받을 수 있게 했습니다.
+- `videoUrl`은 이미지 업로드와 분리해서 `brewery_logs.video_url`에 저장하도록 했습니다.
+- `PATCH /api/fundings/:fundingId/brewery-logs/:breweryLogId`에서 `videoUrl`을 빈 문자열로 보내면 기존 영상 URL이 삭제되도록 했습니다.
+- 양조일지 목록/생성/수정 응답에 `videoUrl`과 `updatedAt`을 포함하도록 했습니다.
+- 양조일지 수정에서 `deleteImageUrls` JSON 문자열 배열을 받아 기존 이미지 배열에서 제거하도록 했습니다.
+- DB 컬럼이 아직 적용되지 않은 환경에서도 조회 API는 `videoUrl: null`로 동작하고, 저장/수정 요청은 필요한 마이그레이션 파일명을 포함해 에러를 반환하도록 방어 처리했습니다.
+
+문서/마이그레이션:
+
+- `database/20260530_brewery_log_video_url.sql`
+- `docs/FRONTEND_HANDOFF_FUNDING.md`
+- `docs/FUNDING_API_STATUS.md`
+- `docs/DATABASE.md`
+
+검증/주의:
+
+- 로컬 `localhost:5433` SSM 터널이 닫혀 있고 현재 IAM 사용자에 `ssm:StartSession` 권한이 없어 Judam DB 적용은 이 턴에서 완료하지 못했습니다.
+- `brewery_logs`는 기존 기록상 `judam_admin` 소유 테이블이라 마이그레이션 적용에는 owner/admin 권한이 필요할 수 있습니다.
+
+### Brewery Dashboard Funding Delivery
+
+완료:
+
+- 종료된 펀딩 카드의 배송 관리 모달용 API를 추가했습니다.
+  - `GET /api/breweries/me/dashboard/fundings/:fundingId/delivery`
+  - `PATCH /api/breweries/me/dashboard/fundings/:fundingId/delivery`
+- 로그인한 양조장 계정이 만든 펀딩인지 확인하도록 했습니다.
+- 존재하지 않는 `fundingId`는 404, 다른 양조장 펀딩은 403을 반환합니다.
+- 배송 저장/수정은 대시보드 목록의 `completed` 필터와 같은 종료 펀딩 조건에서만 허용합니다.
+- `courier`, `trackingNumber` 필수 검증을 추가했습니다.
+- `funding_deliveries` 테이블 마이그레이션을 추가했습니다.
+  - `funding_id` unique 기준으로 배송 정보 1건만 저장합니다.
+  - PATCH는 insert-or-update 방식입니다.
+
+문서/마이그레이션:
+
+- `database/20260530_funding_deliveries.sql`
+- `docs/BREWERY_DASHBOARD_API.md`
+- `docs/DATABASE.md`
+
+검증/주의:
+
+- 로컬 `localhost:5433` SSM 터널이 닫혀 있고 현재 IAM 사용자에 `ssm:StartSession` 권한이 없어 Judam DB 적용은 이 턴에서 완료하지 못했습니다.
+- 서버/Judam DB에서 테스트하려면 `database/20260530_funding_deliveries.sql` 적용이 필요합니다.
+
+### Brewery Dashboard Funding Summary Alignment
+
+완료:
+
+- `GET /api/breweries/me/dashboard/funding-summary`의 active 집계 기준을 `GET /api/breweries/me/dashboard/fundings?status=active` 목록 필터와 동일하게 맞췄습니다.
+- `totalFundingCount`는 대시보드 탭에 표시되는 active + completed 펀딩 수로 계산하도록 정리했습니다.
+- `totalParticipantCount`는 해당 양조장의 active + completed 펀딩에 대한 `orders.order_status = 'PAID'` 고유 참여자 수로 계산합니다.
+- 심사 중/작성 중처럼 active/completed 탭에 포함하지 않는 상태는 `totalFundingCount`에서도 제외합니다.
+
+검증/주의:
+
+- 로컬 `localhost:5433` SSM 터널이 닫혀 있어 실제 Judam DB 응답 3종 스모크 테스트는 이 턴에서 진행하지 못했습니다.
+- `node --check src/services/brewery.service.js`와 `git diff --check`로 코드 검증했습니다.
+
 ## Backlog
 
 - 전체 펀딩 API 통합 테스트 작성 또는 Postman/curl 시나리오 정리

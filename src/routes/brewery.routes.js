@@ -8,6 +8,8 @@ const {
   uploadMyBreweryProfileImage,
   getMyBreweryDashboardFundingSummary,
   getMyBreweryDashboardFundings,
+  getMyBreweryDashboardFundingDelivery,
+  upsertMyBreweryDashboardFundingDelivery,
   getMyBreweryDashboardNotifications,
   createBreweryApplication,
   getBreweryApplications,
@@ -35,6 +37,16 @@ router.patch(
 router.get('/me/dashboard/basic-info', authMiddleware, getMyBreweryDashboardBasicInfo);
 router.get('/me/dashboard/funding-summary', authMiddleware, getMyBreweryDashboardFundingSummary);
 router.get('/me/dashboard/fundings', authMiddleware, getMyBreweryDashboardFundings);
+router.get(
+  '/me/dashboard/fundings/:fundingId/delivery',
+  authMiddleware,
+  getMyBreweryDashboardFundingDelivery,
+);
+router.patch(
+  '/me/dashboard/fundings/:fundingId/delivery',
+  authMiddleware,
+  upsertMyBreweryDashboardFundingDelivery,
+);
 router.get('/me/dashboard/notifications', authMiddleware, getMyBreweryDashboardNotifications);
 
 router.post('/applications', authMiddleware, upload.single('businessLicense'), createBreweryApplication);

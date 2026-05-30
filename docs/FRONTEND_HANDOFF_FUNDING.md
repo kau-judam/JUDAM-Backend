@@ -421,7 +421,7 @@ Allowed document MIME types:
 - `image/jpeg`
 - `image/png`
 
-### Brewery Log Images
+### Brewery Logs
 
 ```http
 POST /api/fundings/:fundingId/brewery-logs
@@ -435,6 +435,38 @@ Fields:
 - `stage`
 - `title`
 - `content`
+- `videoUrl`: optional string URL, not a file upload
+- `imageUrls`: optional JSON string array of existing image URLs to keep
+- `deleteImageUrls`: optional JSON string array of image URLs to remove on PATCH
+
+Notes:
+
+- `videoUrl` and `images` are separate fields.
+- `PATCH` with `videoUrl` as an empty string clears the existing video URL.
+- Response uses `videoUrl`.
+
+Response includes:
+
+```json
+{
+  "breweryLogId": 101,
+  "logId": 101,
+  "fundingId": 1,
+  "stage": "INGREDIENT",
+  "title": "원료 입고 및 세척 완료",
+  "content": "고양 지역 쌀 120kg을 입고하고 선별 세척을 마쳤습니다.",
+  "videoUrl": "https://example.com/video",
+  "imageUrls": ["https://example.com/log-image-1.jpg"],
+  "createdAt": "2026-05-21T10:00:00.000Z",
+  "updatedAt": "2026-05-21T10:00:00.000Z"
+}
+```
+
+Required DB migration:
+
+```text
+database/20260530_brewery_log_video_url.sql
+```
 
 ### Review Images
 
