@@ -30,6 +30,20 @@ const mapUpdatedUserResponse = (user) => ({
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
+const getRequiredUserId = (req, res) => {
+  const userId = Number(req.user?.userId || req.user?.id);
+
+  if (!Number.isInteger(userId) || userId <= 0) {
+    res.status(401).json({
+      status: 401,
+      message: '유효하지 않거나 만료된 토큰입니다.',
+    });
+    return null;
+  }
+
+  return userId;
+};
+
 const getMe = async (req, res) => {
   if (!req.user?.userId) {
     return res.status(401).json({
@@ -201,8 +215,8 @@ const getMyFundingOrders = async (req, res) => {
     });
   }
 
-  // TODO: JWT 완전 연동 후 req.user.userId만 사용
-  const userId = req.user?.userId || 1;
+  const userId = getRequiredUserId(req, res);
+  if (!userId) return;
 
   const values = [userId];
   const conditions = ['o.user_id = $1'];
@@ -303,14 +317,8 @@ const getMyFundingOrders = async (req, res) => {
 
 //찜한 펀딩 목록 조회
 const getMyLikedFundings = async (req, res) => {
-    
-    //if (!req.user?.userId) {
-    //return res.status(401).json({
-     // status: 401,
-      //message: '유효하지 않거나 만료된 토큰입니다.',
-    //});
-    const userId = req.user?.userId || 1; //테스트용
-  
+  const userId = getRequiredUserId(req, res);
+  if (!userId) return;
 
   try {
     const result = await pool.query(
@@ -333,21 +341,28 @@ const getMyLikedFundings = async (req, res) => {
       GROUP BY fp.funding_id
       ORDER BY MAX(my_like.created_at) DESC
       `,
-      [userId]//[req.user.userId]
+      [userId]
     );
 
+    const content = result.rows.map((funding) => ({
+      fundingId: funding.funding_id,
+      title: funding.title,
+      //thumbnailUrl: funding.thumbnail_url,
+      goalAmount: funding.goal_amount,
+      currentAmount: funding.current_amount,
+      startDate: funding.start_date,
+      endDate: funding.end_date,
+      liked: true,
+      likeCount: Number(funding.like_count),
+    }));
+
     return res.status(200).json({
-      content: result.rows.map((funding) => ({
-        fundingId: funding.funding_id,
-        title: funding.title,
-        //thumbnailUrl: funding.thumbnail_url,
-        goalAmount: funding.goal_amount,
-        currentAmount: funding.current_amount,
-        startDate: funding.start_date,
-        endDate: funding.end_date,
-        liked: true,
-        likeCount: Number(funding.like_count),
-      })),
+      status: 200,
+      message: '찜한 펀딩 목록 조회 성공',
+      data: {
+        content,
+      },
+      content,
     });
   } catch (error) {
     console.error(error);
@@ -362,7 +377,8 @@ const getMyLikedFundings = async (req, res) => {
 
 //최근 주문 배송지 불러오기
 const getRecentShippingAddress = async (req, res) => {
-  const userId = req.user?.userId || 1;
+  const userId = getRequiredUserId(req, res);
+  if (!userId) return;
 
   try {
     const result = await pool.query(

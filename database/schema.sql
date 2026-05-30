@@ -290,6 +290,7 @@ ADD COLUMN IF NOT EXISTS volume INT,
 ADD COLUMN IF NOT EXISTS alcohol_percentage DECIMAL(4,1),
 ADD COLUMN IF NOT EXISTS bottle_size VARCHAR(50),
 ADD COLUMN IF NOT EXISTS short_title VARCHAR(100),
+ADD COLUMN IF NOT EXISTS raw_materials JSONB,
 ADD COLUMN IF NOT EXISTS budget_plan TEXT,
 ADD COLUMN IF NOT EXISTS schedule_plan TEXT,
 ADD COLUMN IF NOT EXISTS refund_policy TEXT,
@@ -299,6 +300,7 @@ ADD COLUMN IF NOT EXISTS creator_introduction TEXT;
 ALTER TABLE IF EXISTS funding_drafts
 ADD COLUMN IF NOT EXISTS image_urls TEXT,
 ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
+ADD COLUMN IF NOT EXISTS raw_materials JSONB,
 ADD COLUMN IF NOT EXISTS flavor_notes TEXT,
 ADD COLUMN IF NOT EXISTS budget_plan TEXT,
 ADD COLUMN IF NOT EXISTS schedule_plan TEXT,
@@ -364,6 +366,18 @@ CREATE TABLE IF NOT EXISTS funding_support_options (
   max_per_user INT,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_funding_support_options_funding
+    FOREIGN KEY (funding_id)
+    REFERENCES funding_projects(funding_id)
+    ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS funding_shares (
+  funding_id BIGINT PRIMARY KEY,
+  share_url TEXT NOT NULL,
+  share_count INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_funding_shares_funding
     FOREIGN KEY (funding_id)
     REFERENCES funding_projects(funding_id)
     ON DELETE CASCADE
@@ -608,6 +622,14 @@ CREATE TABLE IF NOT EXISTS reviews (
     REFERENCES orders(order_id)
     ON DELETE SET NULL
 );
+
+ALTER TABLE IF EXISTS reviews
+ALTER COLUMN rating TYPE NUMERIC(2,1)
+USING rating::numeric;
+
+ALTER TABLE IF EXISTS funding_reviews
+ALTER COLUMN rating TYPE NUMERIC(2,1)
+USING rating::numeric;
 
 CREATE TABLE IF NOT EXISTS taste_profiles (
   taste_profile_id BIGSERIAL PRIMARY KEY,

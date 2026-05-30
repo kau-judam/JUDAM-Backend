@@ -11,6 +11,43 @@ const normalizeNumericOrderId = (orderId) => {
   return Number.isInteger(numericOrderId) && numericOrderId > 0 ? numericOrderId : null;
 };
 
+const toSafeNumber = (value, fallback = 0) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+};
+
+const calculateFundingAmountFromOrder = (order) => {
+  const paidAmount = toSafeNumber(order.total_amount);
+  const quantity = Math.max(1, toSafeNumber(order.quantity, 1));
+  const rewardAmount = Math.max(0, toSafeNumber(order.price_per_bottle) * quantity);
+  const shippingFee = Math.max(0, toSafeNumber(order.shipping_fee));
+  const donationAmount = toSafeNumber(order.donation_amount);
+  const legacyAdditionalSupportAmount = toSafeNumber(order.additional_support_amount);
+  const additionalSupportAmount = Math.max(
+    0,
+    donationAmount > 0 ? donationAmount : legacyAdditionalSupportAmount
+  );
+  const calculatedFundingAmount = rewardAmount + additionalSupportAmount;
+  const fundingAmount =
+    calculatedFundingAmount > 0
+      ? calculatedFundingAmount
+      : Math.max(0, paidAmount - shippingFee);
+
+  return {
+    paidAmount,
+    fundingAmount,
+    rewardAmount,
+    subtotalAmount: rewardAmount,
+    shippingFee,
+    additionalSupportAmount,
+  };
+};
+
+const isMockTossPaymentAllowed = () =>
+  process.env.TOSS_ALLOW_MOCK_PAYMENT === 'true'
+  || process.env.NODE_ENV === 'test'
+  || process.env.NODE_ENV === 'development';
+
 const hasTableColumn = async (client, tableName, columnName) => {
   const { rows } = await client.query(
     `
@@ -56,6 +93,11 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
         order_id,
         funding_id,
         total_amount,
+        quantity,
+        price_per_bottle,
+        shipping_fee,
+        donation_amount,
+        additional_support_amount,
         order_status
       FROM orders
       WHERE order_id = $1
@@ -71,6 +113,7 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
     }
 
     const order = orderResult.rows[0];
+    const fundingAmounts = calculateFundingAmountFromOrder(order);
 
     if (order.order_status === 'PAID') {
       const error = new Error('이미 결제 완료된 주문입니다.');
@@ -128,6 +171,12 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
     let tossPayment = null;
 
     if (String(paymentKey).startsWith('test_')) {
+      if (!isMockTossPaymentAllowed()) {
+        const error = new Error('운영 환경에서는 mock paymentKey를 사용할 수 없습니다.');
+        error.status = 400;
+        throw error;
+      }
+
       tossPayment = {
         paymentKey,
         orderId: tossOrderId,
@@ -156,6 +205,21 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       );
 
       tossPayment = tossResponse.data;
+    }
+
+    if (tossPayment?.status && tossPayment.status !== 'DONE') {
+      const error = new Error('토스 결제가 완료 상태가 아닙니다.');
+      error.status = 400;
+      throw error;
+    }
+
+    if (
+      tossPayment?.totalAmount !== undefined &&
+      Number(tossPayment.totalAmount) !== numericAmount
+    ) {
+      const error = new Error('토스 승인 금액과 주문 금액이 일치하지 않습니다.');
+      error.status = 400;
+      throw error;
     }
 
     const paymentResult = await client.query(
@@ -194,7 +258,7 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
             supporter_count = COALESCE(supporter_count, 0) + 1,
             updated_at = CURRENT_TIMESTAMP
           WHERE funding_id = $2
-          RETURNING funding_id, current_amount, supporter_count
+          RETURNING funding_id, current_amount, goal_amount, supporter_count
           `
         : `
           UPDATE funding_projects
@@ -202,13 +266,19 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
             current_amount = current_amount + $1,
             updated_at = CURRENT_TIMESTAMP
           WHERE funding_id = $2
-          RETURNING funding_id, current_amount, NULL::int AS supporter_count
+          RETURNING funding_id, current_amount, goal_amount, NULL::int AS supporter_count
           `,
-      [numericAmount, order.funding_id]
+      [fundingAmounts.fundingAmount, order.funding_id]
     );
 
     const payment = paymentResult.rows[0];
     const funding = fundingResult.rows[0] || {};
+    const currentAmount = Number(funding.current_amount || 0);
+    const targetAmount = Number(funding.goal_amount || 0);
+    const achievementRate =
+      targetAmount > 0
+        ? Math.floor((currentAmount / targetAmount) * 100)
+        : 0;
 
     await client.query('COMMIT');
 
@@ -234,7 +304,15 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
       paymentStatus: payment.payment_status,
       orderStatus: 'PAID',
       amount: Number(payment.amount),
-      currentAmount: Number(funding.current_amount || 0),
+      paidAmount: fundingAmounts.paidAmount,
+      fundingAmount: fundingAmounts.fundingAmount,
+      rewardAmount: fundingAmounts.rewardAmount,
+      subtotalAmount: fundingAmounts.subtotalAmount,
+      shippingFee: fundingAmounts.shippingFee,
+      additionalSupportAmount: fundingAmounts.additionalSupportAmount,
+      currentAmount,
+      targetAmount,
+      achievementRate,
       supporterCount: funding.supporter_count === null || funding.supporter_count === undefined
         ? null
         : Number(funding.supporter_count),

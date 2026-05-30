@@ -11,6 +11,7 @@ const {
   getMyBreweryDashboardFundingDelivery,
   upsertMyBreweryDashboardFundingDelivery,
   getMyBreweryDashboardNotifications,
+  verifyBreweryAccount,
   createBreweryApplication,
   getBreweryApplications,
   getMyBreweryApplication,
@@ -48,6 +49,8 @@ router.patch(
   upsertMyBreweryDashboardFundingDelivery,
 );
 router.get('/me/dashboard/notifications', authMiddleware, getMyBreweryDashboardNotifications);
+
+router.post('/accounts/verify', authMiddleware, verifyBreweryAccount);
 
 router.post('/applications', authMiddleware, upload.single('businessLicense'), createBreweryApplication);
 router.get('/applications', authMiddleware, getBreweryApplications);

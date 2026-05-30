@@ -1,5 +1,29 @@
 const pool = require('../db');
 
+const normalizeWriterRole = (role) => String(role || 'USER').toUpperCase();
+const isBreweryRole = (role) => normalizeWriterRole(role).startsWith('BREWERY');
+
+const mapWriterFields = (row = {}) => {
+  const writerId = row.user_id === null || row.user_id === undefined
+    ? null
+    : Number(row.user_id);
+  const writerRole = normalizeWriterRole(row.writer_role);
+
+  return {
+    writerId,
+    writer_id: writerId,
+    userId: writerId,
+    user_id: writerId,
+    writerNickname: row.user_nickname || '사용자',
+    writerProfileImage: row.author_profile_image || null,
+    profileImage: row.author_profile_image || null,
+    writerRole,
+    role: writerRole,
+    isBrewery: isBreweryRole(writerRole),
+    writerIsBrewery: isBreweryRole(writerRole),
+  };
+};
+
 const assertPostExists = async (client, postId) => {
   const result = await client.query('SELECT 1 FROM posts WHERE post_id = $1', [postId]);
   if (result.rowCount === 0) {
@@ -24,6 +48,7 @@ const getCommentsByPostId = async (postId, page, size, userId) => {
        pc.user_id,
        u.nickname        AS user_nickname,
        u.profile_image   AS author_profile_image,
+       u.role            AS writer_role,
        pc.content,
        pc.like_count,
        (SELECT COUNT(*)::INT FROM post_comments WHERE parent_comment_id = pc.comment_id) AS reply_count,
@@ -32,7 +57,7 @@ const getCommentsByPostId = async (postId, page, size, userId) => {
        CASE WHEN pcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
        CASE WHEN pc.user_id = $4 THEN true ELSE false END         AS is_mine
      FROM post_comments pc
-     JOIN users u ON u.user_id = pc.user_id
+     LEFT JOIN users u ON u.user_id = pc.user_id
      LEFT JOIN post_comment_likes pcl
             ON pcl.comment_id = pc.comment_id AND pcl.user_id = $4
      WHERE pc.post_id = $1 AND pc.parent_comment_id IS NULL
@@ -51,9 +76,10 @@ const getCommentsByPostId = async (postId, page, size, userId) => {
 
   const comments = dataResult.rows.map((c) => ({
     comment_id:           Number(c.comment_id),
-    user_id:              Number(c.user_id),
+    user_id:              c.user_id === null || c.user_id === undefined ? null : Number(c.user_id),
     nickname:             c.user_nickname,
     author_profile_image: c.author_profile_image,
+    ...mapWriterFields(c),
     content:              c.content,
     like_count:           Number(c.like_count),
     reply_count:          Number(c.reply_count),
@@ -88,7 +114,7 @@ const createComment = async (postId, content, user) => {
     );
 
     const nicknameResult = await client.query(
-      'SELECT nickname FROM users WHERE user_id = $1',
+      'SELECT nickname, profile_image, role FROM users WHERE user_id = $1',
       [user.id]
     );
 
@@ -100,6 +126,12 @@ const createComment = async (postId, content, user) => {
       post_id:    postId,
       user_id:    Number(user.id),
       nickname:   nicknameResult.rows[0]?.nickname || `user_${user.id}`,
+      ...mapWriterFields({
+        user_id: user.id,
+        user_nickname: nicknameResult.rows[0]?.nickname,
+        author_profile_image: nicknameResult.rows[0]?.profile_image,
+        writer_role: nicknameResult.rows[0]?.role,
+      }),
       content:    c.content,
       like_count: Number(c.like_count),
       created_at: c.created_at,
@@ -207,13 +239,14 @@ const getRepliesByCommentId = async (postId, parentCommentId, page, size, userId
        pc.user_id,
        u.nickname        AS user_nickname,
        u.profile_image   AS author_profile_image,
+       u.role            AS writer_role,
        pc.content,
        pc.created_at,
        pc.updated_at,
        CASE WHEN pcl.like_id IS NOT NULL THEN true ELSE false END AS is_liked,
        CASE WHEN pc.user_id = $4 THEN true ELSE false END         AS is_mine
      FROM post_comments pc
-     JOIN users u ON u.user_id = pc.user_id
+     LEFT JOIN users u ON u.user_id = pc.user_id
      LEFT JOIN post_comment_likes pcl
             ON pcl.comment_id = pc.comment_id AND pcl.user_id = $4
      WHERE pc.parent_comment_id = $1
@@ -232,9 +265,10 @@ const getRepliesByCommentId = async (postId, parentCommentId, page, size, userId
 
   const replies = dataResult.rows.map((c) => ({
     comment_id:           Number(c.comment_id),
-    user_id:              Number(c.user_id),
+    user_id:              c.user_id === null || c.user_id === undefined ? null : Number(c.user_id),
     nickname:             c.user_nickname,
     author_profile_image: c.author_profile_image,
+    ...mapWriterFields(c),
     content:              c.content,
     is_liked:             c.is_liked,
     is_mine:              c.is_mine,
@@ -262,7 +296,7 @@ const createReply = async (postId, parentCommentId, content, user) => {
   }
 
   const nicknameResult = await pool.query(
-    'SELECT nickname FROM users WHERE user_id = $1',
+    'SELECT nickname, profile_image, role FROM users WHERE user_id = $1',
     [user.id]
   );
   const nickname = nicknameResult.rows[0]?.nickname || `user_${user.id}`;
@@ -286,6 +320,12 @@ const createReply = async (postId, parentCommentId, content, user) => {
     parent_comment_id:  parentCommentId,
     user_id:            Number(user.id),
     nickname:           nickname,
+    ...mapWriterFields({
+      user_id: user.id,
+      user_nickname: nickname,
+      author_profile_image: nicknameResult.rows[0]?.profile_image,
+      writer_role: nicknameResult.rows[0]?.role,
+    }),
     content:            c.content,
     created_at:         c.created_at,
     parent_reply_count: Number(replyCountResult.rows[0].reply_count),

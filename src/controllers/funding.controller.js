@@ -5,7 +5,10 @@ const {
   isAiFundingRegistrationStatus,
   registerFundingProjectToAiPool,
 } = require('../services/funding.service');
-const { updateAiTasteProfile } = require('../services/ai.service');
+const {
+  generateFundingDraftAiImageAndUpload,
+  updateAiTasteProfile,
+} = require('../services/ai.service');
 
 const AI_TASTE_RATING_KEYS = [
   'sweetness',
@@ -141,6 +144,74 @@ const parseFundingListField = (value, fallback = []) => {
   return fallback;
 };
 
+const normalizeRawMaterialItem = (material) => {
+  if (material === undefined || material === null || material === '') {
+    return null;
+  }
+
+  if (typeof material !== 'object' || Array.isArray(material)) {
+    const name = toTrimmedString(material);
+    return name ? { name, origin: null } : null;
+  }
+
+  const name = toTrimmedString(
+    material.name
+      ?? material.ingredient
+      ?? material.mainIngredient
+      ?? material.main_ingredient
+      ?? material.rawMaterial
+      ?? material.raw_material
+  );
+  const origin = toTrimmedString(
+    material.origin
+      ?? material.originName
+      ?? material.origin_name
+      ?? material.countryOfOrigin
+      ?? material.country_of_origin
+      ?? material.country
+      ?? material.region
+  );
+
+  if (!name && !origin) {
+    return null;
+  }
+
+  return {
+    ...material,
+    name: name || null,
+    origin: origin || null,
+  };
+};
+
+const parseFundingRawMaterialsField = (value, fallback = []) => {
+  if (value === undefined || value === null || value === '') return fallback;
+
+  if (Array.isArray(value)) {
+    const materials = value.map(normalizeRawMaterialItem).filter(Boolean);
+    return materials.length > 0 ? materials : fallback;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parseFundingRawMaterialsField(parsed, fallback);
+    } catch (error) {
+      const name = toTrimmedString(value);
+      return name ? [{ name, origin: null }] : fallback;
+    }
+  }
+
+  if (typeof value === 'object') {
+    const material = normalizeRawMaterialItem(value);
+    return material ? [material] : fallback;
+  }
+
+  return fallback;
+};
+
+const normalizeRawMaterialsStorageValue = (value) =>
+  JSON.stringify(parseFundingRawMaterialsField(value, []));
+
 const stringifyJsonField = (value, fallback = []) => {
   if (value === undefined || value === null) {
     return JSON.stringify(fallback);
@@ -258,6 +329,63 @@ const getAuthUserRole = (user) =>
   toTrimmedString(user?.role || user?.userRole || user?.type).toUpperCase();
 
 const isAdminUser = (user) => getAuthUserRole(user) === 'ADMIN';
+
+const findPaidFundingOrder = async (fundingId, userId) => {
+  if (!fundingId || !userId) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT order_id
+    FROM orders
+    WHERE funding_id = $1
+      AND user_id = $2
+      AND order_status = 'PAID'
+    ORDER BY updated_at DESC, created_at DESC, order_id DESC
+    LIMIT 1
+    `,
+    [Number(fundingId), Number(userId)]
+  );
+
+  return rows[0] || null;
+};
+
+const findFundingReviewByUser = async (fundingId, userId) => {
+  if (!fundingId || !userId) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT review_id
+    FROM funding_reviews
+    WHERE funding_id = $1
+      AND user_id = $2
+    ORDER BY created_at DESC, review_id DESC
+    LIMIT 1
+    `,
+    [Number(fundingId), Number(userId)]
+  );
+
+  return rows[0] || null;
+};
+
+const getFundingReviewWriteState = async (fundingId, userId) => {
+  const paidOrder = await findPaidFundingOrder(fundingId, userId);
+  const existingReview = await findFundingReviewByUser(fundingId, userId);
+
+  return {
+    paidOrder,
+    existingReview,
+    canWriteReview: Boolean(paidOrder) && !existingReview,
+  };
+};
+
+const canWriteFundingReview = async (fundingId, userId) => {
+  const { canWriteReview } = await getFundingReviewWriteState(fundingId, userId);
+  return canWriteReview;
+};
 
 const handleAuthorizationError = (res, error) => {
   if (![401, 403, 404].includes(error.status)) {
@@ -569,6 +697,97 @@ const normalizeFundingImageUrlsInput = (value) => {
   return [];
 };
 
+const parseReviewStringArrayField = (value, fieldName) => {
+  const invalidMessage = `${fieldName} 형식이 올바르지 않습니다.`;
+
+  const normalizeItems = (items) => {
+    if (!Array.isArray(items)) {
+      throw createHttpError(400, invalidMessage);
+    }
+
+    return items
+      .map((item) => {
+        if (item === undefined || item === null) {
+          return '';
+        }
+
+        if (typeof item === 'object') {
+          throw createHttpError(400, invalidMessage);
+        }
+
+        return String(item).trim();
+      })
+      .filter(Boolean);
+  };
+
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return normalizeItems(value);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return [];
+    }
+
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        return normalizeItems(JSON.parse(trimmed));
+      } catch (error) {
+        if (error.status) {
+          throw error;
+        }
+
+        throw createHttpError(400, invalidMessage);
+      }
+    }
+
+    return normalizeItems(trimmed.split(','));
+  }
+
+  throw createHttpError(400, invalidMessage);
+};
+
+const normalizeReviewTagsInput = (value) =>
+  uniqueValues(parseReviewStringArrayField(value, 'tags'));
+
+const normalizeReviewImageUrlsInput = (value, fieldName = 'imageUrls') =>
+  uniqueValues(
+    parseReviewStringArrayField(value, fieldName)
+      .map(normalizePublicImageUrl)
+      .filter(Boolean)
+  );
+
+const REVIEW_RATING_ERROR_MESSAGE = 'rating은 0~5 사이의 0.5 단위 숫자여야 합니다.';
+
+const normalizeReviewRatingInput = (value, { required = false } = {}) => {
+  if (value === undefined || value === null || value === '') {
+    if (required) {
+      throw createHttpError(400, REVIEW_RATING_ERROR_MESSAGE);
+    }
+
+    return null;
+  }
+
+  const numberValue = Number(value);
+
+  if (
+    !Number.isFinite(numberValue) ||
+    numberValue < 0 ||
+    numberValue > 5 ||
+    !Number.isInteger(numberValue * 2)
+  ) {
+    throw createHttpError(400, REVIEW_RATING_ERROR_MESSAGE);
+  }
+
+  return Math.round(numberValue * 10) / 10;
+};
+
 const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
   const parsedImageUrls = normalizeFundingImageUrlsInput(imageUrlsValue);
   const normalizedThumbnailUrl = normalizePublicImageUrl(thumbnailUrl) || parsedImageUrls[0] || null;
@@ -589,6 +808,113 @@ const mapFundingImageUrls = (imageUrls = []) =>
     imageUrl,
     displayOrder: index + 1,
   }));
+
+const extractFundingAiImageFlavorTags = (value) => {
+  const parsed = parseJsonFieldPreserveText(value, null);
+
+  if (Array.isArray(parsed) || typeof parsed === 'string') {
+    return parseFundingListField(parsed);
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    return parseFundingListField(
+      parsed.flavorTags ||
+      parsed.flavor_tags ||
+      parsed.flavorNotes ||
+      parsed.flavor_notes ||
+      []
+    );
+  }
+
+  return [];
+};
+
+const normalizeFundingAiImagePayload = (body = {}, draft = {}) => {
+  const requestFlavorTags = getBodyValue(body, ['flavorTags', 'flavor_tags']);
+  const flavorTags = requestFlavorTags !== undefined
+    ? parseFundingListField(requestFlavorTags)
+    : uniqueValues([
+        ...extractFundingAiImageFlavorTags(draft.flavor_notes),
+        ...parseFundingListField(draft.tags),
+      ]);
+
+  return {
+    name: toTrimmedString(
+      getBodyValue(body, ['name']) ||
+      draft.title ||
+      draft.short_title
+    ),
+    description: toTrimmedString(
+      getBodyValue(body, ['description']) ||
+      draft.summary ||
+      draft.introduction
+    ),
+    flavor_tags: flavorTags,
+    region: toTrimmedString(
+      getBodyValue(body, ['region']) ||
+      draft.region ||
+      draft.business_address
+    ),
+  };
+};
+
+const buildFundingSupportOptionsResponse = ({
+  options = [],
+  funding = {},
+  mainIngredient = null,
+  subIngredients = [],
+  ingredients = [],
+}) => {
+  const mappedOptions = (options || []).map((option) => ({
+    optionId: Number(option.option_id),
+    name: option.name,
+    price: Number(option.price || 0),
+    description: option.description,
+    volume: option.volume ?? funding.volume,
+    alcohol: option.alcohol ?? funding.alcohol_percentage,
+    alcoholPercentage: option.alcohol ?? funding.alcohol_percentage,
+    expectedDeliveryDate: funding.expected_delivery_date,
+    mainIngredient,
+    primaryIngredient: mainIngredient,
+    subIngredient: subIngredients[0] || null,
+    subIngredients,
+    ingredients,
+    stock: option.stock,
+    remainingStock: option.remaining_stock,
+    maxPerUser: option.max_per_user,
+    generated: false,
+  }));
+
+  if (mappedOptions.length > 0) {
+    return mappedOptions;
+  }
+
+  const fallbackPrice = Number(funding.price_per_bottle);
+
+  if (!Number.isFinite(fallbackPrice) || fallbackPrice <= 0) {
+    return [];
+  }
+
+  return [{
+    optionId: null,
+    name: '기본 후원 옵션',
+    price: fallbackPrice,
+    description: funding.summary || funding.description || null,
+    volume: funding.volume ?? null,
+    alcohol: funding.alcohol_percentage ?? null,
+    alcoholPercentage: funding.alcohol_percentage ?? null,
+    expectedDeliveryDate: funding.expected_delivery_date ?? null,
+    mainIngredient,
+    primaryIngredient: mainIngredient,
+    subIngredient: subIngredients[0] || null,
+    subIngredients,
+    ingredients,
+    stock: funding.total_quantity ?? null,
+    remainingStock: funding.total_quantity ?? null,
+    maxPerUser: null,
+    generated: true,
+  }];
+};
 
 const PLAN_GUIDES = {
   budgetPlanGuide: '프로젝트 예산은 "- 프로젝트 예산임: 25만원" 형식으로 작성하면 UI에 잘 반영됩니다.',
@@ -722,11 +1048,13 @@ const shouldExposeBankVerificationCode = () =>
   || process.env.NODE_ENV !== 'production';
 
 const normalizeComparableAccountNumber = (accountNumber) =>
-  toTrimmedString(accountNumber).replace(/[\s-]/g, '');
+  toTrimmedString(accountNumber).replace(/\D/g, '');
 
 const getBankVerificationFields = (body = {}) => ({
   bankName: toTrimmedString(getBodyValue(body, ['bankName', 'bank_name'])),
-  accountNumber: toTrimmedString(getBodyValue(body, ['accountNumber', 'account_number'])),
+  accountNumber: normalizeComparableAccountNumber(
+    getBodyValue(body, ['accountNumber', 'account_number'])
+  ),
   normalizedAccountNumber: normalizeComparableAccountNumber(
     getBodyValue(body, ['accountNumber', 'account_number'])
   ),
@@ -775,10 +1103,27 @@ const mapFundingDocument = (document) => ({
   createdAt: document.created_at,
 });
 
+const mapReviewImageUrls = (value) => {
+  try {
+    return normalizeReviewImageUrlsInput(value);
+  } catch (error) {
+    return [];
+  }
+};
+
+const mapReviewTags = (value) => {
+  try {
+    return normalizeReviewTagsInput(value);
+  } catch (error) {
+    return [];
+  }
+};
+
 const mapFundingReview = (review) => {
   const writerId = review.user_id === null || review.user_id === undefined
     ? null
     : Number(review.user_id);
+  const imageUrls = mapReviewImageUrls(review.image_urls);
 
   return {
     reviewId: Number(review.review_id),
@@ -794,20 +1139,40 @@ const mapFundingReview = (review) => {
     role: normalizeWriterRole(review.writer_role),
     isBrewery: isBreweryWriterRole(review.writer_role),
     writerIsBrewery: isBreweryWriterRole(review.writer_role),
+    isProjectOwner: Boolean(review.is_project_owner),
     rating: Number(review.rating),
     title: review.title,
     content: review.content,
     detailReview: review.content,
-    imageUrls: parseJsonField(review.image_urls),
+    imageUrls,
+    images: imageUrls.map((imageUrl, index) => ({
+      imageId: index + 1,
+      imageUrl,
+      displayOrder: index + 1,
+    })),
     mood: review.mood,
     pairing: review.pairing,
-    tags: parseJsonField(review.tags),
+    tags: mapReviewTags(review.tags),
     recordVisibility: review.record_visibility,
     showRecord: review.record_visibility,
     likeCount: Number(review.like_count || 0),
     liked: Boolean(review.liked),
     createdAt: review.created_at,
     updatedAt: review.updated_at,
+  };
+};
+
+const buildFundingReviewResponse = ({ status, message, review, aiTasteUpdate = null }) => {
+  const data = {
+    ...mapFundingReview(review),
+    ...(aiTasteUpdate ? { aiTasteUpdate } : {}),
+  };
+
+  return {
+    ...data,
+    status,
+    message,
+    data,
   };
 };
 
@@ -831,6 +1196,7 @@ const mapFundingReviewComment = (comment) => {
     role: normalizeWriterRole(comment.writer_role),
     isBrewery: isBreweryWriterRole(comment.writer_role),
     writerIsBrewery: isBreweryWriterRole(comment.writer_role),
+    isProjectOwner: Boolean(comment.is_project_owner),
     content: comment.content,
     likeCount: Number(comment.like_count || 0),
     liked: Boolean(comment.liked),
@@ -876,7 +1242,7 @@ const resolveFundingId = async (id) => {
 const buildFundingDraftPayload = (draft, documents = []) => {
   const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
   const subIngredients = parseFundingListField(draft.sub_ingredients);
-  const rawMaterials = parseFundingListField(draft.raw_materials);
+  const rawMaterials = parseFundingRawMaterialsField(draft.raw_materials);
   const tags = parseJsonField(draft.tags);
   const budgetPlan = parseOriginalTextField(draft.budget_plan);
   const schedulePlan = parseOriginalTextField(draft.schedule_plan);
@@ -1217,12 +1583,12 @@ const buildFundingDraftPatchFromPayload = (bodyPayload = {}, currentDraft = {}) 
   const imageCandidate = getPayloadCandidate(
     bodyPayload,
     ['imageUrls', 'image_urls', 'images'],
-    ['basicInfo']
+    ['basicInfo', 'images']
   );
   const thumbnailCandidate = getPayloadCandidate(
     bodyPayload,
     ['thumbnailUrl', 'thumbnail_url', 'imageUrl', 'image_url'],
-    ['basicInfo']
+    ['basicInfo', 'images']
   );
 
   if (imageCandidate.exists) {
@@ -1310,7 +1676,7 @@ const buildFundingDraftPatchFromPayload = (bodyPayload = {}, currentDraft = {}) 
 
   addFromPayload('product_type', ['productType', 'product_type'], ['legalInfo'], normalizeDraftTextValue, 57);
   addFromPayload('volume', ['volume'], ['legalInfo'], normalizeDraftNumberValue, 57);
-  addFromPayload('raw_materials', ['rawMaterials', 'raw_materials'], ['legalInfo'], normalizeJsonStorageValue, 57);
+  addFromPayload('raw_materials', ['rawMaterials', 'raw_materials'], ['legalInfo'], normalizeRawMaterialsStorageValue, 57);
 
   const sweetnessCandidate = getPayloadCandidate(bodyPayload, ['sweetness'], ['tasteProfile']);
   const acidityCandidate = getPayloadCandidate(bodyPayload, ['acidity'], ['tasteProfile']);
@@ -1504,6 +1870,7 @@ const FUNDING_PROJECT_MANAGEMENT_COLUMNS = [
 ];
 
 let fundingProjectManagementColumnsCache = null;
+let fundingProjectRawMaterialsColumnCache = null;
 
 const getFundingProjectManagementColumns = async () => {
   if (fundingProjectManagementColumnsCache) {
@@ -1557,6 +1924,26 @@ const getBreweryLogOptionalColumns = async () => {
   return breweryLogOptionalColumnsCache;
 };
 
+const getFundingProjectRawMaterialsColumn = async () => {
+  if (fundingProjectRawMaterialsColumnCache) {
+    return fundingProjectRawMaterialsColumnCache;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT data_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'funding_projects'
+      AND column_name = 'raw_materials'
+    LIMIT 1
+    `
+  );
+
+  fundingProjectRawMaterialsColumnCache = rows[0] || null;
+  return fundingProjectRawMaterialsColumnCache;
+};
+
 const normalizeBreweryLogVideoUrl = (value) => {
   if (value === undefined) {
     return undefined;
@@ -1596,6 +1983,11 @@ const mapBreweryLogResponse = (log, extra = {}) => ({
 
 const recoverFundingDraftFromProject = async (fundingId) => {
   const managementColumns = await getFundingProjectManagementColumns();
+  const rawMaterialsColumn = await getFundingProjectRawMaterialsColumn();
+  const projectRawMaterialsSelect = rawMaterialsColumn
+    ? 'fp.raw_materials::text AS project_raw_materials'
+    : 'NULL::text AS project_raw_materials';
+
   const { rows } = await pool.query(
     `
     SELECT
@@ -1640,6 +2032,7 @@ const recoverFundingDraftFromProject = async (fundingId) => {
       tp.carbonation,
       tp.alcohol_intensity,
       tp.flavor_notes,
+      ${projectRawMaterialsSelect},
       support_options.total_stock,
       ${projectManagementColumnSelect(managementColumns, 'budget_plan', 'project_budget_plan')},
       ${projectManagementColumnSelect(managementColumns, 'schedule_plan', 'project_schedule_plan')},
@@ -1820,7 +2213,26 @@ const recoverFundingDraftFromProject = async (fundingId) => {
     ]
   );
 
-  return result.rows[0] || null;
+  const recoveredDraft = result.rows[0] || null;
+  const recoveredRawMaterials = parseFundingRawMaterialsField(funding.project_raw_materials);
+
+  if (recoveredDraft && recoveredRawMaterials.length > 0) {
+    const updated = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        raw_materials = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $2
+      RETURNING *
+      `,
+      [JSON.stringify(recoveredRawMaterials), Number(recoveredDraft.draft_id)]
+    );
+
+    return updated.rows[0] || recoveredDraft;
+  }
+
+  return recoveredDraft;
 };
 
 const hydrateFundingDraftManagementFieldsFromProject = async (draft) => {
@@ -1952,7 +2364,7 @@ const findAndLinkFundingDraftByFundingId = async (fundingId) => {
 const syncFundingProjectFieldsFromDraft = async (draftId) => {
   const { rows } = await pool.query(
     `
-    SELECT funding_id, image_urls
+    SELECT funding_id, image_urls, raw_materials
     FROM funding_drafts
     WHERE draft_id = $1
       AND funding_id IS NOT NULL
@@ -2003,6 +2415,29 @@ const syncFundingProjectFieldsFromDraft = async (draftId) => {
       `,
       [
         normalizeJsonStorageValue(normalizeFundingImageUrlsInput(draft.image_urls).slice(0, 5), []),
+        Number(draft.funding_id),
+      ]
+    );
+  }
+
+  const rawMaterialsColumn = await getFundingProjectRawMaterialsColumn();
+  const normalizedRawMaterials = parseFundingRawMaterialsField(draft.raw_materials);
+
+  if (rawMaterialsColumn && normalizedRawMaterials.length > 0) {
+    const rawMaterialsAssignment = ['json', 'jsonb'].includes(rawMaterialsColumn.data_type)
+      ? '$1::jsonb'
+      : '$1';
+
+    await pool.query(
+      `
+      UPDATE funding_projects
+      SET
+        raw_materials = ${rawMaterialsAssignment},
+        updated_at = CURRENT_TIMESTAMP
+      WHERE funding_id = $2
+      `,
+      [
+        JSON.stringify(normalizedRawMaterials),
         Number(draft.funding_id),
       ]
     );
@@ -2103,14 +2538,20 @@ const storeUploadedFile = async (file, folder, ownerId = 'anonymous') => {
     return null;
   }
 
+  const strictS3 = process.env.FILE_UPLOAD_STRICT_S3 === 'true';
+
   if (process.env.AWS_S3_BUCKET && process.env.AWS_REGION) {
     try {
       return await uploadFileToS3(file.buffer, file.originalname, file.mimetype, ownerId);
     } catch (error) {
-      if (process.env.FILE_UPLOAD_STRICT_S3 === 'true') {
+      if (strictS3) {
         throw error;
       }
     }
+  }
+
+  if (strictS3) {
+    throw new Error('S3 업로드 설정이 필요합니다.');
   }
 
   const base64 = file.buffer.toString('base64');
@@ -2472,7 +2913,7 @@ const updateFundingDraft = async (req, res) => {
     ? parseFundingListField(subIngredients)
     : undefined;
   const normalizedImageUrls = hasImageUrls
-    ? parseFundingListField(imageUrls)
+    ? normalizeFundingImageUrlsInput(imageUrls)
     : undefined;
   const normalizedTags = hasTags
     ? parseFundingListField(tags)
@@ -3002,14 +3443,14 @@ const saveLegalInfo = async (req, res) => {
     alcoholPercentage,
     rawMaterials,
   } = req.body;
+  const normalizedRawMaterials = parseFundingRawMaterialsField(rawMaterials);
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
     !productType ||
     volume === undefined ||
-    alcoholPercentage === undefined ||
-    !Array.isArray(rawMaterials)
+    alcoholPercentage === undefined
   ) {
     return res.status(400).json({
       status: 400,
@@ -3028,14 +3469,14 @@ const saveLegalInfo = async (req, res) => {
     });
   }
 
-  if (rawMaterials.length === 0) {
+  if (normalizedRawMaterials.length === 0) {
     return res.status(400).json({
       status: 400,
       message: '최소 1개 이상의 원재료를 입력해야 합니다.',
     });
   }
 
-  const hasInvalidMaterial = rawMaterials.some(
+  const hasInvalidMaterial = normalizedRawMaterials.some(
     (material) => !material.name || !material.origin
   );
 
@@ -3073,7 +3514,7 @@ const saveLegalInfo = async (req, res) => {
         productType,
         Number(volume),
         Number(alcoholPercentage),
-        JSON.stringify(rawMaterials),
+        JSON.stringify(normalizedRawMaterials),
         Number(draftId),
       ]
     );
@@ -3094,7 +3535,7 @@ const saveLegalInfo = async (req, res) => {
       productType: draft.product_type,
       volume: draft.volume,
       alcoholPercentage: draft.alcohol_percentage,
-      rawMaterials: parseJsonField(draft.raw_materials, []),
+      rawMaterials: parseFundingRawMaterialsField(draft.raw_materials),
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
       message: '법적 고시 정보가 저장되었습니다.',
@@ -3463,6 +3904,7 @@ const saveBreweryInfo = async (req, res) => {
 
   const normalizedBusinessNumber = businessRegistrationNumber.replace(/\D/g, '');
   const normalizedPhone = contactPhone.replace(/\D/g, '');
+  const normalizedAccountNumber = normalizeComparableAccountNumber(accountNumber);
 
   if (!/^\d{10}$/.test(normalizedBusinessNumber)) {
     return res.status(400).json({
@@ -3475,6 +3917,13 @@ const saveBreweryInfo = async (req, res) => {
     return res.status(400).json({
       status: 400,
       message: '전화번호 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (normalizedAccountNumber.length < 8) {
+    return res.status(400).json({
+      status: 400,
+      message: '계좌번호는 숫자 8자리 이상이어야 합니다.',
     });
   }
 
@@ -3491,14 +3940,14 @@ const saveBreweryInfo = async (req, res) => {
         WHERE verification_token = $1
           AND status = 'VERIFIED'
           AND bank_name = $2
-          AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $3
+          AND regexp_replace(account_number, '[^0-9]', '', 'g') = $3
           AND account_holder = $4
         LIMIT 1
         `,
         [
           bankVerificationToken,
           bankName,
-          normalizeComparableAccountNumber(accountNumber),
+          normalizedAccountNumber,
           accountHolder,
         ]
       );
@@ -3550,7 +3999,7 @@ const saveBreweryInfo = async (req, res) => {
         contactEmail,
         contactPhone,
         bankName,
-        accountNumber,
+        normalizedAccountNumber,
         accountHolder,
         breweryProfileImageUrl || null,
         breweryBio || null,
@@ -3616,73 +4065,61 @@ const loadBreweryInfo = async (req, res) => {
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
       status: 400,
-      message: '임시저장 프로젝트 ID가 올바르지 않습니다.',
+      message: '요청한 draftId가 유효하지 않습니다.',
     });
   }
 
   try {
     if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
 
-    const result = await pool.query(
+    const { rows } = await pool.query(
       `
       SELECT
         fd.brewery_id,
         fd.brewery_name,
-        creator_name,
-        profile_image_url,
-        creator_introduction,
-        business_name,
-        business_registration_number,
-        representative_name,
-        business_address,
-        business_address_detail,
-        contact_email,
-        contact_phone,
-        bank_name,
-        account_number,
-        account_holder,
-        phone_verified,
-        account_verified,
-        business_type,
-        business_category,
-        business_item,
-        tax_email,
-        identity_document_url,
-        business_registration_file_url,
+        fd.creator_name,
+        fd.creator_introduction,
+        fd.business_name,
+        fd.business_registration_number,
+        fd.representative_name,
+        fd.business_address,
+        fd.business_address_detail,
+        fd.contact_email,
+        fd.contact_phone,
+        fd.bank_name,
+        fd.account_number,
+        fd.account_holder,
+        fd.phone_verified,
+        fd.account_verified,
+        fd.business_type,
+        fd.business_category,
+        fd.business_item,
+        fd.identity_document_url,
+        fd.business_registration_file_url,
+        u.email AS user_email,
+        u.phone_number AS user_phone_number,
+        ba.application_id AS approved_application_id,
         ba.brewery_name AS approved_brewery_name,
         ba.location AS approved_brewery_location,
         ba.license_number AS approved_license_number,
         ba.business_address_detail AS approved_business_address_detail,
         ba.phone_number AS approved_phone_number,
-        ba.document_url AS approved_document_url,
-        ba.document_key AS approved_document_key,
-        ba.original_name AS approved_document_original_name,
-        ba.mime_type AS approved_document_mime_type,
-        ba.file_size AS approved_document_file_size,
-        ba.status AS approved_application_status,
-        u.nickname AS user_nickname,
-        u.email AS user_email,
-        u.phone_number AS user_phone_number,
-        u.profile_image AS user_profile_image
+        ba.document_url AS approved_business_registration_file_url
       FROM funding_drafts fd
-      LEFT JOIN users u ON u.user_id = fd.brewery_id
+      JOIN users u ON u.user_id = fd.brewery_id
       LEFT JOIN LATERAL (
         SELECT
+          application_id,
           brewery_name,
           location,
           license_number,
           business_address_detail,
           phone_number,
-          document_url,
-          document_key,
-          original_name,
-          mime_type,
-          file_size,
-          status
+          document_url
         FROM brewery_auth
         WHERE user_id = fd.brewery_id
+          AND status = 'APPROVED'
         ORDER BY
-          CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
           updated_at DESC,
           application_id DESC
         LIMIT 1
@@ -3692,88 +4129,87 @@ const loadBreweryInfo = async (req, res) => {
       [Number(draftId)]
     );
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+        message: '펀딩 초안 정보를 찾을 수 없습니다.',
       });
     }
 
-    const info = result.rows[0];
-    const resolvedBreweryName = info.approved_brewery_name || info.brewery_name || info.user_nickname || null;
-    const resolvedCreatorName = info.creator_name || info.user_nickname || info.approved_brewery_name || info.brewery_name || null;
-    const resolvedBusinessNumber = info.approved_license_number || info.business_registration_number || null;
-    const resolvedBusinessAddress = info.approved_brewery_location || info.business_address || null;
-    const resolvedBusinessAddressDetail =
-      info.approved_business_address_detail || info.business_address_detail || null;
-    const resolvedContactPhone = info.approved_phone_number || info.user_phone_number || info.contact_phone || null;
-    const resolvedPhoneVerified = Boolean(info.phone_verified || info.approved_phone_number || info.user_phone_number);
-    const resolvedBusinessRegistrationFileUrl =
-      info.approved_document_url || info.business_registration_file_url || null;
-    const businessLicense = resolvedBusinessRegistrationFileUrl
-      ? {
-          documentUrl: resolvedBusinessRegistrationFileUrl,
-          documentKey: info.approved_document_key || null,
-          originalName: info.approved_document_original_name || null,
-          mimeType: info.approved_document_mime_type || null,
-          fileSize: info.approved_document_file_size === null || info.approved_document_file_size === undefined
-            ? null
-            : Number(info.approved_document_file_size),
-        }
-      : null;
+    const info = rows[0];
+
+    if (!info.approved_application_id) {
+      return res.status(404).json({
+        status: 404,
+        message: '승인된 양조장 정보를 찾을 수 없습니다.',
+      });
+    }
+
+    const breweryName = info.approved_brewery_name || info.brewery_name || null;
+    const representativeName = info.representative_name || null;
+    const businessRegistrationNumber = info.approved_license_number || info.business_registration_number || null;
+    const businessAddress = info.approved_brewery_location || info.business_address || null;
+    const businessAddressDetail = info.approved_business_address_detail || info.business_address_detail || null;
+    const contactEmail = info.contact_email || info.user_email || null;
+    const contactPhone = info.contact_phone || info.approved_phone_number || info.user_phone_number || null;
+    const businessRegistrationFileUrl = info.business_registration_file_url || info.approved_business_registration_file_url || null;
+    const businessName = info.business_name || info.brewery_name || info.approved_brewery_name || null;
+
     const missingFields = [
-      ...(!resolvedCreatorName ? ['creatorName'] : []),
-      ...(!resolvedContactPhone ? ['phoneNumber'] : []),
-      ...(!resolvedPhoneVerified ? ['phoneVerification'] : []),
-      ...(!resolvedBusinessNumber ? ['businessNumber'] : []),
-      ...(!resolvedBusinessAddress ? ['businessAddress'] : []),
-      ...(!resolvedBusinessAddressDetail ? ['businessAddressDetail'] : []),
-      ...(!info.representative_name ? ['representativeName'] : []),
-      ...(!resolvedBusinessRegistrationFileUrl ? ['businessLicense'] : []),
-      ...(!info.creator_introduction ? ['creatorIntroduction'] : []),
+      ...(breweryName ? [] : ['breweryName']),
+      ...(representativeName ? [] : ['representativeName']),
+      ...(businessRegistrationNumber ? [] : ['businessRegistrationNumber']),
+      ...(businessAddress ? [] : ['businessAddress']),
+      ...(businessAddressDetail ? [] : ['businessAddressDetail']),
+      ...(contactEmail ? [] : ['contactEmail']),
+      ...(contactPhone ? [] : ['contactPhone']),
+      ...(info.bank_name ? [] : ['bankName']),
+      ...(info.account_number ? [] : ['accountNumber']),
+      ...(info.account_holder ? [] : ['accountHolder']),
+      ...(info.business_type ? [] : ['businessType']),
+      ...(businessName ? [] : ['businessName']),
+      ...(info.business_category ? [] : ['businessCategory']),
+      ...(info.business_item ? [] : ['businessItem']),
+      ...(info.creator_introduction ? [] : ['creatorIntroduction']),
+      ...(info.phone_verified ? [] : ['phoneVerified']),
+      ...(info.account_verified ? [] : ['accountVerified']),
+      ...(businessRegistrationFileUrl ? [] : ['businessRegistrationFileUrl']),
     ];
 
     return res.status(200).json({
-      breweryInfo: {
-        breweryId: info.brewery_id,
-        breweryName: resolvedBreweryName,
-        creatorName: resolvedCreatorName,
-        profileImageUrl: info.user_profile_image || info.profile_image_url,
-        creatorIntroduction: info.creator_introduction,
-        breweryBio: info.creator_introduction,
-        businessName: info.business_name || info.approved_brewery_name || info.brewery_name,
-        businessRegistrationNumber: resolvedBusinessNumber,
-        representativeName: info.representative_name,
-        businessAddress: resolvedBusinessAddress,
-        businessAddressDetail: resolvedBusinessAddressDetail,
-        contactEmail: info.user_email || info.contact_email,
-        contactPhone: resolvedContactPhone,
+      status: 200,
+      message: '양조장 정보 불러오기 성공',
+      data: {
+        breweryName,
+        representativeName,
+        businessRegistrationNumber,
+        businessAddress,
+        businessAddressDetail,
+        contactEmail,
+        contactPhone,
         bankName: info.bank_name,
         accountNumber: info.account_number,
         accountHolder: info.account_holder,
-        phoneVerified: resolvedPhoneVerified,
-        accountVerified: info.account_verified,
         businessType: info.business_type,
+        businessName,
         businessCategory: info.business_category,
         businessItem: info.business_item,
-        taxEmail: info.tax_email,
-        identityDocumentUrl: info.identity_document_url,
-        businessRegistrationFileUrl: resolvedBusinessRegistrationFileUrl,
-        businessLicense,
-        applicationStatus: info.approved_application_status || null,
+        creatorIntroduction: info.creator_introduction,
+        phoneVerified: !!info.phone_verified,
+        accountVerified: !!info.account_verified,
+        businessRegistrationFileUrl,
+        businessLicenseUrl: businessRegistrationFileUrl,
+        missingFields,
       },
-      missingFields,
-      message: '양조장 정보를 불러왔습니다. 본인 인증과 입금 계좌는 직접 입력해주세요.',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '양조장 정보 불러오기 중 서버 오류가 발생했습니다.',
+      message: '양조장 정보 조회 중 오류가 발생했습니다.',
       error: error.message,
     });
   }
 };
-//프젝생성 추가2: 펀딩 프로젝트 파일 업로드:이미지,신분증,사업자등록증 파일을 한 API에서 처리
 const uploadFundingDraftFile = async (req, res) => {
   const { draftId } = req.params;
   const { fileType } = req.body;
@@ -3927,6 +4363,148 @@ const uploadFundingDraftFile = async (req, res) => {
   }
 };
 //프젝생성 추가3: 휴대폰 본인 인증 API
+const generateFundingDraftAiImage = async (req, res) => {
+  const { draftId } = req.params;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '임시저장 프로젝트 ID가 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    await assertFundingDraftOwner(draftId, req.user);
+
+    const draftResult = await pool.query(
+      `
+      SELECT
+        draft_id,
+        brewery_id,
+        funding_id,
+        title,
+        short_title,
+        summary,
+        introduction,
+        flavor_notes,
+        tags,
+        business_address,
+        thumbnail_url,
+        image_urls
+      FROM funding_drafts
+      WHERE draft_id = $1
+      `,
+      [Number(draftId)]
+    );
+
+    const draft = draftResult.rows[0];
+
+    if (!draft) {
+      return res.status(404).json({
+        status: 404,
+        message: '임시저장 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const currentImageUrls = normalizeFundingImageUrlsInput(draft.image_urls);
+
+    if (currentImageUrls.length >= 5) {
+      return res.status(400).json({
+        status: 400,
+        message: '프로젝트 대표 이미지는 최대 5장까지 등록할 수 있습니다.',
+      });
+    }
+
+    const aiPayload = normalizeFundingAiImagePayload(req.body || {}, draft);
+
+    if (!aiPayload.name) {
+      return res.status(400).json({
+        status: 400,
+        message: 'AI 이미지 생성을 위한 프로젝트 이름이 필요합니다.',
+      });
+    }
+
+    const aiResult = await generateFundingDraftAiImageAndUpload({
+      payload: aiPayload,
+      userId: getAuthUserId(req.user) || draft.brewery_id,
+    });
+
+    const currentImageFields = buildImageFields(draft.thumbnail_url, currentImageUrls);
+
+    if (aiResult.aiStatus === 'prompt_only') {
+      return res.status(200).json({
+        status: 200,
+        message: aiResult.message || 'AI 이미지 생성이 프롬프트만 반환되었습니다.',
+        data: {
+          aiStatus: aiResult.aiStatus,
+          promptUsed: aiResult.promptUsed,
+          modelUsed: aiResult.modelUsed,
+          thumbnailUrl: currentImageFields.thumbnailUrl,
+          imageUrls: currentImageFields.imageUrls,
+          allImageUrls: currentImageFields.allImageUrls,
+          images: mapFundingImageUrls(currentImageFields.allImageUrls),
+        },
+      });
+    }
+
+    const nextImageFields = buildImageFields(
+      draft.thumbnail_url || aiResult.imageUrl,
+      [...currentImageUrls, aiResult.imageUrl]
+    );
+
+    const updateResult = await pool.query(
+      `
+      UPDATE funding_drafts
+      SET
+        thumbnail_url = $1,
+        image_urls = $2,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE draft_id = $3
+      RETURNING draft_id, thumbnail_url, image_urls, updated_at
+      `,
+      [
+        nextImageFields.thumbnailUrl,
+        normalizeJsonStorageValue(nextImageFields.allImageUrls, []),
+        Number(draftId),
+      ]
+    );
+
+    const updatedDraft = updateResult.rows[0];
+    await syncFundingProjectFieldsFromDraft(updatedDraft.draft_id);
+
+    return res.status(200).json({
+      status: 200,
+      message: 'AI 이미지 생성 성공',
+      data: {
+        imageUrl: aiResult.imageUrl,
+        imageKey: aiResult.imageKey,
+        mimeType: aiResult.mimeType,
+        promptUsed: aiResult.promptUsed,
+        modelUsed: aiResult.modelUsed,
+        thumbnailUrl: nextImageFields.thumbnailUrl,
+        imageUrls: nextImageFields.imageUrls,
+        allImageUrls: nextImageFields.allImageUrls,
+        images: mapFundingImageUrls(nextImageFields.allImageUrls),
+        updatedAt: updatedDraft.updated_at,
+      },
+    });
+  } catch (error) {
+    if (handleAuthorizationError(res, error)) {
+      return;
+    }
+
+    const status = error.statusCode || error.status || 500;
+    console.error(error.stack || error);
+
+    return res.status(status).json({
+      status,
+      message: status === 500
+        ? 'AI 이미지 생성 중 서버 오류가 발생했습니다.'
+        : error.message,
+    });
+  }
+};
+
 const verifyPhoneForFundingDraft = async (req, res) => {
   const { draftId } = req.params;
   const { contactPhone } = req.body;
@@ -3997,12 +4575,13 @@ const verifyAccountForFundingDraft = async (req, res) => {
     || accountVerificationToken
     || snakeAccountVerificationToken
   );
+  const normalizedAccountNumber = normalizeComparableAccountNumber(accountNumber);
 
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
     !bankName ||
-    !accountNumber ||
+    !normalizedAccountNumber ||
     !accountHolder ||
     !resolvedBankVerificationToken
   ) {
@@ -4022,14 +4601,14 @@ const verifyAccountForFundingDraft = async (req, res) => {
       WHERE verification_token = $1
         AND status = 'VERIFIED'
         AND bank_name = $2
-        AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $3
+        AND regexp_replace(account_number, '[^0-9]', '', 'g') = $3
         AND account_holder = $4
       LIMIT 1
       `,
       [
         resolvedBankVerificationToken,
         bankName,
-        normalizeComparableAccountNumber(accountNumber),
+        normalizedAccountNumber,
         accountHolder,
       ]
     );
@@ -4059,7 +4638,7 @@ const verifyAccountForFundingDraft = async (req, res) => {
         account_verified,
         updated_at
       `,
-      [bankName, accountNumber, accountHolder, Number(draftId)]
+      [bankName, normalizedAccountNumber, accountHolder, Number(draftId)]
     );
 
     if (result.rows.length === 0) {
@@ -4245,7 +4824,7 @@ const confirmBankAccountVerification = async (req, res) => {
       FROM funding_bank_account_verifications
       WHERE status = 'PENDING'
         AND bank_name = $1
-        AND regexp_replace(account_number, '[[:space:]-]', '', 'g') = $2
+        AND regexp_replace(account_number, '[^0-9]', '', 'g') = $2
         AND account_holder = $3
         AND expires_at > CURRENT_TIMESTAMP
         AND user_id IS NOT DISTINCT FROM $4
@@ -4603,6 +5182,72 @@ const submitFundingDraft = async (req, res) => {
     const draft = draftResult.rows[0];
 
     if (draft.status === 'SUBMITTED') {
+      if (draft.funding_id) {
+        const fundingResult = await pool.query(
+          `
+          SELECT
+            funding_id,
+            title,
+            status,
+            goal_amount,
+            current_amount,
+            start_date,
+            end_date,
+            price_per_bottle,
+            shipping_fee,
+            created_at
+          FROM funding_projects
+          WHERE funding_id = $1
+          `,
+          [Number(draft.funding_id)]
+        );
+        const funding = fundingResult.rows[0] || {};
+        const responseData = {
+          draftId: Number(draft.draft_id),
+          fundingId: Number(draft.funding_id),
+          numericFundingId: Number(draft.funding_id),
+          recipeId: draft.recipe_id === null || draft.recipe_id === undefined
+            ? null
+            : Number(draft.recipe_id),
+          status: draft.status,
+          fundingStatus: funding.status || null,
+          progressRate: Number(draft.progress_rate || 0),
+          submittedAt: draft.submitted_at,
+          updatedAt: draft.updated_at,
+          funding: funding.funding_id
+            ? {
+              fundingId: Number(funding.funding_id),
+              numericFundingId: Number(funding.funding_id),
+              title: funding.title,
+              status: funding.status,
+              goalAmount: funding.goal_amount,
+              currentAmount: funding.current_amount,
+              startDate: funding.start_date,
+              endDate: funding.end_date,
+              pricePerBottle: funding.price_per_bottle,
+              shippingFee: funding.shipping_fee,
+              createdAt: funding.created_at,
+            }
+            : null,
+        };
+
+        return res.status(200).json({
+          status: 200,
+          message: '이미 제출된 펀딩 프로젝트입니다.',
+          data: responseData,
+          draftId: responseData.draftId,
+          fundingId: responseData.fundingId,
+          numericFundingId: responseData.numericFundingId,
+          recipeId: responseData.recipeId,
+          draftStatus: responseData.status,
+          fundingStatus: responseData.fundingStatus,
+          progressRate: responseData.progressRate,
+          submittedAt: responseData.submittedAt,
+          updatedAt: responseData.updatedAt,
+          funding: responseData.funding,
+        });
+      }
+
       return res.status(400).json({
         status: 400,
         message: '이미 제출된 프로젝트입니다.',
@@ -4838,11 +5483,39 @@ const submitFundingDraft = async (req, res) => {
         });
       }
 
+      const responseData = {
+        draftId: Number(submittedDraft.draft_id),
+        fundingId: Number(funding.funding_id),
+        numericFundingId: Number(funding.funding_id),
+        recipeId: Number(recipeId),
+        status: submittedDraft.status,
+        fundingStatus: funding.status,
+        progressRate: Number(submittedDraft.progress_rate || 0),
+        submittedAt: submittedDraft.submitted_at,
+        updatedAt: submittedDraft.updated_at,
+        funding: {
+          fundingId: Number(funding.funding_id),
+          numericFundingId: Number(funding.funding_id),
+          title: funding.title,
+          status: funding.status,
+          goalAmount: funding.goal_amount,
+          currentAmount: funding.current_amount,
+          startDate: funding.start_date,
+          endDate: funding.end_date,
+          pricePerBottle: funding.price_per_bottle,
+          shippingFee: funding.shipping_fee,
+          createdAt: funding.created_at,
+        },
+      };
+
       return res.status(200).json({
+        status: 200,
+        data: responseData,
         draftId: submittedDraft.draft_id,
         fundingId: funding.funding_id,
+        numericFundingId: Number(funding.funding_id),
         recipeId,
-        status: submittedDraft.status,
+        draftStatus: responseData.status,
         fundingStatus: funding.status,
         progressRate: submittedDraft.progress_rate,
         submittedAt: submittedDraft.submitted_at,
@@ -4966,14 +5639,17 @@ const getFundingDraftByFundingId = async (req, res) => {
 
     const documents = await getFundingDraftDocuments(draft.draft_id);
     const payload = buildFundingDraftPayload(draft, documents);
+    const responseData = {
+      ...payload,
+      draft,
+    };
 
     return res.status(200).json({
+      ...payload,
       status: 200,
+      draftStatus: payload.status,
       message: '연결된 임시저장 프로젝트 조회 성공',
-      data: {
-        ...payload,
-        draft,
-      },
+      data: responseData,
     });
   } catch (error) {
     return res.status(500).json({
@@ -5189,6 +5865,7 @@ const getFundingDraftPreview = async (req, res) => {
       `
       SELECT
         document_id,
+        draft_id,
         document_type,
         file_name,
         file_url,
@@ -5202,10 +5879,19 @@ const getFundingDraftPreview = async (req, res) => {
       [Number(draftId)]
     );
 
-    const payload = buildFundingDraftPayload(draftResult.rows[0], documentResult.rows);
+    const draft = draftResult.rows[0];
+    const payload = buildFundingDraftPayload(draft, documentResult.rows);
+    const responseData = {
+      ...payload,
+      draft,
+    };
 
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({
       ...payload,
+      status: 200,
+      draftStatus: payload.status,
+      data: responseData,
       message: '프로젝트 미리보기 조회 성공',
     });
   } catch (error) {
@@ -5435,6 +6121,8 @@ const mapFundingListRow = (row) => {
     matchPercent: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
     liked: row.liked,
     likeCount: Number(row.like_count || 0),
+    supporterCount: Number(row.supporter_count || 0),
+    supporter_count: Number(row.supporter_count || 0),
   };
 };
 
@@ -5552,8 +6240,8 @@ const getFundingList = async (req, res) => {
 
   const baseFromClause = `
     FROM funding_projects fp
-    JOIN recipes r ON r.recipe_id = fp.recipe_id
-    JOIN users u ON u.user_id = fp.brewery_user_id
+    LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+    LEFT JOIN users u ON u.user_id = fp.brewery_user_id
     LEFT JOIN LATERAL (
       SELECT brewery_name
       FROM brewery_auth
@@ -5638,6 +6326,7 @@ const getFundingList = async (req, res) => {
         fp.image_urls,
         fp.status,
         fp.current_amount,
+        fp.supporter_count,
         fp.goal_amount AS target_amount,
         fp.start_date,
         fp.end_date,
@@ -5720,6 +6409,7 @@ const getFundingList = async (req, res) => {
       .map(mapFundingListRow)
       .filter((funding) => !mineRequested || funding.breweryUserId === userId);
 
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({
       status: 200,
       message: '펀딩 목록 조회 성공',
@@ -5744,43 +6434,53 @@ const getFundingStats = async (req, res) => {
   try {
     const result = await pool.query(
       `
+      WITH paid_orders AS (
+        SELECT
+          order_id,
+          user_id,
+          funding_id
+        FROM orders
+        WHERE order_status = 'PAID'
+          AND funding_id IS NOT NULL
+      )
       SELECT
-        (
-          SELECT COUNT(*)::int
-          FROM funding_projects
-          WHERE status IN ('ONGOING', 'ACTIVE')
-          AND (end_date IS NULL OR end_date >= CURRENT_DATE)
-        ) AS available_funding_count,
+        COUNT(*) FILTER (
+          WHERE fp.status IN ('ACTIVE', 'ONGOING')
+            AND (fp.end_date IS NULL OR fp.end_date >= CURRENT_DATE)
+        )::int AS available_funding_count,
         (
           SELECT COUNT(DISTINCT user_id)::int
-          FROM orders
-          WHERE order_status = 'PAID'
+          FROM paid_orders
+          WHERE user_id IS NOT NULL
         ) AS total_supporter_count,
-        (
-          SELECT COUNT(*)::int
-          FROM funding_projects
-          WHERE goal_amount > 0
-          AND current_amount >= goal_amount
-        ) AS successful_project_count,
-        (
-          SELECT COALESCE(SUM(current_amount), 0)::bigint
-          FROM funding_projects
-        ) AS total_raised_amount
+        COUNT(*) FILTER (
+          WHERE fp.goal_amount > 0
+            AND COALESCE(fp.current_amount, 0) >= fp.goal_amount
+        )::int AS successful_project_count,
+        COALESCE(SUM(COALESCE(fp.current_amount, 0)), 0)::bigint AS total_raised_amount
+      FROM funding_projects fp
       `
     );
 
     const stats = result.rows[0];
     const totalRaisedAmount = Number(stats.total_raised_amount || 0);
-
-    return res.status(200).json({
+    const responseData = {
       participationAvailableFunding: Number(stats.available_funding_count || 0),
+      availableFundingCount: Number(stats.available_funding_count || 0),
       totalSupporterCount: Number(stats.total_supporter_count || 0),
+      totalParticipantCount: Number(stats.total_supporter_count || 0),
       successfulProjectCount: Number(stats.successful_project_count || 0),
       totalRaisedAmount,
       totalRaisedHundredMillion: Number((totalRaisedAmount / 100000000).toFixed(1)),
       totalRaisedTenMillion: Number((totalRaisedAmount / 10000000).toFixed(1)),
       totalRaisedTenMillionUnit: '천만원',
+    };
+
+    return res.status(200).json({
+      status: 200,
       message: '펀딩 통계 조회 성공',
+      data: responseData,
+      ...responseData,
     });
   } catch (error) {
     return res.status(500).json({
@@ -5808,6 +6508,10 @@ const getFundingDetail = async (req, res) => {
 
   try {
     await findAndLinkFundingDraftByFundingId(resolvedFundingId);
+    const rawMaterialsColumn = await getFundingProjectRawMaterialsColumn();
+    const projectRawMaterialsExpression = rawMaterialsColumn
+      ? 'fp.raw_materials::text'
+      : 'NULL::text';
 
     const fundingResult = await pool.query(
       `
@@ -5820,6 +6524,7 @@ const getFundingDetail = async (req, res) => {
         COALESCE(NULLIF(fd.image_urls::text, '[]'), NULLIF(fp.image_urls::text, '[]')) AS image_urls,
         fp.status,
         fp.current_amount,
+        fp.supporter_count,
         COALESCE(fd.target_amount, fp.goal_amount) AS target_amount,
         COALESCE(fd.funding_start_date, fp.start_date) AS start_date,
         COALESCE(fd.funding_end_date, fp.end_date) AS end_date,
@@ -5843,7 +6548,11 @@ const getFundingDetail = async (req, res) => {
         fd.alcohol_intensity,
         fd.flavor_notes,
         fd.product_type,
-        fd.raw_materials,
+        COALESCE(
+          NULLIF(NULLIF(BTRIM(fd.raw_materials::text), '[]'), 'null'),
+          NULLIF(NULLIF(BTRIM(raw_material_source.raw_materials::text), '[]'), 'null'),
+          NULLIF(NULLIF(BTRIM(${projectRawMaterialsExpression}), '[]'), 'null')
+        ) AS raw_materials,
         fd.introduction,
         fd.video_url,
         COALESCE(NULLIF(fd.budget_plan, ''), NULLIF(fp.budget_plan, '')) AS budget_plan,
@@ -5895,6 +6604,16 @@ const getFundingDetail = async (req, res) => {
         LIMIT 1
       ) fd ON TRUE
       LEFT JOIN LATERAL (
+        SELECT fd_raw.raw_materials
+        FROM funding_drafts fd_raw
+        WHERE fd_raw.funding_id = fp.funding_id
+          AND fd_raw.brewery_id = fp.brewery_user_id
+          AND fd_raw.raw_materials IS NOT NULL
+          AND NULLIF(NULLIF(BTRIM(fd_raw.raw_materials::text), '[]'), 'null') IS NOT NULL
+        ORDER BY fd_raw.updated_at DESC
+        LIMIT 1
+      ) raw_material_source ON TRUE
+      LEFT JOIN LATERAL (
         SELECT
           brewery_name,
           location,
@@ -5932,7 +6651,10 @@ const getFundingDetail = async (req, res) => {
     const mainIngredient = funding.main_ingredient || null;
     const subIngredients = parseFundingListField(funding.sub_ingredients);
     const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
-    const rawMaterials = parseJsonField(funding.raw_materials);
+    const parsedRawMaterials = parseFundingRawMaterialsField(funding.raw_materials);
+    const rawMaterials = parsedRawMaterials.length > 0
+      ? parsedRawMaterials
+      : parseFundingRawMaterialsField([mainIngredient, ...subIngredients].filter(Boolean));
 
     const optionResult = await pool.query(
       `
@@ -6045,6 +6767,7 @@ const getFundingDetail = async (req, res) => {
         })
       : null;
 
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
       title: funding.title,
@@ -6059,6 +6782,8 @@ const getFundingDetail = async (req, res) => {
       subIngredient: subIngredients[0] || null,
       subIngredients,
       ingredients,
+      rawMaterials,
+      ingredientDetails: rawMaterials,
       tags: parseJsonField(funding.tags),
       thumbnailUrl: imageFields.thumbnailUrl,
       imageUrls: imageFields.imageUrls,
@@ -6087,6 +6812,8 @@ const getFundingDetail = async (req, res) => {
       tasteMatchScore: matchScore,
       liked: funding.liked,
       likeCount: Number(funding.like_count || 0),
+      supporterCount: Number(funding.supporter_count || 0),
+      supporter_count: Number(funding.supporter_count || 0),
       tasteProfile,
       legalInfo: {
         productType: funding.product_type,
@@ -6158,17 +6885,16 @@ const getFundingDetail = async (req, res) => {
         policy: projectPolicy,
       },
       documents: documentResult.rows.map(mapFundingDocument),
-      supportOptions: optionResult.rows.map((option) => ({
-        optionId: Number(option.option_id),
-        name: option.name,
-        price: Number(option.price),
-        description: option.description,
-        volume: option.volume,
-        alcohol: option.alcohol,
-        stock: option.stock,
-        remainingStock: option.remaining_stock,
-        maxPerUser: option.max_per_user,
-      })),
+      supportOptions: buildFundingSupportOptionsResponse({
+        options: optionResult.rows,
+        funding: {
+          ...funding,
+          total_quantity: totalQuantity,
+        },
+        mainIngredient,
+        subIngredients,
+        ingredients,
+      }),
     });
   } catch (error) {
     console.error(error);
@@ -7456,6 +8182,8 @@ const getFundingReviews = async (req, res) => {
       : 'ORDER BY fr.created_at DESC';
 
   try {
+    const reviewWriteState = await getFundingReviewWriteState(resolvedFundingId, userId);
+    const reviewWritable = reviewWriteState.canWriteReview;
     const countResult = await pool.query(
       `
       SELECT COUNT(*)::int AS total_count
@@ -7485,6 +8213,7 @@ const getFundingReviews = async (req, res) => {
         fr.created_at,
         fr.updated_at,
         COALESCE(like_counts.like_count, 0) AS like_count,
+        (fr.user_id = fp.brewery_user_id) AS is_project_owner,
         EXISTS (
           SELECT 1
           FROM funding_review_likes my_like
@@ -7492,6 +8221,7 @@ const getFundingReviews = async (req, res) => {
           AND my_like.user_id = $4
         ) AS liked
       FROM funding_reviews fr
+      LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
       LEFT JOIN users u ON u.user_id = fr.user_id
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS like_count
@@ -7513,6 +8243,12 @@ const getFundingReviews = async (req, res) => {
       size: sizeNumber,
       totalElements,
       totalPages: Math.ceil(totalElements / sizeNumber),
+      canWriteReview: reviewWritable,
+      canReview: reviewWritable,
+      hasWrittenReview: Boolean(reviewWriteState.existingReview),
+      myReviewId: reviewWriteState.existingReview
+        ? Number(reviewWriteState.existingReview.review_id)
+        : null,
       message: '후기 목록 조회 성공',
     });
   } catch (error) {
@@ -7563,6 +8299,7 @@ const getFundingReviewDetail = async (req, res) => {
         fr.created_at,
         fr.updated_at,
         COALESCE(like_counts.like_count, 0) AS like_count,
+        (fr.user_id = fp.brewery_user_id) AS is_project_owner,
         EXISTS (
           SELECT 1
           FROM funding_review_likes my_like
@@ -7570,6 +8307,7 @@ const getFundingReviewDetail = async (req, res) => {
           AND my_like.user_id = $3
         ) AS liked
       FROM funding_reviews fr
+      LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
       LEFT JOIN users u ON u.user_id = fr.user_id
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS like_count
@@ -7589,8 +8327,17 @@ const getFundingReviewDetail = async (req, res) => {
       });
     }
 
+    const reviewWriteState = await getFundingReviewWriteState(resolvedFundingId, userId);
+    const reviewWritable = reviewWriteState.canWriteReview;
+
     return res.status(200).json({
       ...mapFundingReview(result.rows[0]),
+      canWriteReview: reviewWritable,
+      canReview: reviewWritable,
+      hasWrittenReview: Boolean(reviewWriteState.existingReview),
+      myReviewId: reviewWriteState.existingReview
+        ? Number(reviewWriteState.existingReview.review_id)
+        : null,
       message: '후기 상세 조회 성공',
     });
   } catch (error) {
@@ -7623,6 +8370,7 @@ const getFundingReviewById = async ({ fundingId, reviewId, userId }) => {
       fr.created_at,
       fr.updated_at,
       COALESCE(like_counts.like_count, 0) AS like_count,
+      (fr.user_id = fp.brewery_user_id) AS is_project_owner,
       EXISTS (
         SELECT 1
         FROM funding_review_likes my_like
@@ -7630,6 +8378,7 @@ const getFundingReviewById = async ({ fundingId, reviewId, userId }) => {
         AND my_like.user_id = $3
       ) AS liked
     FROM funding_reviews fr
+    LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
     LEFT JOIN users u ON u.user_id = fr.user_id
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int AS like_count
@@ -7772,6 +8521,52 @@ const getSupportOptions = async (req, res) => {
   }
 
   try {
+    const fundingResult = await pool.query(
+      `
+      SELECT
+        fp.funding_id,
+        fp.title,
+        COALESCE(fp.summary, fp.description) AS summary,
+        fp.description,
+        fp.price_per_bottle,
+        fd.total_quantity,
+        COALESCE(fd.expected_delivery_date, fp.expected_delivery_date) AS expected_delivery_date,
+        COALESCE(fd.volume, fp.volume) AS volume,
+        COALESCE(fd.alcohol_percentage, fp.alcohol_percentage) AS alcohol_percentage,
+        COALESCE(NULLIF(fd.main_ingredient, ''), NULLIF(r.main_ingredient, '')) AS main_ingredient,
+        COALESCE(NULLIF(fd.sub_ingredients, ''), NULLIF(r.ai_sub_ingredient, '')) AS sub_ingredients
+      FROM funding_projects fp
+      LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+      LEFT JOIN LATERAL (
+        SELECT
+          expected_delivery_date,
+          volume,
+          alcohol_percentage,
+          main_ingredient,
+          sub_ingredients,
+          total_quantity
+        FROM funding_drafts fd_inner
+        WHERE fd_inner.funding_id = fp.funding_id
+        ORDER BY updated_at DESC
+        LIMIT 1
+      ) fd ON TRUE
+      WHERE fp.funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (fundingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+      });
+    }
+
+    const funding = fundingResult.rows[0];
+    const mainIngredient = funding.main_ingredient || null;
+    const subIngredients = parseFundingListField(funding.sub_ingredients);
+    const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
+
     const result = await pool.query(
       `
       SELECT
@@ -7794,17 +8589,23 @@ const getSupportOptions = async (req, res) => {
 
     return res.status(200).json({
       fundingId: Number(fundingId),
-      supportOptions: result.rows.map((option) => ({
-        optionId: Number(option.option_id),
-        name: option.name,
-        price: Number(option.price || 0),
-        description: option.description,
-        volume: option.volume,
-        alcohol: option.alcohol,
-        stock: option.stock,
-        remainingStock: option.remaining_stock,
-        maxPerUser: option.max_per_user,
-      })),
+      expectedDeliveryDate: funding.expected_delivery_date,
+      volume: funding.volume,
+      alcoholPercentage: funding.alcohol_percentage,
+      mainIngredient,
+      primaryIngredient: mainIngredient,
+      mainIngredientLabel: '메인 재료',
+      primaryIngredientLabel: '메인 재료',
+      subIngredient: subIngredients[0] || null,
+      subIngredients,
+      ingredients,
+      supportOptions: buildFundingSupportOptionsResponse({
+        options: result.rows,
+        funding,
+        mainIngredient,
+        subIngredients,
+        ingredients,
+      }),
     });
   } catch (error) {
     console.error(error);
@@ -7818,6 +8619,32 @@ const getSupportOptions = async (req, res) => {
 };
 
 // 후원 주문 생성
+const logFundingOrderValidationFailure = ({
+  req,
+  fundingId,
+  optionId,
+  quantity,
+  recipientName,
+  recipientPhone,
+  shippingAddress,
+  missingFields = [],
+  invalidFields = [],
+  reason,
+}) => {
+  console.warn('Funding order validation failed', {
+    reason,
+    fundingId: fundingId && !isNaN(Number(fundingId)) ? Number(fundingId) : null,
+    userId: getUserId(req) || null,
+    optionId: optionId === null || optionId === undefined || optionId === '' ? null : optionId,
+    quantity,
+    hasRecipientName: Boolean(recipientName),
+    hasRecipientPhone: Boolean(recipientPhone),
+    hasShippingAddress: Boolean(shippingAddress),
+    missingFields,
+    invalidFields,
+  });
+};
+
 const createFundingOrder = async (req, res) => {
   const { fundingId } = req.params;
   const body = req.body || {};
@@ -7876,21 +8703,47 @@ const createFundingOrder = async (req, res) => {
     optionId === null || optionId === undefined || optionId === ''
       ? null
       : Number(optionId);
-  const bottleCount = Number(quantity || 1);
+  const bottleCount =
+    quantity === null || quantity === undefined || quantity === ''
+      ? 1
+      : Number(quantity);
+  const missingFields = [];
+  const invalidFields = [];
+
+  if (!recipientName) missingFields.push('recipientName');
+  if (!recipientPhone) missingFields.push('recipientPhone');
+  if (!shippingAddress) missingFields.push('shippingAddress');
+
+  if (!Number.isInteger(bottleCount) || bottleCount <= 0) {
+    invalidFields.push('quantity');
+  }
 
   if (
-    !bottleCount ||
-    !Number.isInteger(bottleCount) ||
-    bottleCount <= 0 ||
-    (numericOptionId !== null &&
-      (!Number.isInteger(numericOptionId) || numericOptionId <= 0)) ||
-    !recipientName ||
-    !recipientPhone ||
-    !shippingAddress
+    numericOptionId !== null &&
+    (!Number.isInteger(numericOptionId) || numericOptionId <= 0)
   ) {
+    invalidFields.push('optionId');
+  }
+
+  if (missingFields.length > 0 || invalidFields.length > 0) {
+    logFundingOrderValidationFailure({
+      req,
+      fundingId,
+      optionId,
+      quantity,
+      recipientName,
+      recipientPhone,
+      shippingAddress,
+      missingFields,
+      invalidFields,
+      reason: 'invalid_order_input',
+    });
+
     return res.status(400).json({
       status: 400,
       message: '주문 입력값이 올바르지 않습니다.',
+      missingFields,
+      invalidFields,
     });
   }
 
@@ -7918,9 +8771,23 @@ const createFundingOrder = async (req, res) => {
   const donationAmountNumber = Number(donationAmount || 0);
 
   if (!Number.isInteger(donationAmountNumber) || donationAmountNumber < 0) {
+    logFundingOrderValidationFailure({
+      req,
+      fundingId,
+      optionId,
+      quantity,
+      recipientName,
+      recipientPhone,
+      shippingAddress,
+      invalidFields: ['additionalSupportAmount'],
+      reason: 'invalid_additional_support_amount',
+    });
+
     return res.status(400).json({
       status: 400,
       message: '추가 후원금 입력값이 올바르지 않습니다.',
+      missingFields: [],
+      invalidFields: ['additionalSupportAmount'],
     });
   }
 
@@ -8233,10 +9100,24 @@ const getFundingShareLink = async (req, res) => {
       });
     }
 
-    const publicBaseUrl = process.env.PUBLIC_WEB_BASE_URL || 'https://judam.com';
-    const shareUrl = `${publicBaseUrl.replace(/\/$/, '')}/fundings/${fundingId}`;
+    const normalizeShareBaseUrl = (value) => {
+      const normalized = toTrimmedString(value);
 
-    const shareResult = await pool.query(
+      if (!normalized || ['null', 'undefined'].includes(normalized.toLowerCase())) {
+        return null;
+      }
+
+      return normalized.replace(/\/+$/, '');
+    };
+    const publicBaseUrl =
+      normalizeShareBaseUrl(process.env.PUBLIC_WEB_BASE_URL) ||
+      normalizeShareBaseUrl(process.env.FRONTEND_BASE_URL) ||
+      normalizeShareBaseUrl(`${req.protocol}://${req.get('host')}`);
+    const shareUrl = `${publicBaseUrl}/funding/${Number(fundingId)}`;
+
+    let shareCount = null;
+    try {
+      const shareResult = await pool.query(
       `
       INSERT INTO funding_shares (
         funding_id,
@@ -8251,18 +9132,35 @@ const getFundingShareLink = async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       RETURNING share_count
       `,
-      [Number(fundingId), shareUrl]
-    );
+        [Number(fundingId), shareUrl]
+      );
+      shareCount = Number(shareResult.rows[0].share_count);
+    } catch (shareError) {
+      console.warn('Failed to record funding share count', {
+        fundingId: Number(fundingId),
+        message: shareError.message,
+      });
+    }
 
     const funding = fundingResult.rows[0];
-
-    return res.status(200).json({
+    const responseData = {
       fundingId: Number(fundingId),
       shareUrl,
       title: funding.title,
       summary: funding.summary,
       thumbnailImageUrl: funding.thumbnail_url,
-      shareCount: Number(shareResult.rows[0].share_count),
+      shareCount,
+    };
+
+    return res.status(200).json({
+      status: 200,
+      data: responseData,
+      fundingId: Number(fundingId),
+      shareUrl,
+      title: funding.title,
+      summary: funding.summary,
+      thumbnailImageUrl: funding.thumbnail_url,
+      shareCount,
       message: '공유 링크가 생성되었습니다.',
     });
   } catch (error) {
@@ -8486,6 +9384,26 @@ const createFundingReview = async (req, res) => {
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    const paidOrder = await findPaidFundingOrder(Number(fundingId), userId);
+
+    if (!paidOrder) {
+      return res.status(403).json({
+        status: 403,
+        message: '후원 완료 후 후기를 작성할 수 있습니다.',
+      });
+    }
+
+    const existingReview = await findFundingReviewByUser(Number(fundingId), userId);
+    if (existingReview) {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 작성한 후기가 있습니다.',
+        data: {
+          reviewId: Number(existingReview.review_id),
+        },
+      });
+    }
+
     const uploadedImageUrls = [];
     for (const file of files) {
       uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
@@ -8501,59 +9419,7 @@ const createFundingReview = async (req, res) => {
       parseOptionalBoolean(recordVisibility) ??
       true;
 
-    const existingResult = await pool.query(
-      `
-      SELECT review_id
-      FROM funding_reviews
-      WHERE funding_id = $1
-      AND user_id = $2
-      `,
-      [Number(fundingId), userId]
-    );
-
-    const result = existingResult.rows.length > 0
-      ? await pool.query(
-        `
-        UPDATE funding_reviews
-        SET
-          rating = $1,
-          title = $2,
-          content = $3,
-          image_urls = $4,
-          mood = $5,
-          pairing = $6,
-          tags = $7,
-          record_visibility = $8,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE review_id = $9
-        RETURNING
-          review_id,
-          funding_id,
-          user_id,
-          rating,
-          title,
-          content,
-          image_urls,
-          mood,
-          pairing,
-          tags,
-          record_visibility,
-          created_at,
-          updated_at
-        `,
-        [
-          Number(rating),
-          title || null,
-          normalizedContent,
-          JSON.stringify(normalizedImageUrls),
-          mood || null,
-          pairing || null,
-          JSON.stringify(normalizedTags),
-          normalizedRecordVisibility,
-          existingResult.rows[0].review_id,
-        ]
-      )
-      : await pool.query(
+    const result = await pool.query(
       `
       INSERT INTO funding_reviews (
         funding_id,
@@ -8597,22 +9463,56 @@ const createFundingReview = async (req, res) => {
       ]
     );
 
-    const review = await getFundingReviewById({
-      fundingId: Number(fundingId),
-      reviewId: result.rows[0].review_id,
-      userId,
-    }) || result.rows[0];
-    const aiTasteUpdate = await updateFundingReviewAiTasteProfile({
-      userId,
-      review,
-      requestBody: req.body || {},
-      isCreate: existingResult.rows.length === 0,
-    });
+    const createdReview = result.rows[0];
+
+    if (!createdReview) {
+      return res.status(500).json({
+        status: 500,
+        message: '후기 등록 결과를 확인할 수 없습니다.',
+      });
+    }
+
+    let review = createdReview;
+    try {
+      review = await getFundingReviewById({
+        fundingId: Number(fundingId),
+        reviewId: createdReview.review_id,
+        userId,
+      }) || createdReview;
+    } catch (lookupError) {
+      console.warn('Funding review lookup failed after create', {
+        fundingId: Number(fundingId),
+        reviewId: Number(createdReview.review_id),
+        userId,
+        message: lookupError.message,
+      });
+    }
+
+    let aiTasteUpdate = null;
+    try {
+      aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+        userId,
+        review,
+        requestBody: req.body || {},
+        isCreate: true,
+      });
+    } catch (aiError) {
+      console.warn('Funding review AI taste update failed after review create', {
+        fundingId: Number(fundingId),
+        reviewId: Number(createdReview.review_id),
+        userId,
+        message: aiError.message,
+      });
+      aiTasteUpdate = {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
 
     return res.status(201).json({
       ...mapFundingReview(review),
       ...(aiTasteUpdate ? { aiTasteUpdate } : {}),
-      message: existingResult.rows.length > 0 ? '후기가 수정되었습니다.' : '후기가 등록되었습니다.',
+      message: '후기가 등록되었습니다.',
     });
   } catch (error) {
     console.error(error);
@@ -8654,16 +9554,10 @@ const updateFundingReview = async (req, res) => {
     });
   }
 
-  if (rating !== undefined && (isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5)) {
-    return res.status(400).json({
-      status: 400,
-      message: '별점은 1점부터 5점까지 입력 가능합니다.',
-    });
-  }
-
   try {
     const userId = requireUserId(req, res);
     if (!userId) return;
+    const normalizedRating = normalizeReviewRatingInput(rating);
     const existingResult = await pool.query(
       `
       SELECT *
@@ -8707,7 +9601,7 @@ const updateFundingReview = async (req, res) => {
       `
       UPDATE funding_reviews
       SET
-        rating = COALESCE($1, rating),
+        rating = COALESCE($1::numeric, rating),
         title = COALESCE($2, title),
         content = $3,
         image_urls = $4,
@@ -8733,7 +9627,7 @@ const updateFundingReview = async (req, res) => {
         updated_at
       `,
       [
-        rating !== undefined ? Number(rating) : null,
+        normalizedRating,
         title || null,
         nextContent,
         JSON.stringify(nextImageUrls),
@@ -8745,17 +9639,51 @@ const updateFundingReview = async (req, res) => {
       ]
     );
 
-    const review = await getFundingReviewById({
-      fundingId: Number(fundingId),
-      reviewId: result.rows[0].review_id,
-      userId,
-    }) || result.rows[0];
-    const aiTasteUpdate = await updateFundingReviewAiTasteProfile({
-      userId,
-      review,
-      requestBody: req.body || {},
-      isCreate: false,
-    });
+    const updatedReview = result.rows[0];
+
+    if (!updatedReview) {
+      return res.status(404).json({
+        status: 404,
+        message: '수정할 후기를 찾을 수 없습니다.',
+      });
+    }
+
+    let review = updatedReview;
+    try {
+      review = await getFundingReviewById({
+        fundingId: Number(fundingId),
+        reviewId: updatedReview.review_id,
+        userId,
+      }) || updatedReview;
+    } catch (lookupError) {
+      console.warn('Funding review lookup failed after update', {
+        fundingId: Number(fundingId),
+        reviewId: Number(updatedReview.review_id),
+        userId,
+        message: lookupError.message,
+      });
+    }
+
+    let aiTasteUpdate = null;
+    try {
+      aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+        userId,
+        review,
+        requestBody: req.body || {},
+        isCreate: false,
+      });
+    } catch (aiError) {
+      console.warn('Funding review AI taste update failed after review update', {
+        fundingId: Number(fundingId),
+        reviewId: Number(updatedReview.review_id),
+        userId,
+        message: aiError.message,
+      });
+      aiTasteUpdate = {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
 
     return res.status(200).json({
       ...mapFundingReview(review),
@@ -8763,6 +9691,8 @@ const updateFundingReview = async (req, res) => {
       message: '후기가 수정되었습니다.',
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       status: 500,
       message: '후기 수정 중 서버 오류가 발생했습니다.',
@@ -8876,6 +9806,7 @@ const getFundingReviewComments = async (req, res) => {
         frc.created_at,
         frc.updated_at,
         COALESCE(like_counts.like_count, 0) AS like_count,
+        (frc.user_id = fp.brewery_user_id) AS is_project_owner,
         EXISTS (
           SELECT 1
           FROM funding_review_comment_likes my_like
@@ -8883,6 +9814,7 @@ const getFundingReviewComments = async (req, res) => {
           AND my_like.user_id = $3
         ) AS liked
       FROM funding_review_comments frc
+      LEFT JOIN funding_projects fp ON fp.funding_id = frc.funding_id
       LEFT JOIN users u ON u.user_id = frc.user_id
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS like_count
@@ -8983,8 +9915,10 @@ const createFundingReviewComment = async (req, res) => {
         inserted.created_at,
         inserted.updated_at,
         0::int AS like_count,
+        (inserted.user_id = fp.brewery_user_id) AS is_project_owner,
         false AS liked
       FROM inserted
+      LEFT JOIN funding_projects fp ON fp.funding_id = inserted.funding_id
       LEFT JOIN users u ON u.user_id = inserted.user_id
       `,
       [resolvedFundingId, Number(reviewId), userId, content]
@@ -9018,6 +9952,7 @@ const getFundingReviewCommentById = async ({ fundingId, reviewId, commentId, use
       frc.created_at,
       frc.updated_at,
       COALESCE(like_counts.like_count, 0) AS like_count,
+      (frc.user_id = fp.brewery_user_id) AS is_project_owner,
       EXISTS (
         SELECT 1
         FROM funding_review_comment_likes my_like
@@ -9025,6 +9960,7 @@ const getFundingReviewCommentById = async ({ fundingId, reviewId, commentId, use
         AND my_like.user_id = $4
       ) AS liked
     FROM funding_review_comments frc
+    LEFT JOIN funding_projects fp ON fp.funding_id = frc.funding_id
     LEFT JOIN users u ON u.user_id = frc.user_id
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int AS like_count
@@ -9923,6 +10859,364 @@ const unlikeBreweryLogComment = async (req, res) => {
   }
 };
 
+const sendFundingReviewError = (res, error, fallbackMessage) => {
+  const status = error.status || 500;
+
+  console.error(error.stack || error);
+
+  return res.status(status).json({
+    status,
+    message: status === 500 ? fallbackMessage : error.message,
+  });
+};
+
+const createFundingReviewStable = async (req, res) => {
+  const { fundingId } = req.params;
+  const {
+    rating,
+    title,
+    content,
+    detailReview,
+    mood,
+    pairing,
+    tags,
+    recordVisibility = true,
+    showRecord,
+    imageUrls,
+  } = req.body || {};
+  const files = req.files || [];
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  const normalizedContent = toTrimmedString(content || detailReview);
+
+  if (!normalizedContent) {
+    return res.status(400).json({
+      status: 400,
+      message: '후기 내용을 입력해주세요.',
+    });
+  }
+
+  try {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    const normalizedRating = normalizeReviewRatingInput(rating, { required: true });
+
+    const paidOrder = await findPaidFundingOrder(Number(fundingId), userId);
+    if (!paidOrder) {
+      return res.status(403).json({
+        status: 403,
+        message: '후원 완료 후 후기를 작성할 수 있습니다.',
+      });
+    }
+
+    const existingReview = await findFundingReviewByUser(Number(fundingId), userId);
+    if (existingReview) {
+      return res.status(409).json({
+        status: 409,
+        message: '이미 작성한 후기가 있습니다.',
+        data: {
+          reviewId: Number(existingReview.review_id),
+        },
+      });
+    }
+
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
+    }
+
+    const normalizedImageUrls = uniqueValues([
+      ...normalizeReviewImageUrlsInput(imageUrls),
+      ...normalizeReviewImageUrlsInput(uploadedImageUrls),
+    ]);
+    const normalizedTags = normalizeReviewTagsInput(tags);
+    const normalizedRecordVisibility =
+      parseOptionalBoolean(showRecord) ??
+      parseOptionalBoolean(recordVisibility) ??
+      true;
+
+    const result = await pool.query(
+      `
+      INSERT INTO funding_reviews (
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls,
+        mood,
+        pairing,
+        tags,
+        record_visibility
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING
+        review_id,
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls,
+        mood,
+        pairing,
+        tags,
+        record_visibility,
+        created_at,
+        updated_at
+      `,
+      [
+        Number(fundingId),
+        userId,
+        normalizedRating,
+        title || null,
+        normalizedContent,
+        JSON.stringify(normalizedImageUrls),
+        mood || null,
+        pairing || null,
+        JSON.stringify(normalizedTags),
+        normalizedRecordVisibility,
+      ]
+    );
+
+    const createdReview = result.rows[0];
+    if (!createdReview) {
+      throw createHttpError(500, '후기 등록 결과를 확인할 수 없습니다.');
+    }
+
+    let review = createdReview;
+    try {
+      review = await getFundingReviewById({
+        fundingId: Number(fundingId),
+        reviewId: createdReview.review_id,
+        userId,
+      }) || createdReview;
+    } catch (lookupError) {
+      console.warn('Funding review lookup failed after create', {
+        fundingId: Number(fundingId),
+        reviewId: Number(createdReview.review_id),
+        userId,
+        message: lookupError.message,
+      });
+    }
+
+    let aiTasteUpdate = null;
+    try {
+      aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+        userId,
+        review,
+        requestBody: req.body || {},
+        isCreate: true,
+      });
+    } catch (aiError) {
+      console.warn('Funding review AI taste update failed after review create', {
+        fundingId: Number(fundingId),
+        reviewId: Number(createdReview.review_id),
+        userId,
+        message: aiError.message,
+      });
+      aiTasteUpdate = {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
+
+    return res.status(201).json(buildFundingReviewResponse({
+      status: 201,
+      message: '후기가 등록되었습니다.',
+      review,
+      aiTasteUpdate,
+    }));
+  } catch (error) {
+    return sendFundingReviewError(res, error, '후기 등록 중 서버 오류가 발생했습니다.');
+  }
+};
+
+const updateFundingReviewStable = async (req, res) => {
+  const { fundingId, reviewId } = req.params;
+  const {
+    rating,
+    title,
+    content,
+    detailReview,
+    mood,
+    pairing,
+    tags,
+    recordVisibility,
+    showRecord,
+    imageUrls,
+    deleteImageUrls,
+  } = req.body || {};
+  const files = req.files || [];
+
+  if (
+    !fundingId ||
+    isNaN(Number(fundingId)) ||
+    !reviewId ||
+    isNaN(Number(reviewId))
+  ) {
+    return res.status(400).json({
+      status: 400,
+      message: '후기 수정 요청값이 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    const normalizedRating = normalizeReviewRatingInput(rating);
+
+    const existingResult = await pool.query(
+      `
+      SELECT *
+      FROM funding_reviews
+      WHERE funding_id = $1
+        AND review_id = $2
+      `,
+      [Number(fundingId), Number(reviewId)]
+    );
+
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '후기를 찾을 수 없습니다.',
+      });
+    }
+
+    const current = existingResult.rows[0];
+    const writerId = Number(current.user_id);
+    if (writerId !== userId && !isAdminUser(req.user)) {
+      return res.status(403).json({
+        status: 403,
+        message: '후기를 수정할 권한이 없습니다.',
+      });
+    }
+
+    const uploadedImageUrls = [];
+    for (const file of files) {
+      uploadedImageUrls.push(await storeUploadedFile(file, `funding-reviews/${fundingId}`, userId));
+    }
+
+    const deleteImageUrlSet = new Set(normalizeReviewImageUrlsInput(deleteImageUrls, 'deleteImageUrls'));
+    const currentImageUrls = normalizeReviewImageUrlsInput(current.image_urls);
+    const baseImageUrls = imageUrls !== undefined
+      ? normalizeReviewImageUrlsInput(imageUrls)
+      : currentImageUrls;
+    const nextImageUrls = uniqueValues([
+      ...baseImageUrls.filter((imageUrl) => !deleteImageUrlSet.has(imageUrl)),
+      ...normalizeReviewImageUrlsInput(uploadedImageUrls),
+    ]);
+    const nextTags = tags !== undefined ? normalizeReviewTagsInput(tags) : null;
+    const nextContent = toTrimmedString(content || detailReview) || current.content;
+    const nextRecordVisibility =
+      parseOptionalBoolean(showRecord) ??
+      parseOptionalBoolean(recordVisibility) ??
+      current.record_visibility;
+
+    const result = await pool.query(
+      `
+      UPDATE funding_reviews
+      SET
+        rating = COALESCE($1::numeric, rating),
+        title = COALESCE($2, title),
+        content = $3,
+        image_urls = $4,
+        mood = COALESCE($5, mood),
+        pairing = COALESCE($6, pairing),
+        tags = COALESCE($7, tags),
+        record_visibility = $8,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE review_id = $9
+      RETURNING
+        review_id,
+        funding_id,
+        user_id,
+        rating,
+        title,
+        content,
+        image_urls,
+        mood,
+        pairing,
+        tags,
+        record_visibility,
+        created_at,
+        updated_at
+      `,
+      [
+        normalizedRating,
+        title || null,
+        nextContent,
+        JSON.stringify(nextImageUrls),
+        mood || null,
+        pairing || null,
+        nextTags !== null ? JSON.stringify(nextTags) : null,
+        nextRecordVisibility,
+        Number(reviewId),
+      ]
+    );
+
+    const updatedReview = result.rows[0];
+    if (!updatedReview) {
+      return res.status(404).json({
+        status: 404,
+        message: '후기를 찾을 수 없습니다.',
+      });
+    }
+
+    let review = updatedReview;
+    try {
+      review = await getFundingReviewById({
+        fundingId: Number(fundingId),
+        reviewId: updatedReview.review_id,
+        userId,
+      }) || updatedReview;
+    } catch (lookupError) {
+      console.warn('Funding review lookup failed after update', {
+        fundingId: Number(fundingId),
+        reviewId: Number(updatedReview.review_id),
+        userId,
+        message: lookupError.message,
+      });
+    }
+
+    let aiTasteUpdate = null;
+    try {
+      aiTasteUpdate = await updateFundingReviewAiTasteProfile({
+        userId: writerId || userId,
+        review,
+        requestBody: req.body || {},
+        isCreate: false,
+      });
+    } catch (aiError) {
+      console.warn('Funding review AI taste update failed after review update', {
+        fundingId: Number(fundingId),
+        reviewId: Number(updatedReview.review_id),
+        userId: writerId || userId,
+        message: aiError.message,
+      });
+      aiTasteUpdate = {
+        updated: false,
+        message: 'AI 취향 업데이트에 실패했습니다.',
+      };
+    }
+
+    return res.status(200).json(buildFundingReviewResponse({
+      status: 200,
+      message: '후기가 수정되었습니다.',
+      review,
+      aiTasteUpdate,
+    }));
+  } catch (error) {
+    return sendFundingReviewError(res, error, '후기 수정 중 서버 오류가 발생했습니다.');
+  }
+};
+
 module.exports = {
   saveAgreement,
   createFundingDraft,
@@ -9935,6 +11229,7 @@ module.exports = {
   saveBreweryInfo,
   loadBreweryInfo, //프젝생성추가1 부분
   uploadFundingDraftFile,
+  generateFundingDraftAiImage,
   verifyPhoneForFundingDraft,
   verifyAccountForFundingDraft,//추가4
   requestBankAccountVerification,
@@ -9975,8 +11270,8 @@ module.exports = {
   getFundingShareLink,
   createFundingReport,
   getFundingReports,
-  createFundingReview,
-  updateFundingReview,
+  createFundingReview: createFundingReviewStable,
+  updateFundingReview: updateFundingReviewStable,
   deleteFundingReview,
   getFundingReviewComments,
   createFundingReviewComment,

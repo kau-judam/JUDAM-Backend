@@ -378,6 +378,8 @@ const validateBreweryProfileImageFile = (file) => {
 };
 
 const uploadProfileImageFile = async (file, userId) => {
+  const strictS3 = process.env.FILE_UPLOAD_STRICT_S3 === 'true';
+
   if (process.env.AWS_S3_BUCKET && process.env.AWS_REGION) {
     try {
       return await uploadFileToS3(
@@ -387,10 +389,18 @@ const uploadProfileImageFile = async (file, userId) => {
         userId,
       );
     } catch (error) {
-      if (process.env.FILE_UPLOAD_STRICT_S3 === 'true') {
+      if (strictS3) {
         throw error;
       }
     }
+  }
+
+  if (strictS3) {
+    throw createServiceError(
+      500,
+      'S3 업로드 설정이 필요합니다.',
+      'AWS_S3_BUCKET 또는 AWS_REGION이 설정되지 않았습니다.',
+    );
   }
 
   return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;

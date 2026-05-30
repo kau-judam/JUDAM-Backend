@@ -23,6 +23,7 @@ const {
   saveBreweryInfo,
   loadBreweryInfo,
   uploadFundingDraftFile,
+  generateFundingDraftAiImage,
   verifyPhoneForFundingDraft,
   verifyAccountForFundingDraft,
   requestBankAccountVerification,
@@ -99,6 +100,7 @@ router.patch('/drafts/:draftId/brewery-info', saveBreweryInfo);
 router.patch('/drafts/:draftId/notices', saveNotices);
 
 router.get('/drafts/:draftId/brewery-info/load', loadBreweryInfo);
+router.post('/drafts/:draftId/images/ai-generate', generateFundingDraftAiImage);
 router.post('/drafts/:draftId/files', upload.single('file'), uploadFundingDraftFile);
 router.post('/drafts/:draftId/phone-verification', verifyPhoneForFundingDraft);
 router.post('/drafts/:draftId/account-verification', verifyAccountForFundingDraft);
