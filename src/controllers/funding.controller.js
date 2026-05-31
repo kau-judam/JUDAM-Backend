@@ -1851,7 +1851,17 @@ const updateFundingDraftRowFromPayload = async (draftId, bodyPayload = {}) => {
 const normalizeManagementDraftStatus = (fundingStatus) => {
   const status = toTrimmedString(fundingStatus).toUpperCase();
 
-  if (['ACTIVE', 'ONGOING', 'COMPLETED', 'SUCCESSFUL', 'APPROVED'].includes(status)) {
+  if (
+    [
+      'ACTIVE',
+      'ONGOING',
+      'COMPLETED',
+      'SUCCESSFUL',
+      'APPROVED',
+      'CANCELED',
+      'CANCELLED',
+    ].includes(status)
+  ) {
     return 'APPROVED';
   }
 
@@ -5771,6 +5781,8 @@ const deleteFundingDraft = async (req, res) => {
       'ONGOING',
       'COMPLETED',
       'SUCCESSFUL',
+      'CANCELED',
+      'CANCELLED',
     ];
     const draftStatus = toTrimmedString(draft.status).toUpperCase();
     const fundingStatus = toTrimmedString(draft.funding_status).toUpperCase();
@@ -5928,7 +5940,7 @@ const updateFundingProject = async (req, res) => {
     });
   }
 
-  const allowedStatuses = ['ONGOING', 'ACTIVE', 'ENDED', 'CANCELLED'];
+  const allowedStatuses = ['ONGOING', 'ACTIVE', 'ENDED', 'CANCELED', 'CANCELLED'];
 
   if (status && !allowedStatuses.includes(status)) {
     return res.status(400).json({
