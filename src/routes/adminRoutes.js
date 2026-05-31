@@ -6,6 +6,7 @@ const {
   getSubmittedFundingDrafts,
   approveFundingDraft,
   rejectFundingDraft,
+  cancelFundingProject,
   settleExpiredFundingsManually,
 } = require('../controllers/admin.controller');
 
@@ -25,6 +26,12 @@ const requireAdmin = (req, res, next) => {
 router.get('/fundings/drafts', getSubmittedFundingDrafts);
 router.patch('/fundings/drafts/:draftId/approve', approveFundingDraft);
 router.patch('/fundings/drafts/:draftId/reject', rejectFundingDraft);
+router.patch(
+  '/fundings/:fundingId/cancel',
+  authMiddleware,
+  requireAdmin,
+  cancelFundingProject,
+);
 router.post(
   '/fundings/settle-expired',
   authMiddleware,
