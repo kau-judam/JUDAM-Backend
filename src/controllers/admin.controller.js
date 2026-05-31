@@ -84,6 +84,123 @@ const getSubmittedFundingDrafts = async (req, res) => {
   }
 };
 
+const toPositiveInteger = (value, fallback = null) => {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    return fallback;
+  }
+
+  return Math.floor(numberValue);
+};
+
+const buildDefaultSupportOptionName = (draft, funding) => {
+  const baseName = String(
+    draft.reward_name ||
+    draft.option_name ||
+    draft.short_title ||
+    draft.title ||
+    funding.title ||
+    '기본 후원 옵션'
+  ).trim();
+  const optionName = baseName.endsWith('기본 후원')
+    ? baseName
+    : `${baseName} 기본 후원`;
+
+  return optionName.slice(0, 100);
+};
+
+const ensureDefaultFundingSupportOption = async (client, funding, draft) => {
+  const fundingId = Number(funding?.funding_id || draft?.funding_id);
+
+  if (!Number.isInteger(fundingId) || fundingId <= 0) {
+    return null;
+  }
+
+  const existingOptionResult = await client.query(
+    `
+    SELECT option_id
+    FROM funding_support_options
+    WHERE funding_id = $1
+    LIMIT 1
+    `,
+    [fundingId]
+  );
+
+  if (existingOptionResult.rows.length > 0) {
+    return null;
+  }
+
+  const projectResult = await client.query(
+    `
+    SELECT
+      funding_id,
+      title,
+      price_per_bottle,
+      summary,
+      description
+    FROM funding_projects
+    WHERE funding_id = $1
+    LIMIT 1
+    `,
+    [fundingId]
+  );
+  const project = projectResult.rows[0] || funding || {};
+  const price = toPositiveInteger(draft.price_per_bottle, toPositiveInteger(project.price_per_bottle));
+
+  if (!price) {
+    const error = new Error('후원 옵션 생성을 위한 가격 정보가 없습니다.');
+    error.status = 400;
+    throw error;
+  }
+
+  const stock = toPositiveInteger(
+    draft.total_quantity || draft.stock || draft.target_quantity,
+    100
+  );
+  const maxPerUser = toPositiveInteger(draft.max_per_user || draft.maxPerUser, 10);
+  const optionName = buildDefaultSupportOptionName(draft, project);
+  const description =
+    draft.reward_description ||
+    draft.option_description ||
+    draft.summary ||
+    project.summary ||
+    project.description ||
+    optionName;
+
+  const createdOptionResult = await client.query(
+    `
+    INSERT INTO funding_support_options (
+      funding_id,
+      name,
+      price,
+      description,
+      stock,
+      remaining_stock,
+      max_per_user
+    )
+    VALUES ($1, $2, $3, $4, $5, $5, $6)
+    RETURNING option_id
+    `,
+    [
+      fundingId,
+      optionName,
+      price,
+      description,
+      stock,
+      maxPerUser,
+    ]
+  );
+
+  console.log('Default funding support option created', {
+    fundingId,
+    draftId: draft.draft_id,
+    optionId: createdOptionResult.rows[0]?.option_id,
+  });
+
+  return createdOptionResult.rows[0] || null;
+};
+
 // 관리자 제출 프로젝트 승인
 const approveFundingDraft = async (req, res) => {
   const { draftId } = req.params;
@@ -137,7 +254,7 @@ const approveFundingDraft = async (req, res) => {
             goal_amount = COALESCE($3, goal_amount),
             start_date = COALESCE($4, start_date),
             end_date = COALESCE($5, end_date),
-            status = 'ONGOING',
+            status = 'ACTIVE',
             summary = COALESCE($6, summary),
             category = COALESCE($7, category),
             thumbnail_url = COALESCE($8, thumbnail_url),
@@ -225,7 +342,7 @@ const approveFundingDraft = async (req, res) => {
             creator_introduction
           )
           VALUES (
-            $1, $2, $3, $4, $5, 0, $6, $7, 'ONGOING', $8, $9, $10, $11,
+            $1, $2, $3, $4, $5, 0, $6, $7, 'ACTIVE', $8, $9, $10, $11,
             $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
           )
           RETURNING
@@ -265,6 +382,8 @@ const approveFundingDraft = async (req, res) => {
 
         funding = fundingResult.rows[0];
       }
+
+      await ensureDefaultFundingSupportOption(client, funding, draft);
 
       await client.query(
         `
@@ -308,10 +427,13 @@ const approveFundingDraft = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
+    const status = error.status || 500;
 
-    return res.status(500).json({
-      status: 500,
-      message: '프로젝트 승인 중 서버 오류가 발생했습니다.',
+    return res.status(status).json({
+      status,
+      message: status === 500
+        ? '프로젝트 승인 중 서버 오류가 발생했습니다.'
+        : error.message,
       error: error.message,
     });
   }

@@ -917,9 +917,108 @@ const buildFundingSupportOptionsResponse = ({
   }];
 };
 
+const MAIN_INGREDIENT_LABEL = '메인 재료';
+
 const PLAN_GUIDES = {
-  budgetPlanGuide: '?꾨줈?앺듃 ?덉궛? "- ?꾨줈?앺듃 ?덉궛?? 25留뚯썝" ?뺤떇?쇰줈 ?묒꽦?섎㈃ UI????諛섏쁺?⑸땲??',
-  schedulePlanGuide: '?꾨줈?앺듃 ?쇱젙? "- ?꾨줈?앺듃 ?쇱젙: ?쇱젙?댁슜" ?뺤떇?쇰줈 ?묒꽦?섎㈃ UI????諛섏쁺?⑸땲??',
+  budgetPlanGuide: '프로젝트 예산은 "- 프로젝트 예산: 25만원" 형식으로 작성하면 UI에 반영됩니다.',
+  schedulePlanGuide: '프로젝트 일정은 "- 프로젝트 일정: 일정 내용" 형식으로 작성하면 UI에 반영됩니다.',
+};
+
+const FUNDING_TEXT_FIXTURES = {
+  3: {
+    mainIngredient: '쌀',
+    subIngredients: ['산사'],
+    rawMaterials: [
+      { name: '쌀', origin: '국산' },
+      { name: '산사', origin: '국산' },
+    ],
+    flavorNotes: ['달콤하고 산뜻한 산사향'],
+    flavorTags: ['달콤하고 산뜻한 산사향'],
+  },
+};
+
+const hasBrokenKoreanText = (value) => {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(hasBrokenKoreanText);
+  }
+
+  if (typeof value === 'object') {
+    return Object.values(value).some(hasBrokenKoreanText);
+  }
+
+  const text = String(value);
+  return text.includes('\uFFFD') || text.includes('�');
+};
+
+const getFundingTextFixture = (fundingId) =>
+  FUNDING_TEXT_FIXTURES[Number(fundingId)] || null;
+
+const normalizeDisplayText = (value, fallback = null) => {
+  const text = toTrimmedString(value);
+
+  if (!text || hasBrokenKoreanText(text)) {
+    return fallback;
+  }
+
+  return text;
+};
+
+const normalizeDisplayList = (value, fallback = []) => {
+  const normalized = parseFundingListField(value)
+    .map((item) => normalizeDisplayText(item))
+    .filter(Boolean);
+
+  return normalized.length > 0 ? normalized : fallback;
+};
+
+const normalizeDisplayRawMaterials = (value, fallback = []) => {
+  const normalized = parseFundingRawMaterialsField(value)
+    .map((material) => ({
+      ...material,
+      name: normalizeDisplayText(material.name),
+      origin: normalizeDisplayText(material.origin),
+    }))
+    .filter((material) => material.name || material.origin);
+
+  return normalized.length > 0 ? normalized : fallback;
+};
+
+const buildFundingIngredientContext = (funding = {}) => {
+  const fixture = getFundingTextFixture(funding.funding_id);
+  const mainIngredient = normalizeDisplayText(
+    funding.main_ingredient || funding.recipe_main_ingredient,
+    fixture?.mainIngredient || null,
+  );
+  const subIngredients = normalizeDisplayList(
+    funding.sub_ingredients || funding.recipe_sub_ingredient,
+    fixture?.subIngredients || [],
+  );
+  const rawMaterials = normalizeDisplayRawMaterials(
+    funding.raw_materials,
+    fixture?.rawMaterials || [],
+  );
+  const ingredientNames = rawMaterials
+    .map((material) => material.name)
+    .filter(Boolean);
+  const ingredients = uniqueValues([
+    mainIngredient,
+    ...subIngredients,
+    ...ingredientNames,
+  ].filter(Boolean));
+
+  return {
+    mainIngredient,
+    primaryIngredient: mainIngredient,
+    subIngredient: subIngredients[0] || null,
+    subIngredients,
+    ingredients,
+    rawMaterials,
+    ingredientDetails: rawMaterials,
+  };
 };
 
 const parseTasteProfileExtras = (flavorNotesValue) => {
@@ -998,6 +1097,9 @@ const buildTasteProfileStorage = ({
 const buildTasteProfileResponse = (source = {}) => {
   const extras = parseTasteProfileExtras(source.flavor_notes);
   const alcoholIntensity = source.alcohol_intensity ?? source.alcoholIntensity ?? null;
+  const fixture = getFundingTextFixture(source.funding_id || source.fundingId);
+  const flavorNotes = normalizeDisplayList(extras.flavorNotes, fixture?.flavorNotes || []);
+  const flavorTags = normalizeDisplayList(extras.flavorTags, fixture?.flavorTags || flavorNotes);
 
   return {
     abv: source.alcohol_percentage ?? source.abv ?? null,
@@ -1012,8 +1114,8 @@ const buildTasteProfileResponse = (source = {}) => {
     aromaIntensity: source.aroma_intensity ?? source.aromaIntensity ?? extras.aromaIntensity,
     finish: source.finish ?? source.aftertaste ?? extras.finish,
     aftertaste: source.aftertaste ?? source.finish ?? extras.finish,
-    flavorNotes: extras.flavorNotes,
-    flavorTags: extras.flavorTags,
+    flavorNotes,
+    flavorTags,
     tasteInput: extras.tasteInput || {
       sweetness: source.sweetness,
       body: source.body,
@@ -6661,13 +6763,15 @@ const getFundingDetail = async (req, res) => {
 
     const funding = fundingResult.rows[0];
     const imageFields = buildImageFields(funding.thumbnail_url, funding.image_urls);
-    const mainIngredient = funding.main_ingredient || null;
-    const subIngredients = parseFundingListField(funding.sub_ingredients);
-    const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
-    const parsedRawMaterials = parseFundingRawMaterialsField(funding.raw_materials);
-    const rawMaterials = parsedRawMaterials.length > 0
-      ? parsedRawMaterials
-      : parseFundingRawMaterialsField([mainIngredient, ...subIngredients].filter(Boolean));
+    const {
+      mainIngredient,
+      primaryIngredient,
+      subIngredient,
+      subIngredients,
+      ingredients,
+      rawMaterials,
+      ingredientDetails,
+    } = buildFundingIngredientContext(funding);
 
     const optionResult = await pool.query(
       `
@@ -6776,6 +6880,7 @@ const getFundingDetail = async (req, res) => {
     const tasteProfile = taste
       ? buildTasteProfileResponse({
           ...taste,
+          funding_id: funding.funding_id,
           alcohol_percentage: funding.alcohol_percentage,
         })
       : null;
@@ -6789,14 +6894,14 @@ const getFundingDetail = async (req, res) => {
       category: funding.category,
       shortTitle: funding.short_title,
       mainIngredient,
-      primaryIngredient: mainIngredient,
-      mainIngredientLabel: '硫붿씤 ?щ즺',
-      primaryIngredientLabel: '硫붿씤 ?щ즺',
-      subIngredient: subIngredients[0] || null,
+      primaryIngredient,
+      mainIngredientLabel: MAIN_INGREDIENT_LABEL,
+      primaryIngredientLabel: MAIN_INGREDIENT_LABEL,
+      subIngredient,
       subIngredients,
       ingredients,
       rawMaterials,
-      ingredientDetails: rawMaterials,
+      ingredientDetails,
       tags: parseJsonField(funding.tags),
       thumbnailUrl: imageFields.thumbnailUrl,
       imageUrls: imageFields.imageUrls,
@@ -6833,8 +6938,8 @@ const getFundingDetail = async (req, res) => {
         volume: funding.volume,
         alcoholPercentage: funding.alcohol_percentage,
         mainIngredient,
-        primaryIngredient: mainIngredient,
-        subIngredient: subIngredients[0] || null,
+        primaryIngredient,
+        subIngredient,
         subIngredients,
         ingredients,
         rawMaterials,
@@ -6989,9 +7094,13 @@ const getFundingIntro = async (req, res) => {
     }
 
     const funding = result.rows[0];
-    const subIngredients = parseFundingListField(funding.sub_ingredients || funding.recipe_sub_ingredient);
-    const mainIngredient = funding.main_ingredient || funding.recipe_main_ingredient || null;
-    const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
+    const {
+      mainIngredient,
+      primaryIngredient,
+      subIngredient,
+      subIngredients,
+      ingredients,
+    } = buildFundingIngredientContext(funding);
     const imageFields = buildImageFields(funding.thumbnail_url, funding.image_urls);
     const budgetPlan = parseOriginalTextField(funding.budget_plan);
     const schedulePlan = parseOriginalTextField(funding.schedule_plan);
@@ -7003,10 +7112,10 @@ const getFundingIntro = async (req, res) => {
       introduction: funding.draft_introduction || funding.summary || funding.description || funding.recipe_content || '',
       story: funding.description || funding.recipe_content || funding.concept || '',
       mainIngredient,
-      primaryIngredient: mainIngredient,
-      mainIngredientLabel: '硫붿씤 ?щ즺',
-      primaryIngredientLabel: '硫붿씤 ?щ즺',
-      subIngredient: subIngredients[0] || null,
+      primaryIngredient,
+      mainIngredientLabel: MAIN_INGREDIENT_LABEL,
+      primaryIngredientLabel: MAIN_INGREDIENT_LABEL,
+      subIngredient,
       subIngredients,
       ingredients,
       videoUrl: funding.video_url,
@@ -8576,9 +8685,13 @@ const getSupportOptions = async (req, res) => {
     }
 
     const funding = fundingResult.rows[0];
-    const mainIngredient = funding.main_ingredient || null;
-    const subIngredients = parseFundingListField(funding.sub_ingredients);
-    const ingredients = [mainIngredient, ...subIngredients].filter(Boolean);
+    const {
+      mainIngredient,
+      primaryIngredient,
+      subIngredient,
+      subIngredients,
+      ingredients,
+    } = buildFundingIngredientContext(funding);
 
     const result = await pool.query(
       `
@@ -8606,10 +8719,10 @@ const getSupportOptions = async (req, res) => {
       volume: funding.volume,
       alcoholPercentage: funding.alcohol_percentage,
       mainIngredient,
-      primaryIngredient: mainIngredient,
-      mainIngredientLabel: '硫붿씤 ?щ즺',
-      primaryIngredientLabel: '硫붿씤 ?щ즺',
-      subIngredient: subIngredients[0] || null,
+      primaryIngredient,
+      mainIngredientLabel: MAIN_INGREDIENT_LABEL,
+      primaryIngredientLabel: MAIN_INGREDIENT_LABEL,
+      subIngredient,
       subIngredients,
       ingredients,
       supportOptions: buildFundingSupportOptionsResponse({
