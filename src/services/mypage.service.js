@@ -2058,6 +2058,26 @@ const createMyArchive = async (userId, payload) => {
   try {
     await client.query('BEGIN');
 
+    // 펀딩 술(FUNDING)은 한 펀딩당 1회만 기록 가능 — 삭제되지 않은 동일 펀딩 기록이 있으면 중복 작성 차단
+    if (archiveData.archiveType === 'FUNDING' && archiveData.fundingId) {
+      const { rows: existingFundingArchive } = await client.query(
+        `
+          SELECT 1
+          FROM user_archives
+          WHERE user_id = $1
+            AND archive_type = 'FUNDING'
+            AND funding_id = $2
+            AND deleted_at IS NULL
+          LIMIT 1
+        `,
+        [userId, archiveData.fundingId],
+      );
+
+      if (existingFundingArchive.length > 0) {
+        throw createServiceError(400, '이미 기록한 펀딩입니다.');
+      }
+    }
+
     const tagIds = await resolveArchiveTagIds(
       client,
       archiveData.tagIds,
@@ -2503,6 +2523,14 @@ const getParticipatedFundings = async (userId) => {
         WHERE o.user_id = $1
           AND o.order_status = 'PAID'
           AND o.funding_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM user_archives ua
+            WHERE ua.user_id = $1
+              AND ua.archive_type = 'FUNDING'
+              AND ua.funding_id = o.funding_id
+              AND ua.deleted_at IS NULL
+          )
         ORDER BY o.funding_id, o.order_id DESC
       ) recent
       JOIN funding_projects fp ON fp.funding_id = recent.funding_id
