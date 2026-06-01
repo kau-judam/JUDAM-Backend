@@ -461,7 +461,7 @@ const rejectFundingDraft = async (req, res) => {
   try {
     const draftResult = await pool.query(
       `
-      SELECT draft_id, status
+      SELECT draft_id, funding_id, status
       FROM funding_drafts
       WHERE draft_id = $1
       `,
@@ -477,31 +477,65 @@ const rejectFundingDraft = async (req, res) => {
 
     const draft = draftResult.rows[0];
 
-    if (draft.status !== 'SUBMITTED') {
+    if (!['SUBMITTED', 'REVIEWING'].includes(draft.status)) {
       return res.status(400).json({
         status: 400,
-        message: '제출된 프로젝트만 반려할 수 있습니다.',
+        message: '심사 중인 프로젝트만 반려할 수 있습니다.',
       });
     }
 
-    const result = await pool.query(
-      `
-      UPDATE funding_drafts
-      SET
-        status = 'REJECTED',
-        reject_reason = $1,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $2
-      RETURNING draft_id, status, reject_reason, updated_at
-      `,
-      [rejectReason.trim(), Number(draftId)]
-    );
+    const client = await pool.connect();
+    let rejectedDraft;
+    let rejectedFunding = null;
 
-    const rejectedDraft = result.rows[0];
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query(
+        `
+        UPDATE funding_drafts
+        SET
+          status = 'REJECTED',
+          reject_reason = $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE draft_id = $2
+        RETURNING draft_id, funding_id, status, reject_reason, updated_at
+        `,
+        [rejectReason.trim(), Number(draftId)]
+      );
+
+      rejectedDraft = result.rows[0];
+
+      if (rejectedDraft.funding_id) {
+        const fundingResult = await client.query(
+          `
+          UPDATE funding_projects
+          SET
+            status = 'REJECTED',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE funding_id = $1
+            AND status IN ('READY', 'REVIEWING', 'SUBMITTED', 'ONGOING')
+          RETURNING funding_id, status, updated_at
+          `,
+          [Number(rejectedDraft.funding_id)]
+        );
+
+        rejectedFunding = fundingResult.rows[0] || null;
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
 
     return res.status(200).json({
       draftId: rejectedDraft.draft_id,
+      fundingId: rejectedDraft.funding_id ? Number(rejectedDraft.funding_id) : null,
       status: rejectedDraft.status,
+      projectStatus: rejectedFunding?.status || null,
       rejectReason: rejectedDraft.reject_reason,
       updatedAt: rejectedDraft.updated_at,
       message: '프로젝트가 반려되었습니다.',
