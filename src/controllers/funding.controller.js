@@ -7269,7 +7269,7 @@ const createBreweryLog = async (req, res) => {
     const hasVideoUrl = hasBreweryLogVideoUrlField(req.body);
     const videoUrl = hasVideoUrl ? getBreweryLogVideoUrlFromBody(req.body) : null;
 
-    if (hasVideoUrl && !breweryLogColumns.has('video_url')) {
+    if (videoUrl && !breweryLogColumns.has('video_url')) {
       return res.status(500).json({
         status: 500,
         message: '양조일지 영상 URL 저장 컬럼이 아직 DB에 적용되지 않았습니다.',
@@ -7417,7 +7417,7 @@ const updateBreweryLog = async (req, res) => {
     const breweryLogColumns = await getBreweryLogOptionalColumns();
     const videoUrl = getBreweryLogVideoUrlFromBody(req.body);
 
-    if (hasVideoUrl && !breweryLogColumns.has('video_url')) {
+    if (videoUrl && !breweryLogColumns.has('video_url')) {
       return res.status(500).json({
         status: 500,
         message: '양조일지 영상 URL 저장 컬럼이 아직 DB에 적용되지 않았습니다.',
@@ -7435,8 +7435,13 @@ const updateBreweryLog = async (req, res) => {
     const currentSelect = [
       'log_id',
       'funding_id',
+      'step',
+      'title',
+      'content',
       'image_urls',
       breweryLogColumns.has('video_url') ? 'video_url' : 'NULL::text AS video_url',
+      'created_at',
+      breweryLogColumns.has('updated_at') ? 'updated_at' : 'created_at AS updated_at',
     ];
     const currentResult = await pool.query(
       `
@@ -7492,9 +7497,18 @@ const updateBreweryLog = async (req, res) => {
     if (title) addSet('title', title);
     if (content) addSet('content', content);
     if (normalizedImageUrls) addSet('image_urls', JSON.stringify(normalizedImageUrls));
-    if (hasVideoUrl) addSet('video_url', videoUrl);
+    if (hasVideoUrl && breweryLogColumns.has('video_url')) {
+      addSet('video_url', videoUrl);
+    }
     if (breweryLogColumns.has('updated_at')) {
       setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    }
+
+    if (setClauses.length === 0) {
+      return res.status(200).json({
+        ...mapBreweryLogResponse(currentResult.rows[0]),
+        message: '양조일지가 수정되었습니다.',
+      });
     }
 
     values.push(resolvedFundingId);
