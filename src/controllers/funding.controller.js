@@ -1227,6 +1227,8 @@ const mapFundingReview = (review) => {
     ? null
     : Number(review.user_id);
   const imageUrls = mapReviewImageUrls(review.image_urls);
+  const writerIsBrewery = isBreweryWriterRole(review.writer_role);
+  const isProjectOwner = toRequiredBoolean(review.is_project_owner);
 
   return {
     reviewId: Number(review.review_id),
@@ -1240,9 +1242,11 @@ const mapFundingReview = (review) => {
     profileImage: review.writer_profile_image || null,
     writerRole: normalizeWriterRole(review.writer_role),
     role: normalizeWriterRole(review.writer_role),
-    isBrewery: isBreweryWriterRole(review.writer_role),
-    writerIsBrewery: isBreweryWriterRole(review.writer_role),
-    isProjectOwner: Boolean(review.is_project_owner),
+    isBrewery: writerIsBrewery,
+    writerIsBrewery,
+    isProjectOwner,
+    showBreweryBadge: isProjectOwner,
+    breweryBadge: isProjectOwner,
     rating: Number(review.rating),
     title: review.title,
     content: review.content,
@@ -1283,6 +1287,8 @@ const mapFundingReviewComment = (comment) => {
   const writerId = comment.user_id === null || comment.user_id === undefined
     ? null
     : Number(comment.user_id);
+  const writerIsBrewery = isBreweryWriterRole(comment.writer_role);
+  const isProjectOwner = toRequiredBoolean(comment.is_project_owner);
 
   return {
     commentId: Number(comment.comment_id),
@@ -1297,9 +1303,11 @@ const mapFundingReviewComment = (comment) => {
     profileImage: comment.writer_profile_image || null,
     writerRole: normalizeWriterRole(comment.writer_role),
     role: normalizeWriterRole(comment.writer_role),
-    isBrewery: isBreweryWriterRole(comment.writer_role),
-    writerIsBrewery: isBreweryWriterRole(comment.writer_role),
-    isProjectOwner: Boolean(comment.is_project_owner),
+    isBrewery: writerIsBrewery,
+    writerIsBrewery,
+    isProjectOwner,
+    showBreweryBadge: isProjectOwner,
+    breweryBadge: isProjectOwner,
     content: comment.content,
     likeCount: Number(comment.like_count || 0),
     liked: Boolean(comment.liked),
