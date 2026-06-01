@@ -2058,6 +2058,26 @@ const createMyArchive = async (userId, payload) => {
   try {
     await client.query('BEGIN');
 
+    // 펀딩 술(FUNDING)은 한 펀딩당 1회만 기록 가능 — 삭제되지 않은 동일 펀딩 기록이 있으면 중복 작성 차단
+    if (archiveData.archiveType === 'FUNDING' && archiveData.fundingId) {
+      const { rows: existingFundingArchive } = await client.query(
+        `
+          SELECT 1
+          FROM user_archives
+          WHERE user_id = $1
+            AND archive_type = 'FUNDING'
+            AND funding_id = $2
+            AND deleted_at IS NULL
+          LIMIT 1
+        `,
+        [userId, archiveData.fundingId],
+      );
+
+      if (existingFundingArchive.length > 0) {
+        throw createServiceError(400, '이미 기록한 펀딩입니다.');
+      }
+    }
+
     const tagIds = await resolveArchiveTagIds(
       client,
       archiveData.tagIds,
@@ -2416,6 +2436,191 @@ const deleteArchiveImage = async (userId, archiveId, imageId) => {
   }
 };
 
+// raw_materials(JSONB 배열)에서 재료명을 추출해 쉼표로 연결. 값이 없으면 null.
+const buildIngredientsText = (rawMaterials) => {
+  if (!rawMaterials) {
+    return null;
+  }
+
+  let list = rawMaterials;
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  if (!Array.isArray(list)) {
+    return null;
+  }
+
+  const names = list
+    .map((item) => {
+      if (!item) {
+        return null;
+      }
+      if (typeof item === 'string') {
+        return item.trim();
+      }
+      const name = item.name
+        || item.ingredient
+        || item.rawMaterial
+        || item.raw_material
+        || item.mainIngredient;
+      return typeof name === 'string' ? name.trim() : null;
+    })
+    .filter((name) => name);
+
+  return names.length > 0 ? names.join(', ') : null;
+};
+
+// funding_reviews.image_urls(JSONB 배열) → [{ imageId, imageUrl, sortOrder }]
+const mapFundingReviewImages = (imageUrls) => {
+  let list = imageUrls;
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list);
+    } catch (error) {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  return list
+    .filter((url) => typeof url === 'string' && url.trim().length > 0)
+    .map((url, index) => ({
+      imageId: index + 1,
+      imageUrl: url,
+      sortOrder: index,
+    }));
+};
+
+// 마이페이지 참여 펀딩 목록 (GET /api/mypage/fundings/participated)
+// 결제 완료(PAID)한 주문이 있는 펀딩을 펀딩당 1행으로 반환. 최근 참여순.
+const getParticipatedFundings = async (userId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        recent.funding_id,
+        recent.order_id,
+        fp.title AS project_name,
+        fp.alcohol_percentage AS abv,
+        fp.thumbnail_url,
+        fp.status AS funding_status,
+        fp.raw_materials,
+        ba.brewery_name,
+        u.nickname AS brewery_nickname,
+        fr.review_id
+      FROM (
+        SELECT DISTINCT ON (o.funding_id)
+          o.funding_id,
+          o.order_id
+        FROM orders o
+        WHERE o.user_id = $1
+          AND o.order_status = 'PAID'
+          AND o.funding_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM user_archives ua
+            WHERE ua.user_id = $1
+              AND ua.archive_type = 'FUNDING'
+              AND ua.funding_id = o.funding_id
+              AND ua.deleted_at IS NULL
+          )
+        ORDER BY o.funding_id, o.order_id DESC
+      ) recent
+      JOIN funding_projects fp ON fp.funding_id = recent.funding_id
+      LEFT JOIN users u ON u.user_id = fp.brewery_user_id
+      LEFT JOIN LATERAL (
+        SELECT brewery_name
+        FROM brewery_auth
+        WHERE user_id = fp.brewery_user_id
+        ORDER BY
+          CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
+          updated_at DESC,
+          application_id DESC
+        LIMIT 1
+      ) ba ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT review_id
+        FROM funding_reviews
+        WHERE funding_id = recent.funding_id
+          AND user_id = $1
+        ORDER BY review_id DESC
+        LIMIT 1
+      ) fr ON TRUE
+      ORDER BY recent.order_id DESC
+    `,
+    [userId],
+  );
+
+  return rows.map((row) => {
+    const reviewId = row.review_id === null || row.review_id === undefined
+      ? null
+      : Number(row.review_id);
+
+    return {
+      fundingId: Number(row.funding_id),
+      orderId: Number(row.order_id),
+      projectName: row.project_name,
+      drinkName: row.project_name,
+      breweryName: row.brewery_name || row.brewery_nickname || null,
+      ingredients: buildIngredientsText(row.raw_materials),
+      abv: toNullableNumber(row.abv),
+      thumbnailUrl: row.thumbnail_url || null,
+      fundingStatus: row.funding_status,
+      hasReview: reviewId !== null,
+      reviewId,
+    };
+  });
+};
+
+// 펀딩 후기 불러오기 (GET /api/mypage/fundings/{fundingId}/review)
+// 본인이 작성한 후기 1건을 아카이브 작성 폼에 채울 수 있는 형태로 반환. 없으면 null.
+const getMyFundingReview = async (userId, fundingId) => {
+  const parsedFundingId = Number(fundingId);
+
+  if (!Number.isInteger(parsedFundingId) || parsedFundingId <= 0) {
+    throw createServiceError(400, '유효하지 않은 펀딩 ID입니다.');
+  }
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        review_id,
+        rating,
+        content,
+        mood,
+        pairing,
+        image_urls
+      FROM funding_reviews
+      WHERE funding_id = $1
+        AND user_id = $2
+      ORDER BY review_id DESC
+      LIMIT 1
+    `,
+    [parsedFundingId, userId],
+  );
+
+  const review = rows[0];
+  if (!review) {
+    return null;
+  }
+
+  return {
+    reviewId: Number(review.review_id),
+    rating: toNullableNumber(review.rating),
+    tastingNote: review.content,
+    mood: review.mood,
+    pairing: review.pairing,
+    images: mapFundingReviewImages(review.image_urls),
+  };
+};
+
 module.exports = {
   getMyProfile,
   checkNickname,
@@ -2453,4 +2658,6 @@ module.exports = {
   mapArchiveResponse,
   validateArchivePayload,
   validateTagIds,
+  getParticipatedFundings,
+  getMyFundingReview,
 };
