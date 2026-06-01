@@ -119,6 +119,10 @@ jobs:
           OCTOMO_API_URL=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('OCTOMO_API_URL', 'https://api.octoverse.kr/octomo/v1/public/message/exists'))")
           OCTOMO_RECEIVE_NUMBER=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('OCTOMO_RECEIVE_NUMBER', '1666-3538'))")
           TOSS_SECRET_KEY=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('TOSS_SECRET_KEY', ''))")
+          PASSWORD_RESET_SECRET=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('PASSWORD_RESET_SECRET', ''))")
+          MAIL_PROVIDER=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('MAIL_PROVIDER', 'ses'))")
+          MAIL_FROM=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('MAIL_FROM', ''))")
+          AWS_SES_REGION=$(python3 -c "import json, os; print(json.loads(os.environ['SECRET_JSON']).get('AWS_SES_REGION', 'ap-northeast-2'))")
 
           ENV_TMP=$(mktemp .env.XXXXXX)
 
@@ -144,6 +148,11 @@ jobs:
             echo "PUBLIC_WEB_BASE_URL=$PUBLIC_WEB_BASE_URL"
             echo "FRONTEND_BASE_URL=$FRONTEND_BASE_URL"
             echo "TOSS_SECRET_KEY=$TOSS_SECRET_KEY"
+            echo "TOSS_SECRET_KEY=$TOSS_SECRET_KEY"
+            echo "PASSWORD_RESET_SECRET=$PASSWORD_RESET_SECRET"
+            echo "MAIL_PROVIDER=$MAIL_PROVIDER"
+            echo "MAIL_FROM=$MAIL_FROM"
+            echo "AWS_SES_REGION=$AWS_SES_REGION"
           } > "$ENV_TMP"
 
           chmod 600 "$ENV_TMP"
