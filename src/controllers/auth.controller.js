@@ -1,4 +1,3 @@
-const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { getKakaoToken, getKakaoUserInfo } = require('../services/kakao.service');
 const {
@@ -12,9 +11,6 @@ const {
   updateUserRole,
   isNicknameUsedByAnotherUser,
   isNicknameExists,
-  createPasswordResetVerification,
-  verifyPasswordResetVerification,
-  resetPasswordWithVerification,
 } = require('../services/user.service');
 const {
   generateAccessToken,
@@ -29,6 +25,12 @@ const {
   confirmAuthPhoneVerification,
   verifyAuthPhoneVerificationToken,
 } = require('../services/auth-phone.service');
+const {
+  PASSWORD_RESET_EXPIRES_IN_MINUTES,
+  requestPasswordResetVerification,
+  verifyPasswordResetCode,
+  confirmPasswordReset,
+} = require('../services/auth.service');
 
 const sendError = (res, status, message, error) => {
   return res.status(status).json({
@@ -42,7 +44,6 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NICKNAME_PATTERN = /^[가-힣A-Za-z0-9]{2,12}$/u;
 const PASSWORD_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
 const ALLOWED_SIGNUP_ROLES = new Set(['USER', 'BREWERY_PENDING']);
-const PASSWORD_RESET_EXPIRES_IN_MINUTES = 5;
 const DEFAULT_KAKAO_APP_REDIRECT_URI = 'judamfrontend://kakao/callback';
 
 const normalizeString = (value) => {
@@ -94,7 +95,7 @@ const buildKakaoAuthUrl = (redirectUri, state) => {
   kakaoAuthUrl.searchParams.set('response_type', 'code');
   kakaoAuthUrl.searchParams.set('client_id', process.env.KAKAO_REST_API_KEY);
   kakaoAuthUrl.searchParams.set('scope', 'account_email profile_nickname profile_image');
-  // redirectUri는 카카오 개발자 콘솔에 등록된 값만 정상 동작한다.
+  // redirectUri??移댁뭅??媛쒕컻??肄섏넄???깅줉??媛믩쭔 ?뺤긽 ?숈옉?쒕떎.
   kakaoAuthUrl.searchParams.set('redirect_uri', redirectUri);
   if (state) {
     kakaoAuthUrl.searchParams.set('state', state);
@@ -152,11 +153,6 @@ const appendQueryParams = (baseUrl, params) => {
   return url.toString();
 };
 
-const generatePasswordResetCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-
-const sendPasswordResetEmail = async () => {
-  // MVP에서는 이메일 발송 대신 응답에 인증번호를 포함한다.
-};
 
 const checkEmail = async (req, res) => {
   const email = normalizeString(req.query?.email).toLowerCase();
@@ -164,14 +160,14 @@ const checkEmail = async (req, res) => {
   if (!email) {
     return res.status(400).json({
       status: 400,
-      message: '이메일을 입력해주세요.',
+      message: '?대찓?쇱쓣 ?낅젰?댁＜?몄슂.',
     });
   }
 
   if (!EMAIL_PATTERN.test(email)) {
     return res.status(400).json({
       status: 400,
-      message: '이메일 형식이 올바르지 않습니다.',
+      message: '?대찓???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -181,7 +177,7 @@ const checkEmail = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: isAvailable ? '사용 가능한 이메일입니다.' : '이미 사용 중인 이메일입니다.',
+      message: isAvailable ? '?ъ슜 媛?ν븳 ?대찓?쇱엯?덈떎.' : '?대? ?ъ슜 以묒씤 ?대찓?쇱엯?덈떎.',
       data: {
         email,
         isAvailable,
@@ -190,7 +186,7 @@ const checkEmail = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '이메일 중복 확인 중 서버 오류가 발생했습니다.',
+      message: '?대찓??以묐났 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -201,14 +197,14 @@ const checkNickname = async (req, res) => {
   if (!nickname) {
     return res.status(400).json({
       status: 400,
-      message: '닉네임을 입력해주세요.',
+      message: '?됰꽕?꾩쓣 ?낅젰?댁＜?몄슂.',
     });
   }
 
   if (!NICKNAME_PATTERN.test(nickname)) {
     return res.status(400).json({
       status: 400,
-      message: '닉네임은 2자 이상 12자 이하의 한글, 영문, 숫자만 사용할 수 있습니다.',
+      message: '?됰꽕?꾩? 2???댁긽 12???댄븯???쒓?, ?곷Ц, ?レ옄留??ъ슜?????덉뒿?덈떎.',
     });
   }
 
@@ -217,7 +213,7 @@ const checkNickname = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: isAvailable ? '사용 가능한 닉네임입니다.' : '이미 사용 중인 닉네임입니다.',
+      message: isAvailable ? '?ъ슜 媛?ν븳 ?됰꽕?꾩엯?덈떎.' : '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
       data: {
         nickname,
         isAvailable,
@@ -226,7 +222,7 @@ const checkNickname = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '닉네임 중복 확인 중 서버 오류가 발생했습니다.',
+      message: '?됰꽕??以묐났 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -249,42 +245,42 @@ const signup = async (req, res) => {
   if (!email || !password || !nickname) {
     return res.status(400).json({
       status: 400,
-      message: 'email, password, nickname은 필수입니다.',
+      message: 'email, password, nickname? ?꾩닔?낅땲??',
     });
   }
 
   if (!EMAIL_PATTERN.test(email)) {
     return res.status(400).json({
       status: 400,
-      message: '이메일 형식이 올바르지 않습니다.',
+      message: '?대찓???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (!PASSWORD_PATTERN.test(password)) {
     return res.status(400).json({
       status: 400,
-      message: '비밀번호는 8자 이상이며 영문 대문자, 영문 소문자, 숫자를 모두 포함해야 합니다.',
+      message: '鍮꾨?踰덊샇??8???댁긽?대ŉ ?곷Ц ?臾몄옄, ?곷Ц ?뚮Ц?? ?レ옄瑜?紐⑤몢 ?ы븿?댁빞 ?⑸땲??',
     });
   }
 
   if (!NICKNAME_PATTERN.test(nickname)) {
     return res.status(400).json({
       status: 400,
-      message: '닉네임은 2자 이상 12자 이하의 한글, 영문, 숫자만 사용할 수 있습니다.',
+      message: '?됰꽕?꾩? 2???댁긽 12???댄븯???쒓?, ?곷Ц, ?レ옄留??ъ슜?????덉뒿?덈떎.',
     });
   }
 
   if (!termsAgreed || !privacyAgreed) {
     return res.status(400).json({
       status: 400,
-      message: '필수 약관에 동의해주세요.',
+      message: '?꾩닔 ?쎄????숈쓽?댁＜?몄슂.',
     });
   }
 
   if (!ALLOWED_SIGNUP_ROLES.has(role)) {
     return res.status(400).json({
       status: 400,
-      message: '유효하지 않은 사용자 유형입니다.',
+      message: '?좏슚?섏? ?딆? ?ъ슜???좏삎?낅땲??',
     });
   }
 
@@ -299,7 +295,7 @@ const signup = async (req, res) => {
       if (!phoneVerification.isValid) {
         return res.status(400).json({
           status: 400,
-          message: '전화번호 인증이 필요합니다.',
+          message: '?꾪솕踰덊샇 ?몄쬆???꾩슂?⑸땲??',
         });
       }
 
@@ -311,7 +307,7 @@ const signup = async (req, res) => {
     if (existingUser) {
       return res.status(409).json({
         status: 409,
-        message: '이미 사용 중인 이메일입니다.',
+        message: '?대? ?ъ슜 以묒씤 ?대찓?쇱엯?덈떎.',
       });
     }
 
@@ -320,7 +316,7 @@ const signup = async (req, res) => {
     if (duplicatedNickname) {
       return res.status(409).json({
         status: 409,
-        message: '이미 사용 중인 닉네임입니다.',
+        message: '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
       });
     }
 
@@ -341,7 +337,7 @@ const signup = async (req, res) => {
 
     return res.status(201).json({
       status: 201,
-      message: '회원가입 성공',
+      message: '?뚯썝媛???깃났',
       data: {
         ...signupUser,
         accessToken,
@@ -359,7 +355,7 @@ const signup = async (req, res) => {
       if (existingUser) {
         return res.status(409).json({
           status: 409,
-          message: '이미 사용 중인 이메일입니다.',
+          message: '?대? ?ъ슜 以묒씤 ?대찓?쇱엯?덈떎.',
         });
       }
 
@@ -368,13 +364,13 @@ const signup = async (req, res) => {
       if (duplicatedNickname) {
         return res.status(409).json({
           status: 409,
-          message: '이미 사용 중인 닉네임입니다.',
+          message: '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
         });
       }
 
       return res.status(409).json({
         status: 409,
-        message: '이미 사용 중인 이메일입니다.',
+        message: '?대? ?ъ슜 以묒씤 ?대찓?쇱엯?덈떎.',
       });
     }
 
@@ -387,7 +383,7 @@ const signup = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '회원가입 중 서버 오류가 발생했습니다.',
+      message: '?뚯썝媛??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -399,7 +395,7 @@ const login = async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({
       status: 400,
-      message: 'email, password는 필수입니다.',
+      message: 'email, password???꾩닔?낅땲??',
     });
   }
 
@@ -409,14 +405,14 @@ const login = async (req, res) => {
     if (!user) {
       return res.status(401).json({
         status: 401,
-        message: '이메일 또는 비밀번호가 올바르지 않습니다.',
+        message: '?대찓???먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
       });
     }
 
     if (user.provider !== 'local') {
       return res.status(400).json({
         status: 400,
-        message: '소셜 로그인으로 가입된 계정입니다.',
+        message: '?뚯뀥 濡쒓렇?몄쑝濡?媛?낅맂 怨꾩젙?낅땲??',
       });
     }
 
@@ -425,7 +421,7 @@ const login = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         status: 401,
-        message: '이메일 또는 비밀번호가 올바르지 않습니다.',
+        message: '?대찓???먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
       });
     }
 
@@ -435,7 +431,7 @@ const login = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '로그인 성공',
+      message: '濡쒓렇???깃났',
       data: {
         accessToken,
         refreshToken,
@@ -445,7 +441,7 @@ const login = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '로그인 중 서버 오류가 발생했습니다.',
+      message: '濡쒓렇??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -457,14 +453,14 @@ const updateMyRole = async (req, res) => {
   if (!userId) {
     return res.status(401).json({
       status: 401,
-      message: '유효하지 않거나 만료된 토큰입니다.',
+      message: '?좏슚?섏? ?딄굅??留뚮즺???좏겙?낅땲??',
     });
   }
 
   if (!ALLOWED_SIGNUP_ROLES.has(role)) {
     return res.status(400).json({
       status: 400,
-      message: '변경할 수 없는 사용자 유형입니다.',
+      message: '蹂寃쏀븷 ???녿뒗 ?ъ슜???좏삎?낅땲??',
     });
   }
 
@@ -473,7 +469,7 @@ const updateMyRole = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '사용자 유형 변경 성공',
+      message: '?ъ슜???좏삎 蹂寃??깃났',
       data: {
         user: mapLoginUserResponse(user),
       },
@@ -488,7 +484,7 @@ const updateMyRole = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '사용자 유형 변경 중 서버 오류가 발생했습니다.',
+      message: '?ъ슜???좏삎 蹂寃?以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -499,7 +495,7 @@ const requestAuthPhoneVerificationController = async (req, res) => {
   if (phoneNumber === undefined || phoneNumber === null || normalizeString(phoneNumber) === '') {
     return res.status(400).json({
       status: 400,
-      message: '전화번호를 입력해주세요.',
+      message: '?꾪솕踰덊샇瑜??낅젰?댁＜?몄슂.',
     });
   }
 
@@ -508,13 +504,13 @@ const requestAuthPhoneVerificationController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '전화번호 인증 요청이 생성되었습니다.',
+      message: '?꾪솕踰덊샇 ?몄쬆 ?붿껌???앹꽦?섏뿀?듬땲??',
       data,
     });
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       status: error.statusCode || 500,
-      message: error.message || '전화번호 인증 요청 생성 중 서버 오류가 발생했습니다.',
+      message: error.message || '?꾪솕踰덊샇 ?몄쬆 ?붿껌 ?앹꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -526,14 +522,14 @@ const confirmAuthPhoneVerificationController = async (req, res) => {
   if (phoneNumber === undefined || phoneNumber === null || normalizeString(phoneNumber) === '') {
     return res.status(400).json({
       status: 400,
-      message: '전화번호를 입력해주세요.',
+      message: '?꾪솕踰덊샇瑜??낅젰?댁＜?몄슂.',
     });
   }
 
   if (!verificationCode) {
     return res.status(400).json({
       status: 400,
-      message: '인증번호를 입력해주세요.',
+      message: '?몄쬆踰덊샇瑜??낅젰?댁＜?몄슂.',
     });
   }
 
@@ -542,13 +538,13 @@ const confirmAuthPhoneVerificationController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '전화번호 인증 성공',
+      message: '?꾪솕踰덊샇 ?몄쬆 ?깃났',
       data,
     });
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       status: error.statusCode || 500,
-      message: error.message || '전화번호 인증 확인 중 서버 오류가 발생했습니다.',
+      message: error.message || '?꾪솕踰덊샇 ?몄쬆 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -571,43 +567,25 @@ const requestPasswordReset = async (req, res) => {
   }
 
   try {
-    const user = await findUserByEmail(email);
-
-    if (!user) {
-      return res.status(404).json({
-        status: 404,
-        message: '해당 이메일로 가입된 계정을 찾을 수 없습니다.',
-      });
-    }
-
-    if (user.provider !== 'local') {
-      return res.status(400).json({
-        status: 400,
-        message: '소셜 로그인 계정은 비밀번호를 재설정할 수 없습니다.',
-      });
-    }
-
-    const verificationCode = generatePasswordResetCode();
-    await createPasswordResetVerification(email, verificationCode);
-    await sendPasswordResetEmail(email, verificationCode);
+    await requestPasswordResetVerification(email);
 
     return res.status(200).json({
       status: 200,
-      message: '비밀번호 재설정 인증번호가 발급되었습니다.',
+      message: '비밀번호 재설정 인증번호가 이메일로 발송되었습니다.',
       data: {
         email,
-        verificationCode,
         expiresInMinutes: PASSWORD_RESET_EXPIRES_IN_MINUTES,
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: 500,
-      message: '비밀번호 재설정 인증번호 발급 중 서버 오류가 발생했습니다.',
+    const statusCode = error.statusCode || 500;
+
+    return res.status(statusCode).json({
+      status: statusCode,
+      message: error.message || '비밀번호 재설정 인증번호 발송 중 서버 오류가 발생했습니다.',
     });
   }
 };
-
 const verifyPasswordReset = async (req, res) => {
   const email = normalizeString(req.body?.email).toLowerCase();
   const verificationCode = normalizeString(req.body?.verificationCode);
@@ -626,7 +604,7 @@ const verifyPasswordReset = async (req, res) => {
     });
   }
 
-  if (!verificationCode) {
+  if (!/^\d{6}$/.test(verificationCode)) {
     return res.status(400).json({
       status: 400,
       message: '인증번호가 올바르지 않거나 만료되었습니다.',
@@ -634,57 +612,35 @@ const verifyPasswordReset = async (req, res) => {
   }
 
   try {
-    const verification = await verifyPasswordResetVerification(email, verificationCode);
-
-    if (!verification) {
-      return res.status(400).json({
-        status: 400,
-        message: '인증번호가 올바르지 않거나 만료되었습니다.',
-      });
-    }
+    const passwordReset = await verifyPasswordResetCode({ email, verificationCode });
 
     return res.status(200).json({
       status: 200,
       message: '인증번호 확인 성공',
       data: {
-        email,
-        verified: true,
+        passwordResetToken: passwordReset.passwordResetToken,
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: 500,
-      message: '인증번호 확인 중 서버 오류가 발생했습니다.',
+    const statusCode = error.statusCode || 500;
+
+    return res.status(statusCode).json({
+      status: statusCode,
+      message: error.message || '인증번호 확인 중 서버 오류가 발생했습니다.',
     });
   }
 };
-
 const resetPassword = async (req, res) => {
-  const email = normalizeString(req.body?.email).toLowerCase();
-  const verificationCode = normalizeString(req.body?.verificationCode);
+  const passwordResetToken = normalizeString(req.body?.passwordResetToken);
   const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
   const newPasswordConfirm = typeof req.body?.newPasswordConfirm === 'string'
     ? req.body.newPasswordConfirm
     : '';
 
-  if (!email) {
+  if (!passwordResetToken) {
     return res.status(400).json({
       status: 400,
-      message: '이메일을 입력해주세요.',
-    });
-  }
-
-  if (!EMAIL_PATTERN.test(email)) {
-    return res.status(400).json({
-      status: 400,
-      message: '이메일 형식이 올바르지 않습니다.',
-    });
-  }
-
-  if (!verificationCode) {
-    return res.status(400).json({
-      status: 400,
-      message: '인증번호 확인이 필요합니다.',
+      message: '비밀번호 재설정 토큰이 필요합니다.',
     });
   }
 
@@ -703,44 +659,21 @@ const resetPassword = async (req, res) => {
   }
 
   try {
-    const user = await findUserByEmail(email);
-
-    if (!user) {
-      return res.status(404).json({
-        status: 404,
-        message: '해당 이메일로 가입된 계정을 찾을 수 없습니다.',
-      });
-    }
-
-    if (user.provider !== 'local') {
-      return res.status(400).json({
-        status: 400,
-        message: '소셜 로그인 계정은 비밀번호를 재설정할 수 없습니다.',
-      });
-    }
-
-    const passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
-    await resetPasswordWithVerification(email, verificationCode, passwordHash);
+    await confirmPasswordReset({ passwordResetToken, newPassword });
 
     return res.status(200).json({
       status: 200,
-      message: '비밀번호 재설정 성공',
+      message: '비밀번호가 성공적으로 변경되었습니다.',
     });
   } catch (error) {
-    if (error.statusCode === 400) {
-      return res.status(400).json({
-        status: 400,
-        message: error.message,
-      });
-    }
+    const statusCode = error.statusCode || 500;
 
-    return res.status(500).json({
-      status: 500,
-      message: '비밀번호 재설정 중 서버 오류가 발생했습니다.',
+    return res.status(statusCode).json({
+      status: statusCode,
+      message: error.message || '비밀번호 재설정 중 서버 오류가 발생했습니다.',
     });
   }
 };
-
 const kakaoLoginUrl = (req, res) => {
   const redirectUri = normalizeString(req.query?.redirectUri) || getFrontendRedirectUri() || getBackendRedirectUri();
   const appRedirectUri = normalizeString(req.query?.appRedirectUri)
@@ -754,7 +687,7 @@ const kakaoLoginUrl = (req, res) => {
   if (!process.env.KAKAO_REST_API_KEY || !redirectUri) {
     return res.status(500).json({
       status: 500,
-      message: '서버 내부 오류',
+      message: '?쒕쾭 ?대? ?ㅻ쪟',
     });
   }
 
@@ -762,7 +695,7 @@ const kakaoLoginUrl = (req, res) => {
 
   return res.status(200).json({
     status: 200,
-    message: '카카오 로그인 URL 조회 성공',
+    message: '移댁뭅??濡쒓렇??URL 議고쉶 ?깃났',
     data: {
       kakaoLoginUrl: kakaoLoginUrlValue,
       url: kakaoLoginUrlValue,
@@ -825,7 +758,7 @@ const getExistingKakaoUser = async (kakaoProfile) => {
 const sendKakaoEmailDuplicateResponse = (res, email, provider = 'local') => (
   res.status(409).json({
     status: 409,
-    message: '중복된 이메일로 가입된 기록이 있습니다.',
+    message: '以묐났???대찓?쇰줈 媛?낅맂 湲곕줉???덉뒿?덈떎.',
     data: {
       emailAlreadyExists: true,
       provider,
@@ -874,7 +807,7 @@ const kakaoLoginByCode = async (req, res) => {
   if (!code) {
     return res.status(400).json({
       status: 400,
-      message: '카카오 인가 코드가 필요합니다.',
+      message: '移댁뭅???멸? 肄붾뱶媛 ?꾩슂?⑸땲??',
     });
   }
 
@@ -889,7 +822,7 @@ const kakaoLoginByCode = async (req, res) => {
 
       return res.status(401).json({
         status: 401,
-        message: '카카오 인증에 실패했습니다.',
+        message: '移댁뭅???몄쬆???ㅽ뙣?덉뒿?덈떎.',
       });
     }
 
@@ -899,7 +832,7 @@ const kakaoLoginByCode = async (req, res) => {
     } catch (error) {
       return res.status(502).json({
         status: 502,
-        message: '카카오 사용자 정보 조회에 실패했습니다.',
+        message: '移댁뭅???ъ슜???뺣낫 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       });
     }
 
@@ -920,7 +853,7 @@ const kakaoLoginByCode = async (req, res) => {
 
       return res.status(200).json({
         status: 200,
-        message: '카카오 회원가입 추가 정보가 필요합니다.',
+        message: '移댁뭅???뚯썝媛??異붽? ?뺣낫媛 ?꾩슂?⑸땲??',
         data: buildKakaoSignupRequiredData(signupProfile, kakaoSignupToken),
       });
     }
@@ -931,7 +864,7 @@ const kakaoLoginByCode = async (req, res) => {
 
       return res.status(200).json({
         status: 200,
-        message: '카카오 회원가입 추가 정보가 필요합니다.',
+        message: '移댁뭅???뚯썝媛??異붽? ?뺣낫媛 ?꾩슂?⑸땲??',
         data: buildKakaoSignupRequiredData(signupProfile, kakaoSignupToken, {
           reason: 'INCOMPLETE_PROFILE',
           existingUserId: String(existingUser.user_id),
@@ -945,7 +878,7 @@ const kakaoLoginByCode = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '카카오 로그인 성공',
+      message: '移댁뭅??濡쒓렇???깃났',
       data: {
         isNewUser: false,
         signupRequired: false,
@@ -966,20 +899,20 @@ const kakaoLoginByCode = async (req, res) => {
     if (error.response?.status === 401) {
       return res.status(401).json({
         status: 401,
-        message: '카카오 인증에 실패했습니다.',
+        message: '移댁뭅???몄쬆???ㅽ뙣?덉뒿?덈떎.',
       });
     }
 
     if (error.response?.config?.url?.includes('/v2/user/me')) {
       return res.status(502).json({
         status: 502,
-        message: '카카오 사용자 정보 조회에 실패했습니다.',
+        message: '移댁뭅???ъ슜???뺣낫 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       });
     }
 
     return res.status(500).json({
       status: 500,
-      message: '서버 내부 오류',
+      message: '?쒕쾭 ?대? ?ㅻ쪟',
     });
   }
 };
@@ -1002,35 +935,35 @@ const completeKakaoSignup = async (req, res) => {
   if (!kakaoSignupToken) {
     return res.status(400).json({
       status: 400,
-      message: '카카오 회원가입 토큰이 필요합니다.',
+      message: '移댁뭅???뚯썝媛???좏겙???꾩슂?⑸땲??',
     });
   }
 
   if (!nickname) {
     return res.status(400).json({
       status: 400,
-      message: '닉네임을 입력해주세요.',
+      message: '?됰꽕?꾩쓣 ?낅젰?댁＜?몄슂.',
     });
   }
 
   if (!NICKNAME_PATTERN.test(nickname)) {
     return res.status(400).json({
       status: 400,
-      message: '닉네임은 2자 이상 12자 이하의 한글, 영문, 숫자만 사용할 수 있습니다.',
+      message: '?됰꽕?꾩? 2???댁긽 12???댄븯???쒓?, ?곷Ц, ?レ옄留??ъ슜?????덉뒿?덈떎.',
     });
   }
 
   if (!termsAgreed || !privacyAgreed) {
     return res.status(400).json({
       status: 400,
-      message: '필수 약관에 동의해주세요.',
+      message: '?꾩닔 ?쎄????숈쓽?댁＜?몄슂.',
     });
   }
 
   if (!ALLOWED_SIGNUP_ROLES.has(role)) {
     return res.status(400).json({
       status: 400,
-      message: '유효하지 않은 사용자 유형입니다.',
+      message: '?좏슚?섏? ?딆? ?ъ슜???좏삎?낅땲??',
     });
   }
 
@@ -1046,7 +979,7 @@ const completeKakaoSignup = async (req, res) => {
     if (requestedEmail && requestedEmail !== kakaoEmail) {
       return res.status(400).json({
         status: 400,
-        message: '카카오 이메일 정보가 일치하지 않습니다.',
+        message: '移댁뭅???대찓???뺣낫媛 ?쇱튂?섏? ?딆뒿?덈떎.',
       });
     }
 
@@ -1056,7 +989,7 @@ const completeKakaoSignup = async (req, res) => {
       if (!phoneVerification.isValid) {
         return res.status(400).json({
           status: 400,
-          message: '전화번호 인증이 필요합니다.',
+          message: '?꾪솕踰덊샇 ?몄쬆???꾩슂?⑸땲??',
         });
       }
 
@@ -1081,14 +1014,14 @@ const completeKakaoSignup = async (req, res) => {
     ) {
       return res.status(409).json({
         status: 409,
-        message: '이미 가입된 카카오 계정입니다.',
+        message: '?대? 媛?낅맂 移댁뭅??怨꾩젙?낅땲??',
       });
     }
 
     if (duplicatedNickname) {
       return res.status(409).json({
         status: 409,
-        message: '이미 사용 중인 닉네임입니다.',
+        message: '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
       });
     }
 
@@ -1114,7 +1047,7 @@ const completeKakaoSignup = async (req, res) => {
 
     return res.status(201).json({
       status: 201,
-      message: '카카오 회원가입 성공',
+      message: '移댁뭅???뚯썝媛???깃났',
       data: {
         accessToken,
         refreshToken,
@@ -1128,7 +1061,7 @@ const completeKakaoSignup = async (req, res) => {
     if (error.statusCode === 401) {
       return res.status(400).json({
         status: 400,
-        message: '카카오 회원가입 정보가 유효하지 않습니다.',
+        message: '移댁뭅???뚯썝媛???뺣낫媛 ?좏슚?섏? ?딆뒿?덈떎.',
       });
     }
 
@@ -1142,13 +1075,13 @@ const completeKakaoSignup = async (req, res) => {
     if (error.code === '23505') {
       return res.status(409).json({
         status: 409,
-        message: '이미 가입된 카카오 계정입니다.',
+        message: '?대? 媛?낅맂 移댁뭅??怨꾩젙?낅땲??',
       });
     }
 
     return res.status(500).json({
       status: 500,
-      message: '카카오 회원가입 중 서버 오류가 발생했습니다.',
+      message: '移댁뭅???뚯썝媛??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -1159,7 +1092,7 @@ const refreshAccessToken = async (req, res) => {
   if (!refreshToken) {
     return res.status(401).json({
       status: 401,
-      message: '유효하지 않거나 만료된 리프레시 토큰입니다.',
+      message: '?좏슚?섏? ?딄굅??留뚮즺??由ы봽?덉떆 ?좏겙?낅땲??',
     });
   }
 
@@ -1168,7 +1101,7 @@ const refreshAccessToken = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '토큰 재발급 성공',
+      message: '?좏겙 ?щ컻湲??깃났',
       data: {
         accessToken,
         refreshToken,
@@ -1178,13 +1111,13 @@ const refreshAccessToken = async (req, res) => {
     if (error.statusCode === 401) {
       return res.status(401).json({
         status: 401,
-        message: '유효하지 않거나 만료된 리프레시 토큰입니다.',
+        message: '?좏슚?섏? ?딄굅??留뚮즺??由ы봽?덉떆 ?좏겙?낅땲??',
       });
     }
 
     return res.status(500).json({
       status: 500,
-      message: '토큰 재발급 중 서버 오류가 발생했습니다.',
+      message: '?좏겙 ?щ컻湲?以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -1199,12 +1132,12 @@ const logout = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '로그아웃 성공',
+      message: '濡쒓렇?꾩썐 ?깃났',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '로그아웃 중 서버 오류가 발생했습니다.',
+      message: '濡쒓렇?꾩썐 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };

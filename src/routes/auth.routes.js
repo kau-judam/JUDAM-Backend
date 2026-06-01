@@ -31,6 +31,7 @@ router.post('/phone/verification', requestAuthPhoneVerificationController);
 router.post('/phone/verification/confirm', confirmAuthPhoneVerificationController);
 router.post('/password/reset/request', requestPasswordReset);
 router.post('/password/reset/verify', verifyPasswordReset);
+router.post('/password/reset/confirm', resetPassword);
 router.patch('/password/reset', resetPassword);
 router.get('/kakao/url', kakaoLoginUrl);
 router.get('/kakao', kakaoLogin);
