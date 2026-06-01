@@ -6424,7 +6424,7 @@ const getFundingList = async (req, res) => {
       RECOMMENDED: 'ORDER BY match_rate DESC NULLS LAST, COALESCE(like_counts.like_count, 0) DESC, fp.created_at DESC, fp.funding_id DESC',
       POPULAR: 'ORDER BY COALESCE(like_counts.like_count, 0) DESC, fp.created_at DESC, fp.funding_id DESC',
       LATEST: 'ORDER BY fp.created_at DESC, fp.funding_id DESC',
-      DEADLINE: 'ORDER BY CASE WHEN fp.end_date >= CURRENT_DATE THEN 0 ELSE 1 END, fp.end_date ASC NULLS LAST, fp.created_at DESC, fp.funding_id DESC',
+      DEADLINE: `ORDER BY CASE WHEN fp.end_date >= ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul')::date) THEN 0 ELSE 1 END, fp.end_date ASC NULLS LAST, fp.created_at DESC, fp.funding_id DESC`,
       ID_ASC: 'ORDER BY fp.funding_id ASC',
     }[normalizedSort];
 
@@ -6546,6 +6546,8 @@ const getFundingList = async (req, res) => {
 };
 
 const getFundingStats = async (req, res) => {
+  res.set('Content-Type', 'application/json; charset=utf-8');
+
   try {
     const result = await pool.query(
       `
@@ -6588,7 +6590,7 @@ const getFundingStats = async (req, res) => {
       totalRaisedAmount,
       totalRaisedHundredMillion: Number((totalRaisedAmount / 100000000).toFixed(1)),
       totalRaisedTenMillion: Number((totalRaisedAmount / 10000000).toFixed(1)),
-      totalRaisedTenMillionUnit: '泥쒕쭔??',
+      totalRaisedTenMillionUnit: '천만원',
     };
 
     return res.status(200).json({
