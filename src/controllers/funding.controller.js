@@ -8892,7 +8892,9 @@ const getFundingOrderAvailability = async (fundingId) => {
     return { canCreate: true };
   }
 
-  if (funding.status !== 'ACTIVE' || funding.is_expired) {
+  const fundingStatus = String(funding.status || '').trim().toUpperCase();
+
+  if (fundingStatus !== 'ACTIVE' || funding.is_expired) {
     return {
       canCreate: false,
       status: 400,

@@ -12,11 +12,14 @@ const { settleExpiredFundings } = require('../services/fundingSettlement.service
 const getSubmittedFundingDrafts = async (req, res) => {
   const REVIEW_TARGET_DRAFT_STATUSES = ['SUBMITTED', 'REVIEWING'];
   const EXCLUDED_PROJECT_STATUSES = [
+    'READY',
+    'APPROVED',
     'ACTIVE',
     'SUCCESS',
     'FAILED',
     'ENDED',
     'ONGOING',
+    'REJECTED',
     'CANCELED',
     'CANCELLED',
   ];
