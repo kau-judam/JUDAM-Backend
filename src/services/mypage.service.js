@@ -45,7 +45,7 @@ const getExistingUser = async (userId) => {
   const user = await findUserById(userId);
 
   if (!user) {
-    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+    throw createServiceError(404, '?????? ?轅붽틓?????????????욱룏???????낆젵.');
   }
 
   return user;
@@ -84,13 +84,13 @@ const updateNickname = async (userId, nickname) => {
 
 const normalizePhoneNumber = (phoneNumber) => {
   if (typeof phoneNumber !== 'string') {
-    throw createServiceError(400, '전화번호 형식이 올바르지 않습니다.');
+    throw createServiceError(400, '????袁ｋ쨨????브틦???살퓢?????꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.');
   }
 
   const normalized = phoneNumber.replace(/\s/g, '').replace(/-/g, '');
 
   if (!/^010\d{7,8}$/.test(normalized)) {
-    throw createServiceError(400, '전화번호 형식이 올바르지 않습니다.');
+    throw createServiceError(400, '????袁ｋ쨨????브틦???살퓢?????꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.');
   }
 
   return normalized;
@@ -138,13 +138,13 @@ const requestPhoneVerification = async (userId, phoneNumber) => {
     phoneNumber: normalizedPhoneNumber,
     verificationCode,
     sendTo: OCTOMO_RECEIVE_NUMBER,
-    guideMessage: `휴대폰 문자로 ${verificationCode}을 ${OCTOMO_RECEIVE_NUMBER}로 보내주세요.`,
+    guideMessage: `?????????筌???????節덇덩?${verificationCode}??${OCTOMO_RECEIVE_NUMBER}?????ㅼ뒧????野????嚥싲갭횧????`,
   };
 };
 
 const checkOctomoMessageExists = async (phoneNumber, verificationCode) => {
   if (!process.env.OCTOMO_API_KEY) {
-    throw createServiceError(500, '전화번호 인증 서비스 설정이 누락되었습니다.');
+    throw createServiceError(500, '????袁ｋ쨨????브틦???살퓢?????꿔꺂????癒κ섶???癲ル슢怡??귦룈?????濚밸Ŧ?????????밸븶?④섣???癲???????');
   }
 
   const octomoMessageExistsUrl = getOctomoMessageExistsUrl();
@@ -175,7 +175,7 @@ const checkOctomoMessageExists = async (phoneNumber, verificationCode) => {
       url: octomoMessageExistsUrl,
     });
 
-    throw createServiceError(502, '전화번호 인증 서비스와 통신할 수 없습니다.');
+    throw createServiceError(502, '????袁ｋ쨨????브틦???살퓢?????꿔꺂????癒κ섶???癲ル슢怡??귦룈??? ???癲?????????욱룏???????낆젵.');
   }
 };
 
@@ -206,13 +206,13 @@ const updatePhoneNumberWithVerification = async (userId, phoneNumber, verificati
   const verification = rows[0];
 
   if (!verification) {
-    throw createServiceError(400, '전화번호 인증 요청이 없거나 만료되었습니다.');
+    throw createServiceError(400, '????袁ｋ쨨????브틦???살퓢?????꿔꺂????癒κ섶?????거?????????얜∥異???轅붽틓????鶯??癲???????');
   }
 
   const exists = await checkOctomoMessageExists(normalizedPhoneNumber, normalizedVerificationCode);
 
   if (!exists) {
-    throw createServiceError(400, '인증 문자가 확인되지 않았습니다.');
+    throw createServiceError(400, '??꿔꺂????癒κ섶????筌??????? ??꿔꺂??틝??????? ?????源낅돹??????');
   }
 
   const client = await pool.connect();
@@ -242,7 +242,7 @@ const updatePhoneNumberWithVerification = async (userId, phoneNumber, verificati
     );
 
     if (userRows.length === 0) {
-      throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+      throw createServiceError(404, '?????? ?轅붽틓?????????????욱룏???????낆젵.');
     }
 
     await client.query('COMMIT');
@@ -289,17 +289,17 @@ const changeMyPassword = async (userId, currentPassword, newPassword) => {
   const user = rows[0];
 
   if (!user) {
-    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+    throw createServiceError(404, '?????? ?轅붽틓?????????????욱룏???????낆젵.');
   }
 
   if (user.provider !== 'local') {
-    throw createServiceError(400, '소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다.');
+    throw createServiceError(400, '??????黎??筌????????????????嶺?????亦껋꼦裕㎩쳞????ㅼ뒧????β뼯援???????????욱룏???????낆젵.');
   }
 
   const isPasswordValid = await bcrypt.compare(currentPassword, user.password || '');
 
   if (!isPasswordValid) {
-    throw createServiceError(401, '현재 비밀번호가 올바르지 않습니다.');
+    throw createServiceError(401, '?????밸븶???????嶺?????????? ????癲?? ???????????낆젵.');
   }
 
   const passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
@@ -348,12 +348,12 @@ const getArchiveCount = async (userId) => {
 const BADGES = [
   {
     badgeId: 'welcome',
-    name: '반가워요!',
+    name: '주담에 오신 것을 환영합니다!',
     displayOrder: 1,
   },
   {
     badgeId: 'communicate',
-    name: '주담과 소통하기',
+    name: '소통을 시작한 전통주 친구',
     displayOrder: 2,
   },
   {
@@ -363,21 +363,20 @@ const BADGES = [
   },
   {
     badgeId: 'funding-intermediate',
-    name: '펀딩 중급자',
+    name: '펀딩 애호가',
     displayOrder: 4,
   },
   {
     badgeId: 'funding-expert',
-    name: '펀딩 숙련가',
+    name: '펀딩 전문가',
     displayOrder: 5,
   },
   {
     badgeId: 'co-creator',
-    name: '공동 제작자',
+    name: '함께 빚는 동료',
     displayOrder: 6,
   },
 ];
-
 const evaluateBadgeConditions = async (userId) => {
   const [
     userRowsResult,
@@ -746,7 +745,7 @@ const validateSulbtiPayload = (payload) => {
   const typeCode = typeof payload?.type === 'string' ? payload.type.trim() : '';
 
   if (!typeCode) {
-    throw createServiceError(400, '술BTI 유형을 입력해주세요.');
+    throw createServiceError(400, '???耀??????援????????⑤챷竊????觀????꿔꺂?????');
   }
 
   const scores = {
@@ -762,7 +761,7 @@ const validateSulbtiPayload = (payload) => {
   );
 
   if (hasInvalidScore) {
-    throw createServiceError(400, '술BTI 점수는 1~5 사이의 숫자여야 합니다.');
+    throw createServiceError(400, '???耀???????1~5 ???????????????癲ル슢?????');
   }
 
   return {
@@ -773,7 +772,7 @@ const validateSulbtiPayload = (payload) => {
 
 const SULBTI_SURVEY_QUESTION_KEYS = Array.from({ length: 25 }, (_, index) => `q${index + 1}`);
 const SULBTI_SURVEY_MULTI_SCORE_KEYS = ['q24', 'q25'];
-const SULBTI_SURVEY_FORMAT_ERROR_MESSAGE = '술BTI 설문 답변 형식이 올바르지 않습니다.';
+const SULBTI_SURVEY_FORMAT_ERROR_MESSAGE = '???耀???????? ??꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.';
 
 const hasSulbtiSurveyQuestionKeys = (payload) => (
   payload
@@ -905,7 +904,7 @@ const extractSulbtiSurveyResult = (aiResponse) => {
   const alcoholLabel = result.alcohol_label || result.alcoholLabel;
 
   if (!tasteVector || !btiCode || !characterName || !alcoholLabel) {
-    throw createServiceError(502, 'AI 술BTI 변환 결과가 올바르지 않습니다.');
+    throw createServiceError(502, 'AI ???耀????ㅼ뒧??????β뼯援?????筌믨퀣?? ????癲?? ???????????낆젵.');
   }
 
   return {
@@ -961,7 +960,7 @@ const saveSulbtiSurveyResult = async (userId, surveyResult) => {
   );
 
   if (rows.length === 0) {
-    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
+    throw createServiceError(404, '?????? ?轅붽틓?????????????욱룏???????낆젵.');
   }
 
   return mapSulbtiSurveySaveResponse(rows[0]);
@@ -975,6 +974,18 @@ const convertAndSaveMySulbtiSurvey = async (userId, payload) => {
   return saveSulbtiSurveyResult(userId, surveyResult);
 };
 
+
+const getMySulbtiShareLink = async (userId) => {
+  const sulbti = await getMySulbti(userId);
+
+  if (!sulbti.hasResult) {
+    const error = new Error('\uc220BTI \uacb0\uacfc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return sulbti;
+};
 const saveMySulbti = async (userId, payload) => {
   if (isSurveyConvertPayload(payload)) {
     return convertAndSaveMySulbtiSurvey(userId, payload);
@@ -992,7 +1003,7 @@ const saveMySulbti = async (userId, payload) => {
   const sulbtiType = await findSulbtiTypeByCode(typeCode);
 
   if (!sulbtiType) {
-    throw createServiceError(400, '유효하지 않은 술BTI 유형입니다.');
+    throw createServiceError(400, '?????援???? ??? ???耀??????援???????뽯쨦??');
   }
 
   const { rows } = await pool.query(
@@ -1059,51 +1070,29 @@ const ARCHIVE_TAG_CATEGORY_NAMES = {
   TASTE: '맛',
   AROMA: '향',
   SITUATION: '상황',
-  MOOD: '감성',
+  MOOD: '분위기',
 };
 
 const FIXED_ARCHIVE_TAG_GROUPS = [
   {
     category: 'TASTE',
-    categoryName: '맛·향',
-    tags: [
-      '달콤한',
-      '깔끔한',
-      '묵직한',
-      '산미있는',
-      '쓴맛',
-      '고소한',
-      '부드러운',
-      '탄산있는',
-      '구수한',
-      '과일향',
-    ],
+    categoryName: '맛',
+    tags: ['달콤한', '상큼한', '고소한', '깔끔한', '진한', '부드러운', '쌉싸름한', '묵직한', '산뜻한', '담백한'],
+  },
+  {
+    category: 'AROMA',
+    categoryName: '향',
+    tags: ['꽃향', '과일향', '곡물향', '허브향', '누룩향', '은은한 향'],
   },
   {
     category: 'SITUATION',
     categoryName: '상황',
-    tags: [
-      '혼술',
-      '친구모임',
-      '데이트',
-      '특별한날',
-      '식사중',
-      '야외',
-      '집들이',
-      '기념일',
-    ],
+    tags: ['혼술', '친구 모임', '가족 식사', '기념일', '캠핑', '선물용', '퇴근 후', '가볍게'],
   },
   {
     category: 'MOOD',
-    categoryName: '감성',
-    tags: [
-      '행복한',
-      '설레는',
-      '그리운',
-      '편안한',
-      '들뜬',
-      '차분한',
-    ],
+    categoryName: '분위기',
+    tags: ['차분한', '활기찬', '따뜻한', '특별한', '편안한', '로맨틱한'],
   },
 ];
 const FIXED_ARCHIVE_TAG_ROWS = FIXED_ARCHIVE_TAG_GROUPS.flatMap((group, groupIndex) => (
@@ -1212,7 +1201,7 @@ const parseNonNegativeInteger = (value, defaultValue, fieldName) => {
   const stringValue = String(value);
 
   if (!/^\d+$/.test(stringValue)) {
-    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
   }
 
   return Number(stringValue);
@@ -1224,14 +1213,14 @@ const parseArchiveListQuery = (query = {}) => {
     : 'all';
 
   if (!hasOwn(ARCHIVE_QUERY_TYPES, type)) {
-    throw createServiceError(400, '아카이브 타입이 올바르지 않습니다.');
+    throw createServiceError(400, '?????밸븶筌믡꺂?????????????ㅿ폑??????癲?? ???????????낆젵.');
   }
 
   const page = parseNonNegativeInteger(query.page, 0, 'page');
   const size = parseNonNegativeInteger(query.size, 10, 'size');
 
   if (size < 1) {
-    throw createServiceError(400, 'size 값이 올바르지 않습니다.');
+    throw createServiceError(400, 'size ???ル봿????????癲?? ???????????낆젵.');
   }
 
   return {
@@ -1246,7 +1235,7 @@ const parseArchiveId = (archiveId) => {
   const stringValue = String(archiveId);
 
   if (!/^\d+$/.test(stringValue) || Number(stringValue) < 1) {
-    throw createServiceError(400, '아카이브 ID가 올바르지 않습니다.');
+    throw createServiceError(400, '?????밸븶筌믡꺂??????ID???ル봿?? ????癲?? ???????????낆젵.');
   }
 
   return Number(stringValue);
@@ -1256,7 +1245,7 @@ const parseArchiveImageId = (imageId) => {
   const stringValue = String(imageId);
 
   if (!/^\d+$/.test(stringValue) || Number(stringValue) < 1) {
-    throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
+    throw createServiceError(400, '?????밸븶筌믡꺂???????????轅붽틓??? ID???ル봿?? ????癲?? ???????????낆젵.');
   }
 
   return Number(stringValue);
@@ -1359,13 +1348,13 @@ const normalizeArchiveType = (archiveType, isPartial) => {
   }
 
   if (typeof archiveType !== 'string') {
-    throw createServiceError(400, '아카이브 유형은 NORMAL 또는 FUNDING만 가능합니다.');
+    throw createServiceError(400, '?????밸븶筌믡꺂???????????援??? NORMAL ?????FUNDING?????ル봿????μ떝?롳쭗????????낆젵.');
   }
 
   const normalized = archiveType.trim().toUpperCase();
 
   if (!ARCHIVE_TYPES.has(normalized)) {
-    throw createServiceError(400, '아카이브 유형은 NORMAL 또는 FUNDING만 가능합니다.');
+    throw createServiceError(400, '?????밸븶筌믡꺂???????????援??? NORMAL ?????FUNDING?????ル봿????μ떝?롳쭗????????낆젵.');
   }
 
   return normalized;
@@ -1381,7 +1370,7 @@ const normalizeOptionalString = (value, fieldName) => {
   }
 
   if (typeof value !== 'string') {
-    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
   }
 
   const trimmed = value.trim();
@@ -1398,11 +1387,11 @@ const normalizeOptionalNumber = (value, fieldName, min, max = null) => {
   }
 
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
   }
 
   if (value < min || (max !== null && value > max)) {
-    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
   }
 
   return value;
@@ -1418,7 +1407,7 @@ const normalizeOptionalId = (value, fieldName) => {
   }
 
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
+    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
   }
 
   return value;
@@ -1434,13 +1423,13 @@ const normalizeOptionalRecordDate = (value) => {
   }
 
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw createServiceError(400, '기록 날짜 형식이 올바르지 않습니다.');
+    throw createServiceError(400, '?????????덉땃??????댟? ??꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.');
   }
 
   const date = new Date(`${value}T00:00:00.000Z`);
 
   if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
-    throw createServiceError(400, '기록 날짜 형식이 올바르지 않습니다.');
+    throw createServiceError(400, '?????????덉땃??????댟? ??꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.');
   }
 
   return value;
@@ -1478,7 +1467,7 @@ const validateArchivePayload = (payload = {}, isPartial = false) => {
 
   if (hasOwn(body, 'tagIds')) {
     if (!Array.isArray(body.tagIds)) {
-      throw createServiceError(400, 'tagIds는 배열이어야 합니다.');
+      throw createServiceError(400, 'tagIds????ш끽維뽳쭩?壤굿??뽯쑆?????욱룑?????癲ル슢?????');
     }
 
     validated.tagIds = body.tagIds;
@@ -1493,7 +1482,7 @@ const validateArchivePayload = (payload = {}, isPartial = false) => {
     const alcoholId = hasOwn(validated, 'alcoholId') ? validated.alcoholId : null;
 
     if (!customName && alcoholId === null) {
-      throw createServiceError(400, 'customName과 alcoholId 중 하나는 필요합니다.');
+      throw createServiceError(400, 'customName??alcoholId ?????棺堉?뤃管????????밸븶???癲ル슢?????');
     }
   }
 
@@ -1512,7 +1501,7 @@ const validateTagIds = async (clientOrPool, tagIds) => {
       (tagId) => typeof tagId !== 'number' || !Number.isInteger(tagId) || tagId < 1,
     )
   ) {
-    throw createServiceError(400, '유효하지 않은 아카이브 태그입니다.');
+    throw createServiceError(400, '?????援???? ??? ?????밸븶筌믡꺂?????????怨뚮뼺?源놁벀??????뽯쨦??');
   }
 
   if (uniqueTagIds.length === 0) {
@@ -1529,7 +1518,7 @@ const validateTagIds = async (clientOrPool, tagIds) => {
   );
 
   if (rows.length !== uniqueTagIds.length) {
-    throw createServiceError(400, '유효하지 않은 아카이브 태그입니다.');
+    throw createServiceError(400, '?????援???? ??? ?????밸븶筌믡꺂?????????怨뚮뼺?源놁벀??????뽯쨦??');
   }
 
   return uniqueTagIds;
@@ -1545,7 +1534,7 @@ const normalizeCustomTags = (customTags) => {
   }
 
   if (!Array.isArray(customTags)) {
-    throw createServiceError(400, 'customTags는 배열이어야 합니다.');
+    throw createServiceError(400, 'customTags????ш끽維뽳쭩?壤굿??뽯쑆?????욱룑?????癲ル슢?????');
   }
 
   return [...new Set(
@@ -1621,7 +1610,7 @@ const ensureArchiveHasDrinkName = (archiveData, currentArchive = null) => {
     : currentArchive?.alcohol_id || null;
 
   if (!customName && alcoholId === null) {
-    throw createServiceError(400, 'customName과 alcoholId 중 하나는 필요합니다.');
+    throw createServiceError(400, 'customName??alcoholId ?????棺堉?뤃管????????밸븶???癲ル슢?????');
   }
 };
 
@@ -1827,7 +1816,7 @@ const parseArchiveFormTagIds = (tagIds) => {
 
       return parsed.map((tagId) => Number(tagId));
     } catch (error) {
-      throw createServiceError(400, 'tagIds는 배열 형식이어야 합니다.');
+      throw createServiceError(400, 'tagIds????ш끽維뽳쭩?壤굿??뽯쑆???꿔꺂??틝???놁뗄?????욱룑?????癲ル슢?????');
     }
   }
 
@@ -1865,7 +1854,7 @@ const parseArchiveFormCustomTags = (customTags) => {
 
       return normalizeCustomTags(parsed);
     } catch (error) {
-      throw createServiceError(400, 'customTags는 배열 형식이어야 합니다.');
+      throw createServiceError(400, 'customTags????ш끽維뽳쭩?壤굿??뽯쑆???꿔꺂??틝???놁뗄?????욱룑?????癲ル슢?????');
     }
   }
 
@@ -1905,7 +1894,7 @@ const normalizeArchiveDeleteImageIds = (deleteImageIds) => {
 
       parsedValues = parsed;
     } catch (error) {
-      throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
+      throw createServiceError(400, '?????밸븶筌믡꺂???????????轅붽틓??? ID???ル봿?? ????癲?? ???????????낆젵.');
     }
   } else {
     parsedValues = stringValue.split(',');
@@ -1918,7 +1907,7 @@ const normalizeArchiveDeleteImageIds = (deleteImageIds) => {
       (imageId) => !Number.isInteger(imageId) || imageId < 1,
     )
   ) {
-    throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
+    throw createServiceError(400, '?????밸븶筌믡꺂???????????轅붽틓??? ID???ル봿?? ????癲?? ???????????낆젵.');
   }
 
   return [...new Set(imageIds)];
@@ -2042,7 +2031,7 @@ const getMyArchiveDetail = async (userId, archiveId) => {
   const archiveRow = await findMyArchiveRow(pool, userId, parsedArchiveId);
 
   if (!archiveRow) {
-    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+    throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
   }
 
   const [archive] = await mapArchivesWithRelations([archiveRow]);
@@ -2058,7 +2047,7 @@ const createMyArchive = async (userId, payload) => {
   try {
     await client.query('BEGIN');
 
-    // 펀딩 술(FUNDING)은 한 펀딩당 1회만 기록 가능 — 삭제되지 않은 동일 펀딩 기록이 있으면 중복 작성 차단
+    // ??????FUNDING)?? ??????癲ル슢????1??????????????덉땃????ル봿???????????? ??? ?????⑤베???????????????덉땃?????濚밸Ŧ寃㎩쳞????μ떝?띄몭??袁㏉떄?????????轅붽틓?蹂잛젂?④낮釉???
     if (archiveData.archiveType === 'FUNDING' && archiveData.fundingId) {
       const { rows: existingFundingArchive } = await client.query(
         `
@@ -2074,7 +2063,7 @@ const createMyArchive = async (userId, payload) => {
       );
 
       if (existingFundingArchive.length > 0) {
-        throw createServiceError(400, '이미 기록한 펀딩입니다.');
+        throw createServiceError(400, '???? ?????????덉땃????????????????낆젵.');
       }
     }
 
@@ -2170,7 +2159,7 @@ const updateMyArchive = async (userId, archiveId, payload) => {
     const currentArchive = await findMyArchiveRow(client, userId, parsedArchiveId);
 
     if (!currentArchive) {
-      throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+      throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
     }
 
     ensureArchiveHasDrinkName(archiveData, currentArchive);
@@ -2262,7 +2251,7 @@ const deleteMyArchive = async (userId, archiveId) => {
   );
 
   if (rows.length === 0) {
-    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+    throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
   }
 };
 
@@ -2343,7 +2332,7 @@ const uploadArchiveImages = async (userId, archiveId, files) => {
   const parsedArchiveId = parseArchiveId(archiveId);
 
   if (!Array.isArray(files) || files.length === 0) {
-    throw createServiceError(400, '업로드할 이미지를 첨부해주세요.');
+    throw createServiceError(400, '????野?????????????轅붽틓??????轅붽틓????낅마??????觀????꿔꺂?????');
   }
 
   const client = await pool.connect();
@@ -2354,7 +2343,7 @@ const uploadArchiveImages = async (userId, archiveId, files) => {
     const archive = await findMyArchiveForImage(userId, parsedArchiveId, client);
 
     if (!archive) {
-      throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+      throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
     }
 
     const { rows: countRows } = await client.query(
@@ -2368,7 +2357,7 @@ const uploadArchiveImages = async (userId, archiveId, files) => {
     const existingImageCount = Number(countRows[0]?.count || 0);
 
     if (existingImageCount + files.length > 3) {
-      throw createServiceError(400, '아카이브 이미지는 최대 3장까지 업로드할 수 있습니다.');
+      throw createServiceError(400, '?????밸븶筌믡꺂???????????轅붽틓??????轅붽틓????彛? 3?饔앷옇??????? ????野?????????????????????낆젵.');
     }
 
     const uploadedImages = [];
@@ -2418,7 +2407,7 @@ const deleteArchiveImage = async (userId, archiveId, imageId) => {
   const archive = await findMyArchiveForImage(userId, parsedArchiveId);
 
   if (!archive) {
-    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
+    throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
   }
 
   const { rows } = await pool.query(
@@ -2432,11 +2421,11 @@ const deleteArchiveImage = async (userId, archiveId, imageId) => {
   );
 
   if (rows.length === 0) {
-    throw createServiceError(404, '아카이브 이미지를 찾을 수 없습니다.');
+    throw createServiceError(404, '?????밸븶筌믡꺂???????????轅붽틓??????轅붽틓?????????????욱룏???????낆젵.');
   }
 };
 
-// raw_materials(JSONB 배열)에서 재료명을 추출해 쉼표로 연결. 값이 없으면 null.
+// raw_materials(JSONB ??ш끽維뽳쭩?壤굿??뽯쑆?????????꿔꺂?ｉ뜮???????ㅿ폁??????살퓢癲??????嶺뚮죭釉뚮댘???????곕츣?? ???ル봿?????????쇨덧?筌먦렜逾?null.
 const buildIngredientsText = (rawMaterials) => {
   if (!rawMaterials) {
     return null;
@@ -2475,7 +2464,7 @@ const buildIngredientsText = (rawMaterials) => {
   return names.length > 0 ? names.join(', ') : null;
 };
 
-// funding_reviews.image_urls(JSONB 배열) → [{ imageId, imageUrl, sortOrder }]
+// funding_reviews.image_urls(JSONB ??ш끽維뽳쭩?壤굿??뽯쑆? ??[{ imageId, imageUrl, sortOrder }]
 const mapFundingReviewImages = (imageUrls) => {
   let list = imageUrls;
   if (typeof list === 'string') {
@@ -2499,8 +2488,8 @@ const mapFundingReviewImages = (imageUrls) => {
     }));
 };
 
-// 마이페이지 참여 펀딩 목록 (GET /api/mypage/fundings/participated)
-// 결제 완료(PAID)한 주문이 있는 펀딩을 펀딩당 1행으로 반환. 최근 참여순.
+// ?轅붽틓????????蹂κ텤?熬곎逾???? ?轅붽틓????????????轅붽틓??熬곥끇釉띄춯誘좊???(GET /api/mypage/fundings/participated)
+// ??β뼯援?????????밸븶??PAID)??????용츧?嶺뚮?援ο쭩????????뀀땽 ?????????????癲ル슢????1??嚥싲갭큔??????ш끽維뽳쭩??? ?轅붽틓????彛???轅붽틓????????
 const getParticipatedFundings = async (userId) => {
   const { rows } = await pool.query(
     `
@@ -2579,13 +2568,13 @@ const getParticipatedFundings = async (userId) => {
   });
 };
 
-// 펀딩 후기 불러오기 (GET /api/mypage/fundings/{fundingId}/review)
-// 본인이 작성한 후기 1건을 아카이브 작성 폼에 채울 수 있는 형태로 반환. 없으면 null.
+// ????????袁ㅻ쇀?????怨쀫뎐??????怨쀫탾??(GET /api/mypage/fundings/{fundingId}/review)
+// ???ㅼ뒧?戮レ땡??????????????袁ㅻ쇀??1?轅몄뫅??????????밸븶筌믡꺂??????????????嚥싲갭큔?댁옊???????????????뀀땽 ??꿔꺂?€〓뀥??????ш끽維뽳쭩??? ?????쇨덧?筌먦렜逾?null.
 const getMyFundingReview = async (userId, fundingId) => {
   const parsedFundingId = Number(fundingId);
 
   if (!Number.isInteger(parsedFundingId) || parsedFundingId <= 0) {
-    throw createServiceError(400, '유효하지 않은 펀딩 ID입니다.');
+    throw createServiceError(400, '?????援???? ??? ????ID??????뽯쨦??');
   }
 
   const { rows } = await pool.query(
@@ -2638,6 +2627,7 @@ module.exports = {
   grantEarnedBadges,
   getUserBadgeRows,
   getMySulbti,
+  getMySulbtiShareLink,
   saveMySulbti,
   convertAndSaveMySulbtiSurvey,
   findSulbtiTypeByCode,
