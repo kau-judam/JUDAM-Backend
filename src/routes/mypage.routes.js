@@ -25,7 +25,11 @@ const {
   uploadArchiveImagesController,
   deleteArchiveImageController,
   getParticipatedFundingsController,
+  getParticipatedFundingOrderDetailController,
   getMyFundingReviewController,
+  getMyActivityInterestsController,
+  getMyActivityCommentsController,
+  getMyActivityQnaController,
 } = require('../controllers/mypage.controller');
 
 const router = express.Router();
@@ -42,7 +46,11 @@ router.patch('/archives/:archiveId/with-images', authMiddleware, upload.array('i
 router.post('/archives/:archiveId/images', authMiddleware, upload.array('images', 3), uploadArchiveImagesController);
 router.delete('/archives/:archiveId/images/:imageId', authMiddleware, deleteArchiveImageController);
 router.get('/fundings/participated', authMiddleware, getParticipatedFundingsController);
+router.get('/fundings/orders/:orderId', authMiddleware, getParticipatedFundingOrderDetailController);
 router.get('/fundings/:fundingId/review', authMiddleware, getMyFundingReviewController);
+router.get('/activity/interests', authMiddleware, getMyActivityInterestsController);
+router.get('/activity/comments', authMiddleware, getMyActivityCommentsController);
+router.get('/activity/qna', authMiddleware, getMyActivityQnaController);
 router.get('/archives/:archiveId', authMiddleware, getMyArchiveDetailController);
 router.post('/archives', authMiddleware, createMyArchiveController);
 router.patch('/archives/:archiveId', authMiddleware, updateMyArchiveController);
