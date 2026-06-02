@@ -313,7 +313,17 @@ ADD COLUMN IF NOT EXISTS flavor_notes TEXT,
 ADD COLUMN IF NOT EXISTS budget_plan TEXT,
 ADD COLUMN IF NOT EXISTS schedule_plan TEXT,
 ADD COLUMN IF NOT EXISTS creator_introduction TEXT,
-ADD COLUMN IF NOT EXISTS business_address_detail VARCHAR(255);
+ADD COLUMN IF NOT EXISTS business_address_detail VARCHAR(255),
+ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100),
+ADD COLUMN IF NOT EXISTS account_number VARCHAR(100),
+ADD COLUMN IF NOT EXISTS account_holder VARCHAR(100),
+ADD COLUMN IF NOT EXISTS account_verified BOOLEAN NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS idx_funding_drafts_funding_id
+ON funding_drafts(funding_id);
+
+CREATE INDEX IF NOT EXISTS idx_funding_drafts_brewery_funding
+ON funding_drafts(brewery_id, funding_id);
 
 -- Existing data backfill reference. Review candidates before running an UPDATE in RDS.
 -- SELECT

@@ -38,9 +38,9 @@ const parsePositiveIntegerParam = (value, name) => {
   const parsed = Number(value);
 
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    const error = new Error(`${name} 값이 올바르지 않습니다.`);
+    const error = new Error(`${name} 媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.`);
     error.statusCode = 400;
-    error.detail = `${name}는 1 이상의 정수여야 합니다.`;
+    error.detail = `${name}??1 ?댁긽???뺤닔?ъ빞 ?⑸땲??`;
     throw error;
   }
 
@@ -119,9 +119,9 @@ const getOptionalEstablishedYear = (body) => {
   const currentYear = new Date().getFullYear();
 
   if (!Number.isInteger(year) || year < 1000 || year > currentYear) {
-    const error = new Error('설립연도 입력값이 올바르지 않습니다.');
+    const error = new Error('?ㅻ┰?곕룄 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.');
     error.statusCode = 400;
-    error.detail = `establishedYear는 1000부터 ${currentYear} 사이의 정수여야 합니다.`;
+    error.detail = `establishedYear??1000遺??${currentYear} ?ъ씠???뺤닔?ъ빞 ?⑸땲??`;
     throw error;
   }
 
@@ -139,9 +139,9 @@ const parsePaginationQuery = (query = {}) => {
     size <= 0 ||
     size > 100
   ) {
-    const error = new Error('페이지 요청값이 올바르지 않습니다.');
+    const error = new Error('?섏씠吏 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.');
     error.statusCode = 400;
-    error.detail = 'page는 0 이상의 정수, size는 1부터 100 사이의 정수여야 합니다.';
+    error.detail = 'page??0 ?댁긽???뺤닔, size??1遺??100 ?ъ씠???뺤닔?ъ빞 ?⑸땲??';
     throw error;
   }
 
@@ -152,7 +152,7 @@ const getMyBreweryProfile = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   try {
@@ -163,7 +163,7 @@ const getMyBreweryProfile = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 프로필 조회에 실패했습니다.',
+      error.message || '?묒“???꾨줈??議고쉶???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -173,7 +173,7 @@ const getMyBreweryDashboardBasicInfo = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   try {
@@ -184,7 +184,7 @@ const getMyBreweryDashboardBasicInfo = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 대시보드 기본 정보 조회에 실패했습니다.',
+      error.message || '?묒“????쒕낫??湲곕낯 ?뺣낫 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -195,7 +195,7 @@ const updateMyBreweryProfile = async (req, res) => {
   const body = req.body || {};
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   let establishedYear;
@@ -233,7 +233,7 @@ const updateMyBreweryProfile = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 프로필 수정에 실패했습니다.',
+      error.message || '?묒“???꾨줈???섏젙???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -267,7 +267,7 @@ const uploadMyBreweryProfileImage = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   try {
@@ -281,7 +281,7 @@ const uploadMyBreweryProfileImage = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 프로필 이미지 업로드에 실패했습니다.',
+      error.message || '?묒“???꾨줈???대?吏 ?낅줈?쒖뿉 ?ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -291,7 +291,7 @@ const getMyBreweryDashboardFundingSummary = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   try {
@@ -302,7 +302,7 @@ const getMyBreweryDashboardFundingSummary = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 대시보드 펀딩 현황 조회에 실패했습니다.',
+      error.message || '?묒“????쒕낫??????꾪솴 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -312,7 +312,7 @@ const getMyBreweryDashboardFundings = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   let pagination;
@@ -341,7 +341,7 @@ const getMyBreweryDashboardFundings = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 대시보드 펀딩 목록 조회에 실패했습니다.',
+      error.message || '?묒“????쒕낫?????紐⑸줉 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -351,7 +351,7 @@ const getMyBreweryDashboardFundingDelivery = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   let fundingId;
@@ -378,7 +378,7 @@ const getMyBreweryDashboardFundingDelivery = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '펀딩 배송 정보 조회에 실패했습니다.',
+      error.message || '???諛곗넚 ?뺣낫 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -389,7 +389,7 @@ const upsertMyBreweryDashboardFundingDelivery = async (req, res) => {
   const body = req.body || {};
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   let fundingId;
@@ -412,8 +412,8 @@ const upsertMyBreweryDashboardFundingDelivery = async (req, res) => {
     return sendError(
       res,
       400,
-      '배송 정보 입력값이 올바르지 않습니다.',
-      'courier, trackingNumber는 필수입니다.',
+      '諛곗넚 ?뺣낫 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      'courier, trackingNumber???꾩닔?낅땲??',
     );
   }
 
@@ -430,7 +430,7 @@ const upsertMyBreweryDashboardFundingDelivery = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '펀딩 배송 정보 저장에 실패했습니다.',
+      error.message || '???諛곗넚 ?뺣낫 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -440,7 +440,7 @@ const getMyBreweryDashboardNotifications = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   try {
@@ -456,7 +456,7 @@ const getMyBreweryDashboardNotifications = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 대시보드 알림 목록 조회에 실패했습니다.',
+      error.message || '?묒“????쒕낫???뚮┝ 紐⑸줉 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -486,7 +486,7 @@ const createBreweryApplication = async (req, res) => {
   const normalizedDocumentKey = normalizeString(documentKey) || null;
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   if (
@@ -499,8 +499,8 @@ const createBreweryApplication = async (req, res) => {
     return sendError(
       res,
       400,
-      '양조장 인증 신청 입력값이 올바르지 않습니다.',
-      'businessNumber, breweryName, businessAddress, phoneNumber, phoneVerificationToken은 필수입니다.',
+      '?묒“???몄쬆 ?좎껌 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      'businessNumber, breweryName, businessAddress, phoneNumber, phoneVerificationToken? ?꾩닔?낅땲??',
     );
   }
 
@@ -508,8 +508,8 @@ const createBreweryApplication = async (req, res) => {
     return sendError(
       res,
       400,
-      '사업자등록증 파일을 첨부해주세요.',
-      'businessLicense는 필수입니다.',
+      '?ъ뾽?먮벑濡앹쬆 ?뚯씪??泥⑤??댁＜?몄슂.',
+      'businessLicense???꾩닔?낅땲??',
     );
   }
 
@@ -525,7 +525,7 @@ const createBreweryApplication = async (req, res) => {
       if (error.statusCode === 400) {
         return res.status(400).json({
           status: 400,
-          message: '전화번호 인증이 필요합니다.',
+          message: '?꾪솕踰덊샇 ?몄쬆???꾩슂?⑸땲??',
         });
       }
 
@@ -535,7 +535,7 @@ const createBreweryApplication = async (req, res) => {
     if (!phoneVerification.isValid) {
       return res.status(400).json({
         status: 400,
-        message: '전화번호 인증이 필요합니다.',
+        message: '?꾪솕踰덊샇 ?몄쬆???꾩슂?⑸땲??',
       });
     }
 
@@ -553,14 +553,14 @@ const createBreweryApplication = async (req, res) => {
 
     return res.status(201).json({
       status: 201,
-      message: '양조장 인증 신청 성공',
+      message: '?묒“???몄쬆 ?좎껌 ?깃났',
       data: application,
     });
   } catch (error) {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 인증 신청 생성에 실패했습니다.',
+      error.message || '?묒“???몄쬆 ?좎껌 ?앹꽦???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -574,15 +574,15 @@ const getBreweryApplications = async (req, res) => {
     : null;
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload에 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   if (normalizedStatus && !APPLICATION_STATUSES.has(normalizedStatus)) {
     return sendError(
       res,
       400,
-      '신청 상태 값이 올바르지 않습니다.',
-      'status는 PENDING, APPROVED, REJECTED 중 하나여야 합니다.',
+      '?좎껌 ?곹깭 媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      'status??PENDING, APPROVED, REJECTED 以??섎굹?ъ빞 ?⑸땲??',
     );
   }
 
@@ -591,14 +591,14 @@ const getBreweryApplications = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '양조장 인증 신청 목록 조회 성공',
+      message: '?묒“???몄쬆 ?좎껌 紐⑸줉 議고쉶 ?깃났',
       data: applications,
     });
   } catch (error) {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 인증 신청 목록 조회에 실패했습니다.',
+      error.message || '?묒“???몄쬆 ?좎껌 紐⑸줉 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -608,7 +608,7 @@ const getMyBreweryApplication = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   try {
@@ -616,14 +616,14 @@ const getMyBreweryApplication = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '내 양조장 인증 신청 조회 성공',
+      message: '???묒“???몄쬆 ?좎껌 議고쉶 ?깃났',
       data: application,
     });
   } catch (error) {
     if (error.statusCode === 404) {
       return res.status(200).json({
         status: 200,
-        message: '양조장 인증 신청 내역이 없습니다.',
+        message: '?묒“???몄쬆 ?좎껌 ?댁뿭???놁뒿?덈떎.',
         data: null,
       });
     }
@@ -631,7 +631,7 @@ const getMyBreweryApplication = async (req, res) => {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 인증 신청 조회에 실패했습니다.',
+      error.message || '?묒“???몄쬆 ?좎껌 議고쉶???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -642,7 +642,7 @@ const updateMyApprovedBreweryApplication = async (req, res) => {
   const body = req.body || {};
 
   if (!userId) {
-    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload의 userId가 없습니다.');
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
   }
 
   const breweryName = getOptionalString(body, 'breweryName');
@@ -658,8 +658,8 @@ const updateMyApprovedBreweryApplication = async (req, res) => {
     return sendError(
       res,
       400,
-      '양조장 정보 수정 입력값이 올바르지 않습니다.',
-      'breweryName, licenseNumber는 빈 문자열로 수정할 수 없습니다.',
+      '?묒“???뺣낫 ?섏젙 ?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      'breweryName, licenseNumber??鍮?臾몄옄?대줈 ?섏젙?????놁뒿?덈떎.',
     );
   }
 
@@ -675,14 +675,14 @@ const updateMyApprovedBreweryApplication = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '승인된 양조장 정보가 수정되었습니다.',
+      message: '?뱀씤???묒“???뺣낫媛 ?섏젙?섏뿀?듬땲??',
       data: application,
     });
   } catch (error) {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '승인된 양조장 정보 수정에 실패했습니다.',
+      error.message || '?뱀씤???묒“???뺣낫 ?섏젙???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -695,8 +695,8 @@ const approveBreweryApplication = async (req, res) => {
     return sendError(
       res,
       400,
-      '양조장 인증 신청 ID가 올바르지 않습니다.',
-      'applicationId는 양의 정수여야 합니다.',
+      '?묒“???몄쬆 ?좎껌 ID媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      'applicationId???묒쓽 ?뺤닔?ъ빞 ?⑸땲??',
     );
   }
 
@@ -706,13 +706,13 @@ const approveBreweryApplication = async (req, res) => {
 
     return res.status(200).json({
       ...result,
-      message: '양조장 인증이 승인되었습니다. 기존 accessToken에는 이전 role이 들어있을 수 있으므로 다시 로그인해야 role=BREWERY가 반영됩니다.',
+      message: '?묒“???몄쬆???뱀씤?섏뿀?듬땲?? 湲곗〈 accessToken?먮뒗 ?댁쟾 role???ㅼ뼱?덉쓣 ???덉쑝誘濡??ㅼ떆 濡쒓렇?명빐??role=BREWERY媛 諛섏쁺?⑸땲??',
     });
   } catch (error) {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 인증 승인에 실패했습니다.',
+      error.message || '?묒“???몄쬆 ?뱀씤???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
@@ -727,8 +727,8 @@ const rejectBreweryApplication = async (req, res) => {
     return sendError(
       res,
       400,
-      '양조장 인증 신청 ID가 올바르지 않습니다.',
-      'applicationId는 양의 정수여야 합니다.',
+      '?묒“???몄쬆 ?좎껌 ID媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      'applicationId???묒쓽 ?뺤닔?ъ빞 ?⑸땲??',
     );
   }
 
@@ -736,8 +736,8 @@ const rejectBreweryApplication = async (req, res) => {
     return sendError(
       res,
       400,
-      '거절 사유가 필요합니다.',
-      'rejectReason은 필수입니다.',
+      '嫄곗젅 ?ъ쑀媛 ?꾩슂?⑸땲??',
+      'rejectReason? ?꾩닔?낅땲??',
     );
   }
 
@@ -749,14 +749,14 @@ const rejectBreweryApplication = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '양조장 인증 신청이 거절되었습니다.',
+      message: '?묒“???몄쬆 ?좎껌??嫄곗젅?섏뿀?듬땲??',
       data: application,
     });
   } catch (error) {
     return sendError(
       res,
       error.statusCode || 500,
-      error.message || '양조장 인증 신청 거절에 실패했습니다.',
+      error.message || '?묒“???몄쬆 ?좎껌 嫄곗젅???ㅽ뙣?덉뒿?덈떎.',
       error.detail || error.message,
     );
   }
