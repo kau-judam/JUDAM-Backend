@@ -338,6 +338,7 @@ const getArchiveCount = async (userId) => {
       SELECT COUNT(*) AS count
       FROM user_archives
       WHERE user_id = $1
+        AND deleted_at IS NULL
     `,
     [userId],
   );
@@ -2499,18 +2500,65 @@ const mapFundingReviewImages = (imageUrls) => {
     }));
 };
 
+// funding_deliveries에서 펀딩별 운송장 존재 여부를 조회.
+// funding_deliveries 소유자/권한 이슈로 SELECT가 막혀도 목록 전체가 깨지지 않도록 분리 + graceful degrade.
+const getDeliveryTrackingMap = async (fundingIds) => {
+  const map = new Map();
+
+  if (!Array.isArray(fundingIds) || fundingIds.length === 0) {
+    return map;
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT funding_id, tracking_number
+        FROM funding_deliveries
+        WHERE funding_id = ANY($1::bigint[])
+      `,
+      [fundingIds],
+    );
+
+    rows.forEach((row) => {
+      map.set(Number(row.funding_id), row.tracking_number || null);
+    });
+  } catch (error) {
+    // funding_deliveries 접근 불가 시 배송 정보 없이 진행
+  }
+
+  return map;
+};
+
 // 마이페이지 참여 펀딩 목록 (GET /api/mypage/fundings/participated)
 // 결제 완료(PAID)한 주문이 있는 펀딩을 펀딩당 1행으로 반환. 최근 참여순.
-const getParticipatedFundings = async (userId) => {
+// excludeArchived=true일 때만 이미 FUNDING 아카이브로 기록한 펀딩을 제외(아카이브 작성 picker용).
+const getParticipatedFundings = async (userId, options = {}) => {
+  const excludeArchived = options.excludeArchived === true;
+
+  const archiveExclusion = excludeArchived
+    ? `AND NOT EXISTS (
+            SELECT 1
+            FROM user_archives ua
+            WHERE ua.user_id = $1
+              AND ua.archive_type = 'FUNDING'
+              AND ua.funding_id = o.funding_id
+              AND ua.deleted_at IS NULL
+          )`
+    : '';
+
   const { rows } = await pool.query(
     `
       SELECT
         recent.funding_id,
         recent.order_id,
+        recent.participated_at,
+        agg.my_amount,
         fp.title AS project_name,
         fp.alcohol_percentage AS abv,
         fp.thumbnail_url,
         fp.status AS funding_status,
+        fp.current_amount,
+        fp.goal_amount,
         fp.raw_materials,
         ba.brewery_name,
         u.nickname AS brewery_nickname,
@@ -2518,22 +2566,23 @@ const getParticipatedFundings = async (userId) => {
       FROM (
         SELECT DISTINCT ON (o.funding_id)
           o.funding_id,
-          o.order_id
+          o.order_id,
+          o.created_at AS participated_at
         FROM orders o
         WHERE o.user_id = $1
           AND o.order_status = 'PAID'
           AND o.funding_id IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1
-            FROM user_archives ua
-            WHERE ua.user_id = $1
-              AND ua.archive_type = 'FUNDING'
-              AND ua.funding_id = o.funding_id
-              AND ua.deleted_at IS NULL
-          )
+          ${archiveExclusion}
         ORDER BY o.funding_id, o.order_id DESC
       ) recent
       JOIN funding_projects fp ON fp.funding_id = recent.funding_id
+      LEFT JOIN LATERAL (
+        SELECT SUM(o2.total_amount) AS my_amount
+        FROM orders o2
+        WHERE o2.user_id = $1
+          AND o2.order_status = 'PAID'
+          AND o2.funding_id = recent.funding_id
+      ) agg ON TRUE
       LEFT JOIN users u ON u.user_id = fp.brewery_user_id
       LEFT JOIN LATERAL (
         SELECT brewery_name
@@ -2558,10 +2607,22 @@ const getParticipatedFundings = async (userId) => {
     [userId],
   );
 
+  const deliveryTrackingMap = await getDeliveryTrackingMap(
+    rows.map((row) => Number(row.funding_id)),
+  );
+
   return rows.map((row) => {
     const reviewId = row.review_id === null || row.review_id === undefined
       ? null
       : Number(row.review_id);
+    const currentAmount = Number(row.current_amount || 0);
+    const goalAmount = Number(row.goal_amount || 0);
+    const progressRate = goalAmount > 0
+      ? Math.round((currentAmount / goalAmount) * 1000) / 10
+      : 0;
+    const fundingStatus = row.funding_status;
+    const hasTrackingNumber = Boolean(deliveryTrackingMap.get(Number(row.funding_id)));
+    const canViewDelivery = fundingStatus === 'SUCCESS' && hasTrackingNumber;
 
     return {
       fundingId: Number(row.funding_id),
@@ -2572,11 +2633,125 @@ const getParticipatedFundings = async (userId) => {
       ingredients: buildIngredientsText(row.raw_materials),
       abv: toNullableNumber(row.abv),
       thumbnailUrl: row.thumbnail_url || null,
-      fundingStatus: row.funding_status,
+      fundingStatus,
+      myAmount: Number(row.my_amount || 0),
+      participatedAt: row.participated_at,
+      currentAmount,
+      goalAmount,
+      progressRate,
+      canViewDelivery,
+      deliveryStatus: hasTrackingNumber ? 'SHIPPED' : null,
+      hasTrackingNumber,
       hasReview: reviewId !== null,
       reviewId,
     };
   });
+};
+
+// 단일 펀딩의 배송 정보(택배사·운송장)를 조회. 권한/부재 시 null로 graceful degrade.
+const getFundingDelivery = async (fundingId) => {
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT courier, tracking_number, created_at
+        FROM funding_deliveries
+        WHERE funding_id = $1
+        ORDER BY delivery_id DESC
+        LIMIT 1
+      `,
+      [fundingId],
+    );
+    return rows[0] || null;
+  } catch (error) {
+    // funding_deliveries 접근 불가 시 배송 정보 없이 진행
+    return null;
+  }
+};
+
+// 마이페이지 참여 펀딩 주문·배송 상세 (GET /api/mypage/fundings/orders/{orderId})
+// 본인 소유 주문 1건의 결제·배송 상세를 반환. 주문이 없거나 타인 주문이면 404.
+const getParticipatedFundingOrderDetail = async (userId, orderId) => {
+  const parsedOrderId = Number(orderId);
+
+  if (!Number.isInteger(parsedOrderId) || parsedOrderId <= 0) {
+    throw createServiceError(400, '유효하지 않은 주문 ID입니다.');
+  }
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        o.order_id,
+        o.funding_id,
+        o.total_amount,
+        o.shipping_fee,
+        o.order_status,
+        o.created_at AS ordered_at,
+        o.recipient_name,
+        o.recipient_phone,
+        o.shipping_address,
+        o.shipping_detail_address,
+        fp.title AS project_name,
+        ba.brewery_name,
+        u.nickname AS brewery_nickname,
+        opt.name AS reward_name
+      FROM orders o
+      JOIN funding_projects fp ON fp.funding_id = o.funding_id
+      LEFT JOIN users u ON u.user_id = fp.brewery_user_id
+      LEFT JOIN LATERAL (
+        SELECT brewery_name
+        FROM brewery_auth
+        WHERE user_id = fp.brewery_user_id
+        ORDER BY
+          CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
+          updated_at DESC,
+          application_id DESC
+        LIMIT 1
+      ) ba ON TRUE
+      LEFT JOIN funding_support_options opt ON opt.option_id = o.option_id
+      WHERE o.order_id = $1
+        AND o.user_id = $2
+      LIMIT 1
+    `,
+    [parsedOrderId, userId],
+  );
+
+  const order = rows[0];
+  if (!order) {
+    throw createServiceError(404, '주문을 찾을 수 없습니다.');
+  }
+
+  const delivery = await getFundingDelivery(order.funding_id);
+  const trackingNumber = delivery?.tracking_number || null;
+  const hasTrackingNumber = Boolean(trackingNumber);
+
+  const totalAmount = Number(order.total_amount || 0);
+  const shippingFee = Number(order.shipping_fee || 0);
+  const receiverAddress = [order.shipping_address, order.shipping_detail_address]
+    .filter((part) => typeof part === 'string' && part.trim().length > 0)
+    .join(' ') || null;
+
+  return {
+    orderId: Number(order.order_id),
+    fundingId: order.funding_id === null || order.funding_id === undefined
+      ? null
+      : Number(order.funding_id),
+    projectName: order.project_name,
+    breweryName: order.brewery_name || order.brewery_nickname || null,
+    rewardName: order.reward_name || null,
+    paidAmount: totalAmount - shippingFee,
+    shippingFee,
+    totalAmount,
+    orderedAt: order.ordered_at,
+    paymentStatus: order.order_status,
+    deliveryStatus: hasTrackingNumber ? 'SHIPPED' : null,
+    courierName: delivery?.courier || null,
+    trackingNumber,
+    shippedAt: hasTrackingNumber ? (delivery?.created_at || null) : null,
+    deliveredAt: null,
+    receiverName: order.recipient_name || null,
+    receiverPhone: order.recipient_phone || null,
+    receiverAddress,
+  };
 };
 
 // 펀딩 후기 불러오기 (GET /api/mypage/fundings/{fundingId}/review)
@@ -2621,6 +2796,217 @@ const getMyFundingReview = async (userId, fundingId) => {
   };
 };
 
+// ── 마이페이지 활동(관심 / 댓글 / Q&A) ──────────────────────────
+
+const ACTIVITY_DEFAULT_SIZE = 20;
+const ACTIVITY_MAX_SIZE = 100;
+
+const parseActivityPagination = (query = {}) => {
+  const rawPage = Number(query.page);
+  const rawSize = Number(query.size);
+  const page = Number.isInteger(rawPage) && rawPage >= 0 ? rawPage : 0;
+  const size = Number.isInteger(rawSize) && rawSize > 0
+    ? Math.min(rawSize, ACTIVITY_MAX_SIZE)
+    : ACTIVITY_DEFAULT_SIZE;
+  return { page, size, offset: page * size };
+};
+
+const normalizeActivityType = (type, allowed) => {
+  if (typeof type !== 'string') {
+    return null;
+  }
+  const upper = type.trim().toUpperCase();
+  return allowed.includes(upper) ? upper : null;
+};
+
+const buildActivityListResponse = (key, items, totalElements, page, size) => ({
+  [key]: items,
+  totalElements,
+  totalPages: size > 0 ? Math.ceil(totalElements / size) : 0,
+  currentPage: page,
+});
+
+// 마이페이지 활동 - 관심 목록 (GET /api/mypage/activity/interests)
+// 관심(찜) 대상을 RECIPE / POST / FUNDING로 통합. type 생략 시 전체.
+const getMyActivityInterests = async (userId, query = {}) => {
+  const { page, size, offset } = parseActivityPagination(query);
+  const type = normalizeActivityType(query.type, ['RECIPE', 'POST', 'FUNDING']);
+
+  const baseCte = `
+    WITH interest_items AS (
+      SELECT r.recipe_id AS target_id, 'RECIPE' AS target_type, r.title AS title,
+             r.summary AS summary, r.image_url AS thumbnail_url, ri.created_at AS interested_at
+      FROM recipe_interests ri
+      JOIN recipes r ON r.recipe_id = ri.recipe_id
+      WHERE ri.user_id = $1
+      UNION ALL
+      SELECT p.post_id, 'POST', p.title,
+             NULL, (
+               SELECT pi.image_url FROM post_images pi
+               WHERE pi.post_id = p.post_id
+               ORDER BY pi.sequence ASC, pi.image_id ASC
+               LIMIT 1
+             ), pl.created_at
+      FROM post_likes pl
+      JOIN posts p ON p.post_id = pl.post_id
+      WHERE pl.user_id = $1
+      UNION ALL
+      SELECT fp.funding_id, 'FUNDING', fp.title,
+             fp.summary, fp.thumbnail_url, fl.created_at
+      FROM funding_likes fl
+      JOIN funding_projects fp ON fp.funding_id = fl.funding_id
+      WHERE fl.user_id = $1
+    )
+  `;
+
+  const [{ rows: countRows }, { rows }] = await Promise.all([
+    pool.query(
+      `${baseCte}
+       SELECT COUNT(*) AS count FROM interest_items
+       WHERE ($2::text IS NULL OR target_type = $2)`,
+      [userId, type],
+    ),
+    pool.query(
+      `${baseCte}
+       SELECT * FROM interest_items
+       WHERE ($2::text IS NULL OR target_type = $2)
+       ORDER BY interested_at DESC
+       LIMIT $3 OFFSET $4`,
+      [userId, type, size, offset],
+    ),
+  ]);
+
+  const totalElements = Number(countRows[0]?.count || 0);
+  const interests = rows.map((row) => ({
+    targetId: Number(row.target_id),
+    targetType: row.target_type,
+    title: row.title,
+    summary: row.summary || null,
+    thumbnailUrl: row.thumbnail_url || null,
+    interestedAt: row.interested_at,
+  }));
+
+  return buildActivityListResponse('interests', interests, totalElements, page, size);
+};
+
+// 마이페이지 활동 - 댓글 목록 (GET /api/mypage/activity/comments)
+// 본인이 작성한 댓글을 RECIPE / POST로 통합. 원문이 삭제된 댓글은 JOIN으로 자연 제외.
+const getMyActivityComments = async (userId, query = {}) => {
+  const { page, size, offset } = parseActivityPagination(query);
+  const type = normalizeActivityType(query.type, ['RECIPE', 'POST']);
+
+  const baseCte = `
+    WITH comment_items AS (
+      SELECT rc.comment_id AS comment_id, r.recipe_id AS target_id, 'RECIPE' AS target_type,
+             r.title AS target_title, rc.content AS content,
+             rc.created_at AS created_at, rc.updated_at AS updated_at
+      FROM recipe_comments rc
+      JOIN recipes r ON r.recipe_id = rc.recipe_id
+      WHERE rc.user_id = $1
+      UNION ALL
+      SELECT pc.comment_id, p.post_id, 'POST',
+             p.title, pc.content,
+             pc.created_at, pc.updated_at
+      FROM post_comments pc
+      JOIN posts p ON p.post_id = pc.post_id
+      WHERE pc.user_id = $1
+    )
+  `;
+
+  const [{ rows: countRows }, { rows }] = await Promise.all([
+    pool.query(
+      `${baseCte}
+       SELECT COUNT(*) AS count FROM comment_items
+       WHERE ($2::text IS NULL OR target_type = $2)`,
+      [userId, type],
+    ),
+    pool.query(
+      `${baseCte}
+       SELECT * FROM comment_items
+       WHERE ($2::text IS NULL OR target_type = $2)
+       ORDER BY created_at DESC
+       LIMIT $3 OFFSET $4`,
+      [userId, type, size, offset],
+    ),
+  ]);
+
+  const totalElements = Number(countRows[0]?.count || 0);
+  const comments = rows.map((row) => ({
+    commentId: Number(row.comment_id),
+    targetId: Number(row.target_id),
+    targetType: row.target_type,
+    targetTitle: row.target_title,
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+
+  return buildActivityListResponse('comments', comments, totalElements, page, size);
+};
+
+// 마이페이지 활동 - Q&A 목록 (GET /api/mypage/activity/qna)
+// 본인이 작성한 펀딩 Q&A와 그에 달린(가장 최근) 답변을 함께 반환.
+const getMyActivityQna = async (userId, query = {}) => {
+  const { page, size, offset } = parseActivityPagination(query);
+
+  const [{ rows: countRows }, { rows }] = await Promise.all([
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM funding_questions fq
+        JOIN funding_projects fp ON fp.funding_id = fq.funding_id
+        WHERE fq.user_id = $1
+      `,
+      [userId],
+    ),
+    pool.query(
+      `
+        SELECT
+          fq.question_id,
+          fq.funding_id,
+          fp.title AS target_title,
+          fq.content AS question_content,
+          fq.created_at AS question_created_at,
+          rep.content AS answer_content,
+          rep.created_at AS answer_created_at
+        FROM funding_questions fq
+        JOIN funding_projects fp ON fp.funding_id = fq.funding_id
+        LEFT JOIN LATERAL (
+          SELECT content, created_at
+          FROM funding_question_replies
+          WHERE question_id = fq.question_id
+          ORDER BY created_at DESC, reply_id DESC
+          LIMIT 1
+        ) rep ON TRUE
+        WHERE fq.user_id = $1
+        ORDER BY fq.created_at DESC
+        LIMIT $2 OFFSET $3
+      `,
+      [userId, size, offset],
+    ),
+  ]);
+
+  const totalElements = Number(countRows[0]?.count || 0);
+  const qnas = rows.map((row) => {
+    const hasAnswer = row.answer_content !== null && row.answer_content !== undefined;
+
+    return {
+      questionId: Number(row.question_id),
+      targetId: Number(row.funding_id),
+      targetType: 'FUNDING',
+      targetTitle: row.target_title,
+      questionContent: row.question_content,
+      questionCreatedAt: row.question_created_at,
+      hasAnswer,
+      answerContent: hasAnswer ? row.answer_content : null,
+      answerCreatedAt: hasAnswer ? row.answer_created_at : null,
+      answerStatus: hasAnswer ? 'ANSWERED' : 'WAITING',
+    };
+  });
+
+  return buildActivityListResponse('qnas', qnas, totalElements, page, size);
+};
+
 module.exports = {
   getMyProfile,
   checkNickname,
@@ -2659,5 +3045,9 @@ module.exports = {
   validateArchivePayload,
   validateTagIds,
   getParticipatedFundings,
+  getParticipatedFundingOrderDetail,
   getMyFundingReview,
+  getMyActivityInterests,
+  getMyActivityComments,
+  getMyActivityQna,
 };
