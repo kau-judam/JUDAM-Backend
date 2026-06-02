@@ -7,6 +7,9 @@ const {
   approveFundingDraft,
   rejectFundingDraft,
   cancelFundingProject,
+  getFundingReportsForAdmin,
+  getFundingReportDetailForAdmin,
+  updateFundingReportStatusForAdmin,
   settleExpiredFundingsManually,
   completeFundingSettlement,
 } = require('../controllers/admin.controller');
@@ -17,7 +20,7 @@ const requireAdmin = (req, res, next) => {
   if (role !== 'ADMIN') {
     return res.status(403).json({
       status: 403,
-      message: '관리자만 호출할 수 있습니다.',
+      message: '???? ??? ? ????.',
     });
   }
 
@@ -33,6 +36,9 @@ router.patch(
   requireAdmin,
   cancelFundingProject,
 );
+router.get('/funding-reports', authMiddleware, requireAdmin, getFundingReportsForAdmin);
+router.get('/funding-reports/:reportId', authMiddleware, requireAdmin, getFundingReportDetailForAdmin);
+router.patch('/funding-reports/:reportId/status', authMiddleware, requireAdmin, updateFundingReportStatusForAdmin);
 router.post(
   '/fundings/settle-expired',
   authMiddleware,

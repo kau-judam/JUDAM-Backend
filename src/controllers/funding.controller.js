@@ -9427,6 +9427,38 @@ const getFundingShareLink = async (req, res) => {
   }
 };
 
+const FUNDING_REPORT_TABLE_CANDIDATES = ['funding_reports', 'funding_project_reports'];
+let cachedFundingReportTableName = null;
+
+const getFundingReportTableName = async () => {
+  if (cachedFundingReportTableName) {
+    return cachedFundingReportTableName;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = ANY($1::text[])
+    `,
+    [FUNDING_REPORT_TABLE_CANDIDATES]
+  );
+
+  const existingTables = new Set(rows.map((row) => row.table_name));
+  cachedFundingReportTableName = FUNDING_REPORT_TABLE_CANDIDATES.find((tableName) => existingTables.has(tableName));
+
+  if (!cachedFundingReportTableName) {
+    throw new Error('funding_reports ???? ????.');
+  }
+
+  return cachedFundingReportTableName;
+};
+
+const FUNDING_REPORT_STATUSES = ['PENDING', 'REVIEWED', 'RESOLVED', 'REJECTED'];
+
+const normalizeFundingReportStatus = (status) => String(status || '').trim().toUpperCase();
+
 const createFundingReport = async (req, res) => {
   const { fundingId } = req.params;
   const { reason, content } = req.body || {};
@@ -9463,9 +9495,12 @@ const createFundingReport = async (req, res) => {
   }
 
   try {
-    const reporterId = getUserId(req);
+    const reporterId = requireUserId(req, res);
+    if (!reporterId) return;
+
+    const reportTableName = await getFundingReportTableName();
     const result = await pool.query(
-      `INSERT INTO funding_project_reports (funding_id, reporter_id, reason, content, status, created_at, updated_at)
+      `INSERT INTO ${reportTableName} (funding_id, reporter_id, reason, content, status, created_at, updated_at)
        VALUES ($1, $2, $3, $4, 'PENDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING report_id, funding_id, reporter_id, reason, content, status, created_at, updated_at`,
       [resolvedFundingId, reporterId, normalizedReason, content || null]
@@ -9529,7 +9564,7 @@ const getFundingReports = async (req, res) => {
     const countResult = await pool.query(
       `
       SELECT COUNT(*)::int AS total_count
-      FROM funding_reports fr
+      FROM ${reportTableName} fr
       ${whereClause}
       `,
       values
@@ -9549,7 +9584,7 @@ const getFundingReports = async (req, res) => {
         fr.content,
         fr.status,
         fr.created_at
-      FROM funding_reports fr
+      FROM ${reportTableName} fr
       LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
       LEFT JOIN users u ON u.user_id = fr.reporter_id
       ${whereClause}
