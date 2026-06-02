@@ -9,6 +9,7 @@ const {
   getMyPageSummary,
   getMyBadges,
   getMySulbti,
+  getMySulbtiShareLink,
   saveMySulbti,
   getMyArchives,
   getMyArchiveDetail,
@@ -30,7 +31,7 @@ const {
 
 const UNAUTHORIZED_RESPONSE = {
   status: 401,
-  message: '유효하지 않거나 만료된 토큰입니다.',
+  message: '?좏슚?섏? ?딄굅??留뚮즺???좏겙?낅땲??',
 };
 
 const getAuthenticatedUserId = (req, res) => {
@@ -46,20 +47,37 @@ const getAuthenticatedUserId = (req, res) => {
 
 const getErrorStatus = (error) => error.statusCode || error.status || 500;
 
+const normalizeShareBaseUrl = (value) => {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized.toLowerCase() === 'null' || normalized.toLowerCase() === 'undefined') {
+    return null;
+  }
+  return normalized.replace(/\/+$/, '');
+};
+
+const buildPublicShareBaseUrl = (req) => {
+  const requestBaseUrl = normalizeShareBaseUrl(`${req.protocol}://${req.get('host')}`);
+  return (
+    normalizeShareBaseUrl(process.env.PUBLIC_WEB_BASE_URL) ||
+    normalizeShareBaseUrl(process.env.FRONTEND_BASE_URL) ||
+    requestBaseUrl
+  );
+};
+
 const sendErrorResponse = (res, error, fallbackMessage) => {
   const status = getErrorStatus(error);
 
   if (status === 404) {
     return res.status(404).json({
       status: 404,
-      message: '사용자를 찾을 수 없습니다.',
+      message: '?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎.',
     });
   }
 
   if (status === 409) {
     return res.status(409).json({
       status: 409,
-      message: '이미 사용 중인 닉네임입니다.',
+      message: '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
     });
   }
 
@@ -105,11 +123,11 @@ const getMyProfileController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '내 정보 조회 성공',
+      message: '???뺣낫 議고쉶 ?깃났',
       data,
     });
   } catch (error) {
-    return sendErrorResponse(res, error, '내 정보 조회 중 서버 오류가 발생했습니다.');
+    return sendErrorResponse(res, error, '???뺣낫 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.');
   }
 };
 
@@ -125,13 +143,13 @@ const getMyPageSummaryController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '마이페이지 메인 요약 조회 성공',
+      message: '留덉씠?섏씠吏 硫붿씤 ?붿빟 議고쉶 ?깃났',
       data,
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '마이페이지 메인 요약 조회 중 서버 오류가 발생했습니다.',
+      message: '留덉씠?섏씠吏 硫붿씤 ?붿빟 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -148,13 +166,13 @@ const getMyBadgesController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '마이페이지 뱃지 목록 조회 성공',
+      message: '留덉씠?섏씠吏 諭껋? 紐⑸줉 議고쉶 ?깃났',
       data,
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '마이페이지 뱃지 목록 조회 중 서버 오류가 발생했습니다.',
+      message: '留덉씠?섏씠吏 諭껋? 紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -171,17 +189,45 @@ const getMySulbtiController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: data.hasResult ? '술BTI 결과 조회 성공' : '술BTI 결과가 없습니다.',
+      message: data.hasResult ? '?잹TI 寃곌낵 議고쉶 ?깃났' : '?잹TI 寃곌낵媛 ?놁뒿?덈떎.',
       data,
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '술BTI 결과 조회 중 서버 오류가 발생했습니다.',
+      message: '?잹TI 寃곌낵 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
 
+
+const getMySulbtiShareLinkController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+  if (!userId) {
+    return;
+  }
+
+  try {
+    await getMySulbtiShareLink(userId);
+    const publicBaseUrl = buildPublicShareBaseUrl(req);
+    const shareUrl = `${publicBaseUrl}/sulbti/result/${encodeURIComponent(String(userId))}`;
+
+    return res.status(200).json({
+      status: 200,
+      message: '술BTI 공유 링크 생성 성공',
+      data: {
+        shareUrl,
+      },
+      shareUrl,
+    });
+  } catch (error) {
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      status,
+      message: status === 404 ? '술BTI 결과가 없습니다.' : (error.message || '술BTI 공유 링크 생성 중 서버 오류가 발생했습니다.'),
+    });
+  }
+};
 const saveMySulbtiController = async (req, res) => {
   const userId = getAuthenticatedUserId(req, res);
 
@@ -202,7 +248,7 @@ const saveMySulbtiController = async (req, res) => {
 
     return res.status(status).json({
       status,
-      message: '술BTI 결과 저장 성공',
+      message: '?잹TI 寃곌낵 ????깃났',
       data,
     });
   } catch (error) {
@@ -217,7 +263,7 @@ const saveMySulbtiController = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '술BTI 결과 저장 중 서버 오류가 발생했습니다.',
+      message: '?잹TI 寃곌낵 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -240,7 +286,7 @@ const getMyArchivesController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '아카이브 목록 조회 성공',
+      message: '?꾩뭅?대툕 紐⑸줉 議고쉶 ?깃났',
       data,
       page,
       size,
@@ -251,7 +297,7 @@ const getMyArchivesController = async (req, res) => {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 목록 조회 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -268,14 +314,14 @@ const getMyArchiveDetailController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '아카이브 상세 조회 성공',
+      message: '?꾩뭅?대툕 ?곸꽭 議고쉶 ?깃났',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 상세 조회 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ?곸꽭 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -292,14 +338,14 @@ const createMyArchiveController = async (req, res) => {
 
     return res.status(201).json({
       status: 201,
-      message: '아카이브 작성 성공',
+      message: '?꾩뭅?대툕 ?묒꽦 ?깃났',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 작성 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ?묒꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -326,14 +372,14 @@ const createMyArchiveWithImagesController = async (req, res) => {
 
     return res.status(201).json({
       status: 201,
-      message: '아카이브 작성 성공',
+      message: '?꾩뭅?대툕 ?묒꽦 ?깃났',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 작성 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ?묒꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -350,14 +396,14 @@ const updateMyArchiveController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '아카이브 수정 성공',
+      message: '?꾩뭅?대툕 ?섏젙 ?깃났',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 수정 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -396,14 +442,14 @@ const updateMyArchiveWithImagesController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '아카이브 수정 성공',
+      message: '?꾩뭅?대툕 ?섏젙 ?깃났',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 수정 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -420,13 +466,13 @@ const deleteMyArchiveController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '아카이브 삭제 성공',
+      message: '?꾩뭅?대툕 ??젣 ?깃났',
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 삭제 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ??젣 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -443,14 +489,14 @@ const uploadArchiveImagesController = async (req, res) => {
 
     return res.status(201).json({
       status: 201,
-      message: '아카이브 이미지 업로드 성공',
+      message: '?꾩뭅?대툕 ?대?吏 ?낅줈???깃났',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 이미지 업로드 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ?대?吏 ?낅줈??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -467,13 +513,13 @@ const deleteArchiveImageController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '아카이브 이미지 삭제 성공',
+      message: '?꾩뭅?대툕 ?대?吏 ??젣 ?깃났',
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 이미지 삭제 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ?대?吏 ??젣 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -490,14 +536,14 @@ const getArchiveTagsController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '아카이브 태그 목록 조회 성공',
+      message: '?꾩뭅?대툕 ?쒓렇 紐⑸줉 議고쉶 ?깃났',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '아카이브 태그 목록 조회 중 서버 오류가 발생했습니다.',
+      '?꾩뭅?대툕 ?쒓렇 紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -515,14 +561,14 @@ const getParticipatedFundingsController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '참여 펀딩 목록 조회 성공',
+      message: '李몄뿬 ???紐⑸줉 議고쉶 ?깃났',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '참여 펀딩 목록 조회 중 서버 오류가 발생했습니다.',
+      '李몄뿬 ???紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -563,14 +609,14 @@ const getMyFundingReviewController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: data ? '펀딩 후기 조회 성공' : '불러올 후기가 없습니다.',
+      message: data ? '????꾧린 議고쉶 ?깃났' : '遺덈윭???꾧린媛 ?놁뒿?덈떎.',
       data,
     });
   } catch (error) {
     return sendArchiveErrorResponse(
       res,
       error,
-      '펀딩 후기 조회 중 서버 오류가 발생했습니다.',
+      '????꾧린 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     );
   }
 };
@@ -587,7 +633,7 @@ const checkNicknameController = async (req, res) => {
   if (!nickname) {
     return res.status(400).json({
       status: 400,
-      message: '닉네임을 입력해주세요.',
+      message: '?됰꽕?꾩쓣 ?낅젰?댁＜?몄슂.',
     });
   }
 
@@ -597,12 +643,12 @@ const checkNicknameController = async (req, res) => {
     return res.status(200).json({
       status: 200,
       message: data.isAvailable
-        ? '사용 가능한 닉네임입니다.'
-        : '이미 사용 중인 닉네임입니다.',
+        ? '?ъ슜 媛?ν븳 ?됰꽕?꾩엯?덈떎.'
+        : '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
       data,
     });
   } catch (error) {
-    return sendErrorResponse(res, error, '닉네임 중복 확인 중 서버 오류가 발생했습니다.');
+    return sendErrorResponse(res, error, '?됰꽕??以묐났 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.');
   }
 };
 
@@ -618,7 +664,7 @@ const updateNicknameController = async (req, res) => {
   if (!nickname) {
     return res.status(400).json({
       status: 400,
-      message: '닉네임을 입력해주세요.',
+      message: '?됰꽕?꾩쓣 ?낅젰?댁＜?몄슂.',
     });
   }
 
@@ -627,11 +673,11 @@ const updateNicknameController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '닉네임 수정 성공',
+      message: '?됰꽕???섏젙 ?깃났',
       data,
     });
   } catch (error) {
-    return sendErrorResponse(res, error, '닉네임 수정 중 서버 오류가 발생했습니다.');
+    return sendErrorResponse(res, error, '?됰꽕???섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.');
   }
 };
 
@@ -648,14 +694,14 @@ const updatePhoneNumberController = async (req, res) => {
   if (!phoneNumber) {
     return res.status(400).json({
       status: 400,
-      message: '전화번호를 입력해주세요.',
+      message: '?꾪솕踰덊샇瑜??낅젰?댁＜?몄슂.',
     });
   }
 
   if (!verificationCode) {
     return res.status(400).json({
       status: 400,
-      message: '인증번호를 입력해주세요.',
+      message: '?몄쬆踰덊샇瑜??낅젰?댁＜?몄슂.',
     });
   }
 
@@ -668,7 +714,7 @@ const updatePhoneNumberController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '전화번호 수정 성공',
+      message: '?꾪솕踰덊샇 ?섏젙 ?깃났',
       data,
     });
   } catch (error) {
@@ -681,7 +727,7 @@ const updatePhoneNumberController = async (req, res) => {
       });
     }
 
-    if (status === 500 && error.message === '전화번호 인증 서비스 설정이 누락되었습니다.') {
+    if (status === 500 && error.message === '?꾪솕踰덊샇 ?몄쬆 ?쒕퉬???ㅼ젙???꾨씫?섏뿀?듬땲??') {
       return res.status(500).json({
         status: 500,
         message: error.message,
@@ -690,7 +736,7 @@ const updatePhoneNumberController = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '전화번호 수정 중 서버 오류가 발생했습니다.',
+      message: '?꾪솕踰덊샇 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -707,7 +753,7 @@ const requestPhoneVerificationController = async (req, res) => {
   if (!phoneNumber) {
     return res.status(400).json({
       status: 400,
-      message: '전화번호를 입력해주세요.',
+      message: '?꾪솕踰덊샇瑜??낅젰?댁＜?몄슂.',
     });
   }
 
@@ -716,7 +762,7 @@ const requestPhoneVerificationController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '전화번호 인증 요청이 생성되었습니다.',
+      message: '?꾪솕踰덊샇 ?몄쬆 ?붿껌???앹꽦?섏뿀?듬땲??',
       data,
     });
   } catch (error) {
@@ -731,7 +777,7 @@ const requestPhoneVerificationController = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '전화번호 인증 요청 생성 중 서버 오류가 발생했습니다.',
+      message: '?꾪솕踰덊샇 ?몄쬆 ?붿껌 ?앹꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -746,7 +792,7 @@ const updateProfileImageController = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({
       status: 400,
-      message: '프로필 이미지 파일을 첨부해주세요.',
+      message: '?꾨줈???대?吏 ?뚯씪??泥⑤??댁＜?몄슂.',
     });
   }
 
@@ -755,13 +801,13 @@ const updateProfileImageController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '프로필 이미지 수정 성공',
+      message: '?꾨줈???대?吏 ?섏젙 ?깃났',
       data,
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '프로필 이미지 수정 중 서버 오류가 발생했습니다.',
+      message: '?꾨줈???대?吏 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -783,14 +829,14 @@ const changeMyPasswordController = async (req, res) => {
   if (!currentPassword || !newPassword) {
     return res.status(400).json({
       status: 400,
-      message: '현재 비밀번호와 새 비밀번호를 입력해주세요.',
+      message: '?꾩옱 鍮꾨?踰덊샇? ??鍮꾨?踰덊샇瑜??낅젰?댁＜?몄슂.',
     });
   }
 
   if (newPassword.length < 8) {
     return res.status(400).json({
       status: 400,
-      message: '새 비밀번호는 8자 이상이어야 합니다.',
+      message: '??鍮꾨?踰덊샇??8???댁긽?댁뼱???⑸땲??',
     });
   }
 
@@ -799,7 +845,7 @@ const changeMyPasswordController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '비밀번호 변경 성공',
+      message: '鍮꾨?踰덊샇 蹂寃??깃났',
     });
   } catch (error) {
     const status = getErrorStatus(error);
@@ -813,7 +859,7 @@ const changeMyPasswordController = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '비밀번호 변경 중 서버 오류가 발생했습니다.',
+      message: '鍮꾨?踰덊샇 蹂寃?以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -880,6 +926,7 @@ module.exports = {
   getMyPageSummaryController,
   getMyBadgesController,
   getMySulbtiController,
+  getMySulbtiShareLinkController,
   saveMySulbtiController,
   getMyArchivesController,
   getMyArchiveDetailController,

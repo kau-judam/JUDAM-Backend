@@ -7,6 +7,7 @@ const {
   getMyPageSummaryController,
   getMyBadgesController,
   getMySulbtiController,
+  getMySulbtiShareLinkController,
   saveMySulbtiController,
   checkNicknameController,
   updateNicknameController,
@@ -38,6 +39,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.get('/summary', authMiddleware, getMyPageSummaryController);
 router.get('/badges', authMiddleware, getMyBadgesController);
 router.get('/sulbti', authMiddleware, getMySulbtiController);
+router.get('/sulbti/share-link', authMiddleware, getMySulbtiShareLinkController);
 router.post('/sulbti', authMiddleware, saveMySulbtiController);
 router.get('/archives/tags', authMiddleware, getArchiveTagsController);
 router.get('/archives', authMiddleware, getMyArchivesController);

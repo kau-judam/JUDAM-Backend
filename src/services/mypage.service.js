@@ -976,6 +976,18 @@ const convertAndSaveMySulbtiSurvey = async (userId, payload) => {
   return saveSulbtiSurveyResult(userId, surveyResult);
 };
 
+const getMySulbtiShareLink = async (userId) => {
+  const sulbti = await getMySulbti(userId);
+
+  if (!sulbti.hasResult) {
+    const error = new Error('\uc220BTI \uacb0\uacfc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return sulbti;
+};
+
 const saveMySulbti = async (userId, payload) => {
   if (isSurveyConvertPayload(payload)) {
     return convertAndSaveMySulbtiSurvey(userId, payload);
