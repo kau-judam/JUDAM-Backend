@@ -6416,7 +6416,7 @@ const getFundingList = async (req, res) => {
     conditions.push(`(
       fp.title ILIKE ${keywordParam}
       OR COALESCE(fp.description, '') ILIKE ${keywordParam}
-      OR COALESCE(ba.brewery_name, u.nickname, '') ILIKE ${keywordParam}
+      OR COALESCE(bp.brewery_name, ba.brewery_name, u.nickname, '') ILIKE ${keywordParam}
       OR r.title ILIKE ${keywordParam}
     )`);
   }
@@ -6985,7 +6985,7 @@ const getFundingDetail = async (req, res) => {
       imageUrls: imageFields.imageUrls,
       allImageUrls: imageFields.allImageUrls,
       images: mapFundingImageUrls(imageFields.allImageUrls),
-      breweryName: funding.draft_brewery_name || funding.brewery_name,
+      breweryName: breweryInfo.breweryName,
       status: funding.status,
       currentAmount: Number(funding.current_amount),
       targetAmount: Number(funding.target_amount),
@@ -6999,9 +6999,9 @@ const getFundingDetail = async (req, res) => {
       volume: funding.volume,
       alcoholPercentage: funding.alcohol_percentage,
       bottleSize: funding.bottle_size,
-      businessAddress: funding.business_address,
-      breweryAddress: funding.business_address,
-      breweryLocation: funding.business_address,
+      businessAddress: breweryInfo.businessAddress,
+      breweryAddress: breweryInfo.businessAddress,
+      breweryLocation: breweryInfo.businessAddress,
       matchRate: matchScore,
       sulbtiMatchScore: matchScore,
       matchScore,
@@ -7021,10 +7021,10 @@ const getFundingDetail = async (req, res) => {
         subIngredients,
         ingredients,
         rawMaterials,
-        businessNumber: funding.business_registration_number,
-        licenseNumber: funding.business_registration_number,
-        businessAddress: funding.business_address,
-        businessAddressDetail: funding.business_address_detail,
+        businessNumber: breweryInfo.businessRegistrationNumber,
+        licenseNumber: breweryInfo.businessRegistrationNumber,
+        businessAddress: breweryInfo.businessAddress,
+        businessAddressDetail: breweryInfo.businessAddressDetail,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
         policy: projectPolicy,
         refundPolicy: projectPolicy,
@@ -7046,17 +7046,17 @@ const getFundingDetail = async (req, res) => {
         ...PLAN_GUIDES,
       },
       breweryInfo: {
-        breweryName: funding.draft_brewery_name || funding.brewery_name,
+        breweryName: breweryInfo.breweryName,
         creatorName: funding.creator_name,
         profileImageUrl: funding.profile_image_url,
         creatorIntroduction: funding.creator_introduction,
         breweryBio: funding.creator_introduction,
         representativeName: funding.representative_name,
         businessRegistrationNumber: funding.business_registration_number,
-        businessAddress: funding.business_address,
-        businessAddressDetail: funding.business_address_detail,
-        breweryLocation: funding.business_address,
-        breweryAddress: funding.business_address,
+        businessAddress: breweryInfo.businessAddress,
+        businessAddressDetail: breweryInfo.businessAddressDetail,
+        breweryLocation: breweryInfo.businessAddress,
+        breweryAddress: breweryInfo.businessAddress,
         contactEmail: funding.contact_email,
         contactPhone: funding.contact_phone,
         bankName: funding.bank_name,
