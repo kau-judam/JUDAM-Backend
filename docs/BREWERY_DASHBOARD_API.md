@@ -282,7 +282,8 @@ Response:
       "currentAmount": 1680000,
       "targetAmount": 3000000,
       "achievementRate": 56,
-      "status": "진행 중",
+      "status": "ACTIVE",
+      "statusLabel": "진행 중",
       "remainingDays": 12,
       "endDate": "2026-06-08"
     }
@@ -296,7 +297,8 @@ Response:
       "currentAmount": 1680000,
       "targetAmount": 3000000,
       "achievementRate": 56,
-      "status": "진행 중",
+      "status": "ACTIVE",
+      "statusLabel": "진행 중",
       "remainingDays": 12,
       "endDate": "2026-06-08"
     }
@@ -310,16 +312,35 @@ Response:
 
 Frontend can use either `content` or `data`.
 
+Pagination:
+
+- `totalPages` is at least `1`, even when the list is empty.
+
 Status filter rules:
 
-- `active`: scheduled/approved/active/ongoing/goal-achieved fundings whose `end_date` has not passed.
-- `completed`: ended/successful/failed/production/shipping/completed fundings, or fundings whose `end_date` has passed.
+- `active`: fundings owned by the authenticated brewery user where status is `ACTIVE` and `end_date >= today` in KST.
+- Legacy `ONGOING` rows are included in `active` for backward compatibility and returned as `status: "ACTIVE"`.
+- `completed`: fundings owned by the authenticated brewery user where status is `SUCCESS`, `FAILED`, `CANCELED`, or an operational completed status such as production/shipping/completed.
+- `ACTIVE` fundings whose `end_date` has passed are not moved to `completed` by this list endpoint. They are settled by the backend at 00:05 KST, then returned as `SUCCESS` or `FAILED`.
 
-Returned `status` is a Korean display label:
+Returned status fields:
 
-- `펀딩 예정`
+- `status`: canonical status for frontend branching.
+- `statusLabel`: Korean display label.
+
+Canonical `status` values:
+
+- `ACTIVE`
+- `SUCCESS`
+- `FAILED`
+- `CANCELED`
+- `PRODUCTION`
+- `SHIPPING`
+- `COMPLETED`
+
+Display `statusLabel` values:
+
 - `진행 중`
-- `목표 달성`
 - `펀딩 성공`
 - `펀딩 실패`
 - `제작 중`
@@ -332,6 +353,7 @@ Field notes:
 - `achievementRate`: integer percent for text/progress bar.
 - `remainingDays`: non-negative integer. Completed fundings can be shown as `종료` on the frontend.
 - `thumbnailUrl`: uses `funding_projects.thumbnail_url`, then first `funding_projects.image_urls`, then recipe image fallback.
+- Date filtering and `remainingDays` use the KST day boundary.
 
 Migration:
 
@@ -498,6 +520,7 @@ Notification type values:
 - `FUNDING_PROGRESS`
 - `FUNDING_ENDED`
 - `FUNDING_SUCCESS`
+- `SETTLEMENT_COMPLETED`
 - `RECIPE_POPULAR`
 
 ## Automatic Notification Creation
@@ -527,8 +550,9 @@ Duplicate prevention:
   - `funding:1:progress:30`
   - `funding:1:progress:50`
   - `funding:1:progress:80`
-  - `funding:1:ended`
+  - `funding:1:failed`
   - `funding:1:success`
+  - `funding:1:settlement_completed`
   - `recipe:10:popular`
 
 ### Created Funding
@@ -587,22 +611,136 @@ Stored data:
 - `metadata.targetAmount`
 - `metadata.achievementRate`
 
-### Funding Ended And Funding Success
+### Funding Failed And Funding Success
 
 Types:
 
 - `FUNDING_ENDED`
 - `FUNDING_SUCCESS`
 
-Current status:
+Created when:
 
-- Reusable functions are implemented for the future funding close/success judgment API.
-- They are not automatically called yet because the close/success judgment API is not implemented.
+- The daily 00:05 KST settlement job settles an expired active funding.
+- `POST /api/admin/fundings/settle-expired` manually runs the same settlement logic.
 
-Functions:
+Rules:
 
-- `createFundingEndedNotification(fundingId)`
-- `createFundingSuccessNotification(fundingId)`
+- If `current_amount >= goal_amount`, the funding becomes `SUCCESS` and `FUNDING_SUCCESS` is created.
+- If `current_amount < goal_amount`, the funding becomes `FAILED` and `FUNDING_ENDED` is created.
+- `FUNDING_ENDED` is now used as the funding failure notification.
+- `FUNDING_SUCCESS` is not created when a payment merely pushes the funding above 100%; progress milestones still use `FUNDING_PROGRESS`.
+
+Failure notification:
+
+```json
+{
+  "type": "FUNDING_ENDED",
+  "title": "펀딩이 실패했습니다.",
+  "content": "'코코 막걸리' 펀딩이 목표 금액을 달성하지 못해 실패했습니다.",
+  "linkUrl": "/funding/1",
+  "fundingId": 1,
+  "metadata": {
+    "fundingId": 1,
+    "title": "코코 막걸리",
+    "currentAmount": 500000,
+    "targetAmount": 3000000,
+    "achievementRate": 16,
+    "result": "FAILED"
+  }
+}
+```
+
+Success notification:
+
+```json
+{
+  "type": "FUNDING_SUCCESS",
+  "title": "펀딩이 성공했습니다.",
+  "content": "'코코 막걸리' 펀딩이 목표 금액을 달성해 성공했습니다.",
+  "linkUrl": "/funding/1",
+  "fundingId": 1,
+  "metadata": {
+    "fundingId": 1,
+    "title": "코코 막걸리",
+    "currentAmount": 3200000,
+    "targetAmount": 3000000,
+    "achievementRate": 106,
+    "result": "SUCCESS"
+  }
+}
+```
+
+Duplicate prevention:
+
+- Failure event key: `funding:{fundingId}:failed`
+- Success event key: `funding:{fundingId}:success`
+
+### Settlement Completed
+
+Type:
+
+- `SETTLEMENT_COMPLETED`
+
+Created when:
+
+- An operator marks a successful funding settlement/payout as completed.
+- This is separate from `FUNDING_SUCCESS`.
+
+Admin API:
+
+```http
+POST /api/admin/fundings/:fundingId/settlement-completed
+```
+
+Request body:
+
+```json
+{
+  "settlementId": 10,
+  "settlementAmount": 2800000,
+  "settledAt": "2026-06-02T10:00:00.000Z",
+  "payoutStatus": "COMPLETED"
+}
+```
+
+Response:
+
+```json
+{
+  "status": 200,
+  "notification": {
+    "notificationId": 1,
+    "userId": 4,
+    "type": "SETTLEMENT_COMPLETED",
+    "title": "정산이 완료되었습니다.",
+    "content": "'코코 막걸리' 펀딩의 정산이 완료되었습니다.",
+    "linkUrl": "/funding/1",
+    "imageUrl": "https://example.com/image.png",
+    "isRead": false,
+    "createdAt": "2026-06-02T10:00:00.000Z",
+    "eventKey": "funding:1:settlement_completed",
+    "fundingId": 1,
+    "recipeId": null,
+    "progressThreshold": null,
+    "metadata": {
+      "fundingId": 1,
+      "title": "코코 막걸리",
+      "settlementId": 10,
+      "settlementAmount": 2800000,
+      "settledAt": "2026-06-02T10:00:00.000Z",
+      "payoutStatus": "COMPLETED",
+      "result": "SETTLEMENT_COMPLETED"
+    }
+  },
+  "message": "정산 완료 알림이 생성되었습니다."
+}
+```
+
+Notes:
+
+- Only successful fundings can be marked as settlement completed.
+- Duplicate calls return `notification: null` and do not create another notification.
+- Duplicate prevention event key: `funding:{fundingId}:settlement_completed`.
 
 ### Popular Recipe
 
@@ -678,6 +816,7 @@ Migration file:
 ```text
 database/20260528_brewery_dashboard_profile_notifications.sql
 database/20260530_brewery_dashboard_notification_events.sql
+database/20260602_brewery_dashboard_settlement_notification_type.sql
 ```
 
 Current connected `judam` DB status:
@@ -685,7 +824,7 @@ Current connected `judam` DB status:
 - Applied.
 - `brewery_profiles` exists.
 - `brewery_dashboard_notifications` exists.
-- Rechecked on 2026-05-28 against `current_database() = judam`, `current_user = judam_jaewon`.
+- Rechecked on 2026-06-02 against `current_database() = judam`, `current_user = judam_jaewon`.
 - Missing required dashboard tables/columns: none.
 - Confirmed dashboard constraints/indexes:
   - `chk_brewery_dashboard_notifications_type`
@@ -694,9 +833,82 @@ Current connected `judam` DB status:
   - `uq_brewery_profiles_user`
   - `idx_brewery_dashboard_notifications_user_created`
   - `idx_brewery_dashboard_notifications_user_read`
+  - `uq_brewery_dashboard_notifications_user_event_key`
+  - `idx_brewery_dashboard_notifications_funding`
+  - `idx_brewery_dashboard_notifications_recipe`
   - `idx_brewery_profiles_user`
-- 2026-05-30 note: `database/20260530_brewery_dashboard_notification_events.sql` is written, but local SSM/RDS tunnel was not available during this turn, so connected Judam DB application could not be completed here.
+- `SETTLEMENT_COMPLETED` is included in `chk_brewery_dashboard_notifications_type`.
+- 2026-06-02 note: `database/20260602_brewery_dashboard_settlement_notification_type.sql` was applied to the connected `judam` DB.
 
 Production/staging status:
 
-- Apply the same migration there before frontend testing against that environment.
+- Apply the same migrations there before frontend testing against that environment.
+
+## Funding Settlement Policy
+
+Expired funding projects are settled by the backend.
+
+Automatic settlement:
+
+- Runs once per day at 00:05 KST.
+- The scheduler uses the Asia/Seoul day boundary even when the server runs in UTC.
+
+Settlement target:
+
+- `funding_projects.status` is `ACTIVE`.
+- Legacy `ONGOING` rows are also handled so older approved projects are not left unsettled.
+- `end_date < today` where `today` is calculated in KST.
+
+Status result:
+
+- `current_amount >= goal_amount` -> `SUCCESS`
+- `current_amount < goal_amount` -> `FAILED`
+
+Manual settlement API:
+
+```http
+POST /api/admin/fundings/settle-expired
+```
+
+Response:
+
+```json
+{
+  "status": 200,
+  "successCount": 1,
+  "failedCount": 1,
+  "processedFundings": [
+    {
+      "fundingId": 1,
+      "title": "펀딩 제목",
+      "previousStatus": "ACTIVE",
+      "status": "SUCCESS",
+      "currentAmount": 1000000,
+      "goalAmount": 1000000,
+      "endDate": "2026-06-10",
+      "settledAt": "2026-06-10T15:05:00.000Z"
+    }
+  ],
+  "message": "마감된 펀딩 정산이 완료되었습니다."
+}
+```
+
+Support order guard:
+
+- `POST /api/fundings/:fundingId/orders` only accepts active, non-expired funding projects.
+- If the funding is not supportable, it returns:
+
+```json
+{
+  "status": 400,
+  "message": "종료된 펀딩에는 후원할 수 없습니다."
+}
+```
+
+Frontend support button rule:
+
+```js
+const canSupport = funding.status === 'ACTIVE';
+```
+
+`SUCCESS`, `FAILED`, `CANCELED`, `REVIEWING`, `READY`, and other non-active statuses should not call the order creation API.

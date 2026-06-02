@@ -104,6 +104,42 @@ const resolveFundingThumbnailUrl = (row) => {
 
 const normalizeFundingStatus = (status) => String(status || '').trim().toUpperCase();
 
+const KST_CURRENT_DATE_SQL = "(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul')::date";
+
+const getDashboardFundingCanonicalStatus = (row) => {
+  const status = normalizeFundingStatus(row.status);
+
+  if (['ONGOING'].includes(status)) {
+    return 'ACTIVE';
+  }
+
+  if (['SUCCESSFUL', 'FUNDING_SUCCESS'].includes(status)) {
+    return 'SUCCESS';
+  }
+
+  if (['FAILURE'].includes(status)) {
+    return 'FAILED';
+  }
+
+  if (['CANCELLED'].includes(status)) {
+    return 'CANCELED';
+  }
+
+  if (['COMPLETED', 'DELIVERED', 'DONE'].includes(status)) {
+    return 'COMPLETED';
+  }
+
+  if (['PRODUCTION', 'IN_PRODUCTION', 'PRODUCING', 'MAKING'].includes(status)) {
+    return 'PRODUCTION';
+  }
+
+  if (['SHIPPING', 'DELIVERING'].includes(status)) {
+    return 'SHIPPING';
+  }
+
+  return status || null;
+};
+
 const getDashboardFundingStatusLabel = (row) => {
   const status = normalizeFundingStatus(row.status);
   const currentAmount = Number(row.current_amount || 0);
@@ -169,7 +205,8 @@ const mapBreweryDashboardFunding = (row) => {
     currentAmount,
     targetAmount,
     achievementRate: targetAmount > 0 ? Math.floor((currentAmount / targetAmount) * 100) : 0,
-    status: getDashboardFundingStatusLabel(row),
+    status: getDashboardFundingCanonicalStatus(row),
+    statusLabel: getDashboardFundingStatusLabel(row),
     remainingDays: rawRemainingDays === null ? null : Math.max(rawRemainingDays, 0),
     endDate: row.end_date || null,
   };
@@ -183,32 +220,10 @@ const mapBreweryFundingSummary = (row) => ({
 
 const BREWERY_DASHBOARD_ACTIVE_FUNDING_CONDITION = `
   (
-    fp.status IN ('READY', 'SCHEDULED', 'APPROVED', 'ACTIVE', 'ONGOING', 'ACHIEVED', 'GOAL_ACHIEVED')
-    OR (
-      fp.goal_amount > 0
-      AND fp.current_amount >= fp.goal_amount
-      AND fp.status NOT IN (
-        'SUCCESSFUL',
-        'SUCCESS',
-        'FUNDING_SUCCESS',
-        'ENDED',
-        'COMPLETED',
-        'DELIVERED',
-        'DONE',
-        'FAILED',
-        'FAILURE',
-        'PRODUCTION',
-        'IN_PRODUCTION',
-        'PRODUCING',
-        'MAKING',
-        'SHIPPING',
-        'DELIVERING',
-        'CANCELLED',
-        'CANCELED'
-      )
-    )
+    fp.status IN ('ACTIVE', 'ONGOING')
+    AND fp.end_date IS NOT NULL
+    AND fp.end_date >= ${KST_CURRENT_DATE_SQL}
   )
-  AND (fp.end_date IS NULL OR fp.end_date >= CURRENT_DATE)
 `;
 
 const BREWERY_DASHBOARD_COMPLETED_FUNDING_CONDITION = `
@@ -232,7 +247,6 @@ const BREWERY_DASHBOARD_COMPLETED_FUNDING_CONDITION = `
       'CANCELLED',
       'CANCELED'
     )
-    OR (fp.end_date IS NOT NULL AND fp.end_date < CURRENT_DATE)
   )
 `;
 
@@ -1298,11 +1312,11 @@ const getBreweryDashboardFundingsByUserId = async ({
         fp.end_date,
         CASE
           WHEN fp.start_date IS NULL THEN NULL
-          ELSE (fp.start_date - CURRENT_DATE)::int
+          ELSE (fp.start_date - ${KST_CURRENT_DATE_SQL})::int
         END AS starts_in_days,
         CASE
           WHEN fp.end_date IS NULL THEN NULL
-          ELSE (fp.end_date - CURRENT_DATE)::int
+          ELSE (fp.end_date - ${KST_CURRENT_DATE_SQL})::int
         END AS remaining_days
       FROM funding_projects fp
       JOIN users u ON u.user_id = fp.brewery_user_id
@@ -1343,7 +1357,7 @@ const getBreweryDashboardFundingsByUserId = async ({
     page,
     size,
     totalElements,
-    totalPages: Math.ceil(totalElements / size),
+    totalPages: Math.ceil(totalElements / size) || 1,
   };
 };
 

@@ -699,6 +699,96 @@
 - 로컬 `localhost:5433` SSM 터널이 닫혀 있어 실제 Judam DB 응답 3종 스모크 테스트는 이 턴에서 진행하지 못했습니다.
 - `node --check src/services/brewery.service.js`와 `git diff --check`로 코드 검증했습니다.
 
+### Funding Settlement Policy
+
+완료:
+
+- 마감일이 지난 펀딩을 KST 기준으로 자동 정산하는 서비스를 추가했습니다.
+- 서버 시작 시 매일 00:05 KST에 정산이 실행되도록 스케줄러를 연결했습니다.
+- 정산 대상은 `ACTIVE` 상태이고 `end_date < KST 오늘`인 펀딩입니다.
+- 기존 승인 데이터 호환을 위해 legacy `ONGOING` 상태도 정산 대상에 포함했습니다.
+- `current_amount >= goal_amount`이면 `SUCCESS`, 미달이면 `FAILED`로 업데이트합니다.
+- 관리자 수동 정산 API를 추가했습니다.
+  - `POST /api/admin/fundings/settle-expired`
+- 관리자 펀딩 승인 시 생성/갱신되는 공개 펀딩 상태를 프론트 정책에 맞춰 `ACTIVE`로 변경했습니다.
+- 주문 생성 API에서 `ACTIVE`/legacy `ONGOING`이 아니거나 KST 기준 마감일이 지난 펀딩은 `"종료된 펀딩에는 후원할 수 없습니다."`로 차단합니다.
+- 정산 시 성공 펀딩에는 `FUNDING_SUCCESS`, 실패 펀딩에는 `FUNDING_ENDED` 알림만 생성하도록 연결했습니다.
+
+문서:
+
+- `docs/BREWERY_DASHBOARD_API.md`
+
+검증:
+
+- `node --check src/services/fundingSettlement.service.js`
+- `node --check src/jobs/fundingSettlementScheduler.js`
+- `node --check src/controllers/admin.controller.js`
+- `node --check src/controllers/funding.controller.js`
+- `node --check index.js`
+- `git diff --check`
+
+### Brewery Dashboard Funding List Alignment
+
+완료:
+
+- `GET /api/breweries/me/dashboard/fundings?status=active` 조건을 프론트 정책에 맞춰 정리했습니다.
+  - 로그인한 양조장 계정의 `funding_projects.brewery_user_id`
+  - `status = ACTIVE`
+  - `end_date >= KST 오늘`
+  - 기존 데이터 호환을 위해 legacy `ONGOING`은 active에 포함하되 응답 `status`는 `ACTIVE`로 내려갑니다.
+- `completed` 목록은 `SUCCESS`, `FAILED`, `CANCELED` 및 제작/배송/완료 운영 상태만 포함하도록 정리했습니다.
+- `ACTIVE`이지만 `end_date`가 지난 펀딩은 목록 API에서 임의로 completed 처리하지 않고, 00:05 KST 정산 후 `SUCCESS`/`FAILED`가 되면 completed에 포함되도록 맞췄습니다.
+- `funding-summary`는 active/completed 목록과 같은 조건을 그대로 사용하므로 `activeFundingCount = active totalElements`, `totalFundingCount = active + completed totalElements` 관계가 유지됩니다.
+- 목록 응답에 원본 분기용 `status`와 표시용 `statusLabel`을 함께 내려주도록 변경했습니다.
+- DB에서 `FUNDING_CREATED` 알림의 `funding_id`와 목록 조건을 비교했습니다.
+  - `항공 막걸리` / `fundingId=32` / `userId=4` / `ACTIVE` / `2026-06-28` / active 조건 통과
+  - `알림 테스트` / `fundingId=36` / `userId=4` / `ACTIVE` / `2026-06-29` / active 조건 통과
+- 서비스 직접 호출로 `userId=4` active 목록 `content`와 `data`에 `fundingId=32`, `fundingId=36`이 포함되는 것을 확인했습니다.
+- 빈 목록이어도 `totalPages`는 최소 `1`로 내려가도록 보정했습니다.
+- `userId=18`도 summary와 active 목록을 비교해 `activeFundingCount=3`, active 목록 `totalElements=3` 일치를 확인했습니다.
+
+문서:
+
+- `docs/BREWERY_DASHBOARD_API.md`
+
+검증:
+
+- `node --check src/services/brewery.service.js`
+- `git diff --check`
+
+### Brewery Dashboard Settlement Notification Types
+
+완료:
+
+- `FUNDING_ENDED`를 펀딩 실패 알림 의미로 정리했습니다.
+  - title: `펀딩이 실패했습니다.`
+  - content: `'{펀딩명}' 펀딩이 목표 금액을 달성하지 못해 실패했습니다.`
+  - eventKey: `funding:{fundingId}:failed`
+  - metadata.result: `FAILED`
+- `FUNDING_SUCCESS` 생성 시점을 자동/수동 정산으로 성공 확정된 시점으로 유지하고 문구를 정리했습니다.
+  - content: `'{펀딩명}' 펀딩이 목표 금액을 달성해 성공했습니다.`
+  - metadata.result: `SUCCESS`
+- 자동 정산 cron과 수동 정산 API 모두 성공/실패 결과에 맞는 알림만 생성하도록 분기했습니다.
+- 새 알림 타입 `SETTLEMENT_COMPLETED`를 추가했습니다.
+- 관리자 정산 완료 알림 API를 추가했습니다.
+  - `POST /api/admin/fundings/:fundingId/settlement-completed`
+- `SETTLEMENT_COMPLETED`는 성공 확정 펀딩에만 생성할 수 있고, `funding:{fundingId}:settlement_completed` eventKey로 중복 생성이 방지됩니다.
+- `brewery_dashboard_notifications` check constraint에 `SETTLEMENT_COMPLETED`를 추가하는 마이그레이션을 작성하고 연결된 Judam DB에 적용했습니다.
+
+문서/마이그레이션:
+
+- `database/20260602_brewery_dashboard_settlement_notification_type.sql`
+- `docs/BREWERY_DASHBOARD_API.md`
+
+검증:
+
+- `node --check src/services/breweryDashboardNotification.service.js`
+- `node --check src/services/fundingSettlement.service.js`
+- `node --check src/controllers/admin.controller.js`
+- `node --check src/routes/adminRoutes.js`
+- 연결된 Judam DB에서 `SETTLEMENT_COMPLETED` insert/rollback 테스트 통과
+- `git diff --check`
+
 ## Backlog
 
 - 전체 펀딩 API 통합 테스트 작성 또는 Postman/curl 시나리오 정리
