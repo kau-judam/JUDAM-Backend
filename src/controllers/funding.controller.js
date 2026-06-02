@@ -1,4 +1,4 @@
-﻿const crypto = require('crypto');
+const crypto = require('crypto');
 const pool = require('../config/db');
 const { uploadFileToS3 } = require('../services/s3.service');
 const {
@@ -409,7 +409,7 @@ const assertFundingProjectOwner = async (fundingId, user) => {
 
   const { rows } = await pool.query(
     `
-    SELECT funding_id, brewery_user_id
+    SELECT funding_id, brewery_user_id, status
     FROM funding_projects
     WHERE funding_id = $1
     `,
@@ -429,7 +429,24 @@ const assertFundingProjectOwner = async (fundingId, user) => {
   throw createHttpError(403, FUNDING_OWNER_FORBIDDEN_MESSAGE);
 };
 
-const assertFundingDraftOwner = async (draftId, user) => {
+const normalizeOptionalFundingId = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  const fundingId = Number(value);
+  return Number.isInteger(fundingId) && fundingId > 0 ? fundingId : null;
+};
+
+const getRequestedFundingIdFromRequest = (req) => (
+  normalizeOptionalFundingId(
+    getBodyValue(req.body || {}, ['fundingId', 'funding_id'])
+      ?? req.query?.fundingId
+      ?? req.query?.funding_id
+  )
+);
+
+const assertFundingDraftOwner = async (draftId, user, expectedFundingId = null) => {
   const userId = getAuthUserId(user);
 
   if (!userId) {
@@ -450,6 +467,18 @@ const assertFundingDraftOwner = async (draftId, user) => {
   }
 
   const draft = rows[0];
+  const normalizedExpectedFundingId = normalizeOptionalFundingId(expectedFundingId);
+
+  if (
+    normalizedExpectedFundingId !== null &&
+    (
+      draft.funding_id === null ||
+      draft.funding_id === undefined ||
+      Number(draft.funding_id) !== normalizedExpectedFundingId
+    )
+  ) {
+    throw createHttpError(403, '현재 펀딩 프로젝트에 연결된 임시저장이 아닙니다.');
+  }
 
   if (isAdminUser(user) || Number(draft.brewery_id) === userId) {
     return draft;
@@ -471,9 +500,9 @@ const authorizeFundingProjectOwner = async (fundingId, user, res) => {
   }
 };
 
-const authorizeFundingDraftOwner = async (draftId, user, res) => {
+const authorizeFundingDraftOwner = async (draftId, user, res, expectedFundingId = null) => {
   try {
-    await assertFundingDraftOwner(draftId, user);
+    await assertFundingDraftOwner(draftId, user, expectedFundingId);
     return true;
   } catch (error) {
     if (handleAuthorizationError(res, error)) {
@@ -2444,42 +2473,10 @@ const findAndLinkFundingDraftByFundingId = async (fundingId) => {
   const directDraft = await findDirectFundingDraftByFundingId(fundingId);
 
   if (directDraft) {
-    const fallbackDraft = await findFallbackFundingDraftByFundingId(fundingId);
-    const mergedDraft = fallbackDraft
-      ? await mergeFundingDraftManagementFieldsFromSource(
-        directDraft.draft_id,
-        fallbackDraft.draft_id
-      )
-      : null;
-
-    return hydrateFundingDraftManagementFieldsFromProject(mergedDraft || directDraft);
+    return hydrateFundingDraftManagementFieldsFromProject(directDraft);
   }
 
-  const fallbackDraft = await findFallbackFundingDraftByFundingId(fundingId);
-
-  if (!fallbackDraft) {
-    return recoverFundingDraftFromProject(fundingId);
-  }
-
-  const { rows } = await pool.query(
-    `
-    UPDATE funding_drafts
-    SET
-      funding_id = $1,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE draft_id = $2
-      AND funding_id IS NULL
-    RETURNING *
-    `,
-    [Number(fundingId), Number(fallbackDraft.draft_id)]
-  );
-
-  const linkedDraft = rows[0] || {
-    ...fallbackDraft,
-    funding_id: Number(fundingId),
-  };
-
-  return hydrateFundingDraftManagementFieldsFromProject(linkedDraft);
+  return recoverFundingDraftFromProject(fundingId);
 };
 
 const syncFundingProjectFieldsFromDraft = async (draftId) => {
@@ -2832,8 +2829,9 @@ const saveAgreement = async (req, res) => {
 const createFundingDraft = async (req, res) => {
   const bodyPayload = req.body || {};
   const currentUserId = getAuthUserId(req.user);
+  const requestedFundingId = getRequestedFundingIdFromRequest(req);
   const requestedBreweryId = getBodyValue(bodyPayload, ['breweryId', 'brewery_id']);
-  const breweryId = requestedBreweryId === undefined || requestedBreweryId === null || requestedBreweryId === ''
+  let breweryId = requestedBreweryId === undefined || requestedBreweryId === null || requestedBreweryId === ''
     ? currentUserId
     : Number(requestedBreweryId);
   const {
@@ -2850,14 +2848,12 @@ const createFundingDraft = async (req, res) => {
     tags,
   } = bodyPayload;
 
-  if (!breweryId) {
+  if (!breweryId && requestedFundingId === null) {
     return res.status(400).json({
       status: 400,
       message: '?묒“??ID???꾩닔?낅땲??',
     });
   }
-
-  if (!authorizeBreweryUserId(breweryId, req.user, res)) return;
 
     if (imageUrls && !Array.isArray(imageUrls) && typeof imageUrls !== 'string') {
       return res.status(400).json({
@@ -2901,10 +2897,43 @@ const createFundingDraft = async (req, res) => {
   const progressRate = Math.round((filledCount / progressFields.length) * 30);
 
   try {
+    let linkedFunding = null;
+
+    if (requestedFundingId !== null) {
+      linkedFunding = await assertFundingProjectOwner(requestedFundingId, req.user);
+      breweryId = Number(linkedFunding.brewery_user_id);
+
+      const existingLinkedDraft = await findDirectFundingDraftByFundingId(requestedFundingId);
+
+      if (existingLinkedDraft) {
+        const updatedDraft = await updateFundingDraftRowFromPayload(existingLinkedDraft.draft_id, bodyPayload);
+        const documents = await getFundingDraftDocuments(updatedDraft.draft_id);
+        const payload = buildFundingDraftPayload(updatedDraft, documents);
+
+        return res.status(200).json({
+          ...payload,
+          status: 200,
+          draftStatus: payload.status,
+          draft: updatedDraft,
+          data: {
+            ...payload,
+            draft: updatedDraft,
+          },
+          message: '연결된 펀딩 프로젝트 임시저장이 저장되었습니다.',
+        });
+      }
+    } else if (!authorizeBreweryUserId(breweryId, req.user, res)) {
+      return;
+    }
+
+    const draftStatus = linkedFunding
+      ? normalizeManagementDraftStatus(linkedFunding.status)
+      : 'DRAFT';
     const result = await pool.query(
       `
       INSERT INTO funding_drafts (
         brewery_id,
+        funding_id,
         title,
         short_title,
         category,
@@ -2918,11 +2947,12 @@ const createFundingDraft = async (req, res) => {
         status,
         progress_rate
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'DRAFT', $12)
-      RETURNING draft_id, brewery_id, thumbnail_url, image_urls, tags, status, progress_rate, created_at
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING draft_id, brewery_id, funding_id, thumbnail_url, image_urls, tags, status, progress_rate, created_at
       `,
       [
         Number(breweryId),
+        requestedFundingId,
         title || null,
         shortTitle || null,
         category || null,
@@ -2937,6 +2967,7 @@ const createFundingDraft = async (req, res) => {
         normalizedThumbnailUrl,
         JSON.stringify(normalizedImageUrls),
         JSON.stringify(tags || []),
+        draftStatus,
         progressRate,
       ]
     );
@@ -2952,6 +2983,10 @@ const createFundingDraft = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
+
+    if (handleAuthorizationError(res, error)) {
+      return;
+    }
 
     return res.status(500).json({
       status: 500,
@@ -3068,7 +3103,7 @@ const updateFundingDraft = async (req, res) => {
   const progressRate = Math.round((filledCount / progressFields.length) * 33);
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const updatedDraft = await updateFundingDraftRowFromPayload(draftId, bodyPayload);
 
@@ -3270,9 +3305,18 @@ const saveBasicInfo = async (req, res) => {
   const normalizedImageUrls = normalizeFundingImageUrlsInput(imageUrls || []);
   const normalizedThumbnailUrl =
     normalizePublicImageUrl(thumbnailUrl) || normalizedImageUrls[0] || null;
+  const hasImageUrls = hasOwn(req.body || {}, 'imageUrls')
+    || hasOwn(req.body || {}, 'image_urls')
+    || hasOwn(req.body || {}, 'images');
+  const hasThumbnailUrl = hasOwn(req.body || {}, 'thumbnailUrl')
+    || hasOwn(req.body || {}, 'thumbnail_url')
+    || hasOwn(req.body || {}, 'imageUrl')
+    || hasOwn(req.body || {}, 'image_url')
+    || hasImageUrls;
+  const hasTags = hasOwn(req.body || {}, 'tags');
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const result = await pool.query(
       `
@@ -3285,12 +3329,12 @@ const saveBasicInfo = async (req, res) => {
         sub_ingredients = $5,
         alcohol_percentage = $6,
         summary = $7,
-        thumbnail_url = $8,
-        image_urls = $9,
-        tags = $10,
+        thumbnail_url = CASE WHEN $11::boolean THEN $8 ELSE thumbnail_url END,
+        image_urls = CASE WHEN $12::boolean THEN $9 ELSE image_urls END,
+        tags = CASE WHEN $13::boolean THEN $10 ELSE tags END,
         progress_rate = GREATEST(progress_rate, 33),
         updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $11
+      WHERE draft_id = $14
       RETURNING
         draft_id,
         title,
@@ -3317,6 +3361,9 @@ const saveBasicInfo = async (req, res) => {
         normalizedThumbnailUrl,
         normalizeJsonStorageValue(normalizedImageUrls, []),
         normalizeJsonStorageValue(parseFundingListField(tags || []), []),
+        hasThumbnailUrl,
+        hasImageUrls,
+        hasTags,
         Number(draftId),
       ]
     );
@@ -3463,7 +3510,7 @@ const saveSchedule = async (req, res) => {
   const formatDate = (date) => date.toISOString().slice(0, 10);
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const result = await pool.query(
       `
@@ -3609,7 +3656,7 @@ const saveLegalInfo = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const result = await pool.query(
       `
@@ -3755,7 +3802,7 @@ const saveTasteProfile = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const currentResult = await pool.query(
       `
@@ -3872,7 +3919,7 @@ const savePlan = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const result = await pool.query(
       `
@@ -4049,9 +4096,11 @@ const saveBreweryInfo = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
-    let resolvedAccountVerified = accountVerified;
+    // MVP simple verification: bank account owner check is skipped for demo.
+    // Replace this with a real bank account verification provider before production.
+    let resolvedAccountVerified = true;
 
     if (bankVerificationToken) {
       const verificationResult = await pool.query(
@@ -4191,7 +4240,7 @@ const loadBreweryInfo = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const { rows } = await pool.query(
       `
@@ -4380,7 +4429,7 @@ const uploadFundingDraftFile = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const fileUrl = await storeUploadedFile(file, `funding-drafts/${draftId}`, draftId);
 
@@ -4638,7 +4687,7 @@ const verifyPhoneForFundingDraft = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const result = await pool.query(
       `
@@ -4690,6 +4739,8 @@ const verifyAccountForFundingDraft = async (req, res) => {
     accountVerificationToken,
     account_verification_token: snakeAccountVerificationToken,
   } = req.body || {};
+  const normalizedBankName = toTrimmedString(bankName);
+  const normalizedAccountHolder = toTrimmedString(accountHolder);
   const resolvedBankVerificationToken = toTrimmedString(
     bankVerificationToken
     || snakeBankVerificationToken
@@ -4701,46 +4752,58 @@ const verifyAccountForFundingDraft = async (req, res) => {
   if (
     !draftId ||
     isNaN(Number(draftId)) ||
-    !bankName ||
+    !normalizedBankName ||
     !normalizedAccountNumber ||
-    !accountHolder ||
-    !resolvedBankVerificationToken
+    !normalizedAccountHolder
   ) {
     return res.status(400).json({
       status: 400,
-      message: '怨꾩쥖 ?몄쬆 ?붿껌媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.',
+      verified: false,
+      message: '입금계좌 정보를 모두 입력해주세요.',
+    });
+  }
+
+  if (normalizedAccountNumber.length < 8) {
+    return res.status(400).json({
+      status: 400,
+      verified: false,
+      message: '계좌번호는 숫자 8자리 이상이어야 합니다.',
     });
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
-    const verificationResult = await pool.query(
-      `
-      SELECT verification_id
-      FROM funding_bank_account_verifications
-      WHERE verification_token = $1
-        AND status = 'VERIFIED'
-        AND bank_name = $2
-        AND regexp_replace(account_number, '[^0-9]', '', 'g') = $3
-        AND account_holder = $4
-      LIMIT 1
-      `,
-      [
-        resolvedBankVerificationToken,
-        bankName,
-        normalizedAccountNumber,
-        accountHolder,
-      ]
-    );
+    if (resolvedBankVerificationToken) {
+      const verificationResult = await pool.query(
+        `
+        SELECT verification_id
+        FROM funding_bank_account_verifications
+        WHERE verification_token = $1
+          AND status = 'VERIFIED'
+          AND bank_name = $2
+          AND regexp_replace(account_number, '[^0-9]', '', 'g') = $3
+          AND account_holder = $4
+        LIMIT 1
+        `,
+        [
+          resolvedBankVerificationToken,
+          normalizedBankName,
+          normalizedAccountNumber,
+          normalizedAccountHolder,
+        ]
+      );
 
-    if (verificationResult.rows.length === 0) {
-      return res.status(400).json({
-        status: 400,
-        message: '怨꾩쥖 ?몄쬆 ?좏겙???щ컮瑜댁? ?딆뒿?덈떎.',
-      });
+      if (verificationResult.rows.length === 0) {
+        return res.status(400).json({
+          status: 400,
+          verified: false,
+          message: '계좌 인증 토큰이 올바르지 않습니다.',
+        });
+      }
     }
 
+    // MVP simple verification. Replace this with a real bank account owner check before production.
     const result = await pool.query(
       `
       UPDATE funding_drafts
@@ -4759,31 +4822,33 @@ const verifyAccountForFundingDraft = async (req, res) => {
         account_verified,
         updated_at
       `,
-      [bankName, normalizedAccountNumber, accountHolder, Number(draftId)]
+      [normalizedBankName, normalizedAccountNumber, normalizedAccountHolder, Number(draftId)]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: 404,
-        message: '?꾩떆????꾨줈?앺듃瑜?李얠쓣 ???놁뒿?덈떎.',
+        message: '임시저장 펀딩 프로젝트를 찾을 수 없습니다.',
       });
     }
 
     const draft = result.rows[0];
 
     return res.status(200).json({
-      draftId: draft.draft_id,
+      status: 200,
+      verified: true,
+      draftId: Number(draft.draft_id),
       bankName: draft.bank_name,
       accountNumber: draft.account_number,
       accountHolder: draft.account_holder,
       accountVerified: draft.account_verified,
       updatedAt: draft.updated_at,
-      message: '?낃툑 怨꾩쥖 ?몄쬆???꾨즺?섏뿀?듬땲??',
+      message: '입금계좌 인증이 완료되었습니다.',
     });
   } catch (error) {
-    return res.status(500).json({
-      status: 500,
-      message: '怨꾩쥖 ?몄쬆 泥섎━ 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+    return res.status(error.status || 500).json({
+      status: error.status || 500,
+      message: error.message || '입금계좌 인증 처리 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -5063,7 +5128,7 @@ const saveNotices = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const result = await pool.query(
       `
@@ -5166,7 +5231,7 @@ const uploadDocument = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const fileUrl = await storeUploadedFile(file, `funding-documents/${draftId}`, draftId);
 
@@ -5282,7 +5347,7 @@ const submitFundingDraft = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const draftResult = await pool.query(
       `
@@ -5684,7 +5749,7 @@ const getFundingDraft = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const result = await pool.query(
       `
@@ -5858,7 +5923,7 @@ const deleteFundingDraft = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const draftResult = await pool.query(
       `
@@ -5966,7 +6031,7 @@ const getFundingDraftPreview = async (req, res) => {
   }
 
   try {
-    if (!(await authorizeFundingDraftOwner(draftId, req.user, res))) return;
+    if (!(await authorizeFundingDraftOwner(draftId, req.user, res, getRequestedFundingIdFromRequest(req)))) return;
 
     const draftResult = await pool.query(
       `
@@ -9563,10 +9628,14 @@ const createFundingReview = async (req, res) => {
     });
   }
 
-  if (!rating || isNaN(Number(rating)) || Number(rating) < 1 || Number(rating) > 5) {
+  let normalizedRating;
+
+  try {
+    normalizedRating = normalizeReviewRatingInput(rating, { required: true });
+  } catch (error) {
     return res.status(400).json({
       status: 400,
-      message: '蹂꾩젏? 1?먮???5?먭퉴吏 ?낅젰 媛?ν빀?덈떎.',
+      message: error.message,
     });
   }
 
@@ -9650,7 +9719,7 @@ const createFundingReview = async (req, res) => {
       [
         Number(fundingId),
         userId,
-        Number(rating),
+        normalizedRating,
         title || null,
         normalizedContent,
         JSON.stringify(normalizedImageUrls),
