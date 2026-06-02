@@ -589,7 +589,7 @@ const cancelFundingProject = async (req, res) => {
     }
 
     const funding = fundingResult.rows[0];
-    const currentStatus = String(funding.status || '').toUpperCase();
+    const currentStatus = String(funding.status || '').trim().toUpperCase();
     const nonCancelableStatuses = ['SUCCESS', 'FAILED', 'ENDED', 'CANCELED', 'CANCELLED'];
 
     if (nonCancelableStatuses.includes(currentStatus)) {
@@ -647,6 +647,196 @@ const cancelFundingProject = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '펀딩 취소 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const getFundingReportsForAdmin = async (req, res) => {
+  const { status, page = 0, size = 20 } = req.query;
+  const normalizedStatus = normalizeAdminFundingReportStatus(status);
+  const pageNumber = Number(page);
+  const sizeNumber = Number(size);
+
+  if (status && !ADMIN_FUNDING_REPORT_STATUSES.includes(normalizedStatus)) {
+    return res.status(400).json({
+      status: 400,
+      message: '?? ??? PENDING, REVIEWED, RESOLVED, REJECTED ? ???? ???.',
+    });
+  }
+
+  if (!Number.isInteger(pageNumber) || pageNumber < 0 || !Number.isInteger(sizeNumber) || sizeNumber <= 0) {
+    return res.status(400).json({
+      status: 400,
+      message: '??? ?? ?? ???? ????.',
+    });
+  }
+
+  try {
+    const reportTableName = await getAdminFundingReportTableName();
+    const values = [];
+    const conditions = [];
+
+    if (normalizedStatus) {
+      values.push(normalizedStatus);
+      conditions.push(`fr.status = ${values.length}`);
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total_count FROM ${reportTableName} fr ${whereClause}`,
+      values,
+    );
+    const listValues = [...values, sizeNumber, pageNumber * sizeNumber];
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        fr.report_id,
+        fr.funding_id,
+        fp.title AS funding_title,
+        fr.reporter_id,
+        u.nickname AS reporter_nickname,
+        fr.reason,
+        fr.content,
+        fr.status,
+        fr.created_at,
+        fr.updated_at
+      FROM ${reportTableName} fr
+      LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
+      LEFT JOIN users u ON u.user_id = fr.reporter_id
+      ${whereClause}
+      ORDER BY fr.created_at DESC, fr.report_id DESC
+      LIMIT ${listValues.length - 1}
+      OFFSET ${listValues.length}
+      `,
+      listValues,
+    );
+
+    const totalElements = Number(countResult.rows[0]?.total_count || 0);
+
+    return res.status(200).json({
+      status: 200,
+      message: '?? ?? ?? ?? ??',
+      data: {
+        content: rows.map(mapAdminFundingReport),
+        page: pageNumber,
+        size: sizeNumber,
+        totalElements,
+        totalPages: Math.ceil(totalElements / sizeNumber),
+      },
+    });
+  } catch (error) {
+    console.error('[admin-funding-reports] list failed', error);
+    return res.status(500).json({
+      status: 500,
+      message: '?? ?? ?? ?? ? ?? ??? ??????.',
+      error: error.message,
+    });
+  }
+};
+
+const getFundingReportDetailForAdmin = async (req, res) => {
+  const reportId = Number(req.params.reportId);
+
+  if (!Number.isInteger(reportId) || reportId <= 0) {
+    return res.status(400).json({ status: 400, message: '??? ?? ID? ????.' });
+  }
+
+  try {
+    const reportTableName = await getAdminFundingReportTableName();
+    const { rows } = await pool.query(
+      `
+      SELECT
+        fr.report_id,
+        fr.funding_id,
+        fp.title AS funding_title,
+        fr.reporter_id,
+        u.nickname AS reporter_nickname,
+        fr.reason,
+        fr.content,
+        fr.status,
+        fr.created_at,
+        fr.updated_at
+      FROM ${reportTableName} fr
+      LEFT JOIN funding_projects fp ON fp.funding_id = fr.funding_id
+      LEFT JOIN users u ON u.user_id = fr.reporter_id
+      WHERE fr.report_id = $1
+      LIMIT 1
+      `,
+      [reportId],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ status: 404, message: '??? ?? ? ????.' });
+    }
+
+    return res.status(200).json({
+      status: 200,
+      message: '?? ?? ?? ?? ??',
+      data: mapAdminFundingReport(rows[0]),
+    });
+  } catch (error) {
+    console.error('[admin-funding-reports] detail failed', error);
+    return res.status(500).json({
+      status: 500,
+      message: '?? ?? ?? ?? ? ?? ??? ??????.',
+      error: error.message,
+    });
+  }
+};
+
+const updateFundingReportStatusForAdmin = async (req, res) => {
+  const reportId = Number(req.params.reportId);
+  const nextStatus = normalizeAdminFundingReportStatus(req.body?.status);
+  const adminMemo = typeof req.body?.adminMemo === 'string' ? req.body.adminMemo.trim() : null;
+
+  if (!Number.isInteger(reportId) || reportId <= 0) {
+    return res.status(400).json({ status: 400, message: '??? ?? ID? ????.' });
+  }
+
+  if (!ADMIN_FUNDING_REPORT_STATUSES.includes(nextStatus)) {
+    return res.status(400).json({
+      status: 400,
+      message: '?? ??? PENDING, REVIEWED, RESOLVED, REJECTED ? ???? ???.',
+    });
+  }
+
+  try {
+    const reportTableName = await getAdminFundingReportTableName();
+    const { rows } = await pool.query(
+      `
+      UPDATE ${reportTableName}
+      SET
+        status = $2,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE report_id = $1
+      RETURNING report_id, funding_id, reporter_id, reason, content, status, created_at, updated_at
+      `,
+      [reportId, nextStatus],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ status: 404, message: '??? ?? ? ????.' });
+    }
+
+    console.log('[admin-funding-reports] status updated', {
+      reportId,
+      status: nextStatus,
+      adminMemo: adminMemo || null,
+      adminUserId: req.user?.userId || req.user?.id || null,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '?? ?? ?? ??? ???????.',
+      data: mapAdminFundingReport(rows[0]),
+    });
+  } catch (error) {
+    console.error('[admin-funding-reports] status update failed', error);
+    return res.status(500).json({
+      status: 500,
+      message: '?? ?? ?? ?? ?? ? ?? ??? ??????.',
       error: error.message,
     });
   }

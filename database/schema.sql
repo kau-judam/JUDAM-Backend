@@ -275,6 +275,25 @@ CREATE TABLE IF NOT EXISTS funding_projects (
     REFERENCES users(user_id)
 );
 
+CREATE TABLE IF NOT EXISTS funding_reports (
+  report_id BIGSERIAL PRIMARY KEY,
+  funding_id BIGINT NOT NULL,
+  reporter_id BIGINT,
+  reason VARCHAR(50) NOT NULL,
+  content TEXT,
+  status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_funding_reports_funding
+    FOREIGN KEY (funding_id)
+    REFERENCES funding_projects(funding_id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_funding_reports_reporter
+    FOREIGN KEY (reporter_id)
+    REFERENCES users(user_id)
+    ON DELETE SET NULL
+);
+
 -- Funding draft/public project linkage used by GET /api/fundings/drafts/by-funding/:fundingId.
 -- The actual funding_drafts table is managed by the funding draft migration; keep this
 -- additive statement here so existing RDS tables can be safely patched.
