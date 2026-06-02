@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const { registerFundingToAiPool } = require('./ai.service');
 
 const AI_REGISTERABLE_FUNDING_STATUSES = new Set(['ACTIVE', 'ONGOING']);
+const KST_TIMEZONE = 'Asia/Seoul';
 
 const normalizeString = (value) => {
   if (value === undefined || value === null) {
@@ -198,7 +199,64 @@ const registerFundingProjectToAiPool = async (fundingId) => {
   }
 };
 
+const mapSettledFunding = (funding) => ({
+  fundingId: Number(funding.funding_id),
+  title: funding.title,
+  previousStatus: funding.previous_status,
+  newStatus: funding.new_status,
+  currentAmount: Number(funding.current_amount || 0),
+  goalAmount: Number(funding.goal_amount || 0),
+});
+
+const settleExpiredFundings = async () => {
+  const { rows } = await pool.query(
+    `
+    UPDATE funding_projects
+    SET
+      status = CASE
+        WHEN COALESCE(current_amount, 0) >= COALESCE(goal_amount, 0) THEN 'SUCCESS'
+        ELSE 'FAILED'
+      END,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE status = 'ACTIVE'
+      AND end_date::date < ((CURRENT_TIMESTAMP AT TIME ZONE $1)::date)
+    RETURNING
+      funding_id,
+      title,
+      'ACTIVE' AS previous_status,
+      status AS new_status,
+      current_amount,
+      goal_amount
+    `,
+    [KST_TIMEZONE],
+  );
+
+  const processedFundings = rows.map(mapSettledFunding);
+  const successCount = processedFundings.filter(
+    (funding) => funding.newStatus === 'SUCCESS',
+  ).length;
+  const failedCount = processedFundings.filter(
+    (funding) => funding.newStatus === 'FAILED',
+  ).length;
+  const result = {
+    successCount,
+    failedCount,
+    processedFundings,
+  };
+
+  console.log('[funding-settlement] expired funding settlement completed', {
+    timezone: KST_TIMEZONE,
+    successCount,
+    failedCount,
+    processedCount: processedFundings.length,
+  });
+
+  return result;
+};
+
 module.exports = {
   isAiFundingRegistrationStatus,
   registerFundingProjectToAiPool,
+  settleExpiredFundings,
+  KST_TIMEZONE,
 };

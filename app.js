@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const mountRoutes = require('./src/routes');
+const { startFundingSettlementCron } = require('./src/schedulers/fundingSettlement.cron');
 
 const app = express();
 
@@ -14,5 +15,6 @@ app.get('/health', (req, res) => {
 });
 
 mountRoutes(app);
+startFundingSettlementCron();
 
 module.exports = app;

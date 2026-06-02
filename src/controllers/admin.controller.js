@@ -1,5 +1,7 @@
 const pool = require('../config/db');
-const { registerFundingProjectToAiPool } = require('../services/funding.service');
+const {
+  registerFundingProjectToAiPool,
+} = require('../services/funding.service');
 const {
   createFundingCreatedNotification,
   createSettlementCompletedNotification,
@@ -8,18 +10,33 @@ const { settleExpiredFundings } = require('../services/fundingSettlement.service
 
 // 관리자 제출 프로젝트 목록 조회
 const getSubmittedFundingDrafts = async (req, res) => {
-  const { status = 'SUBMITTED' } = req.query;
-
-  const allowedStatuses = [
-    'SUBMITTED',
-    'APPROVED',
-    'REJECTED',
+  const REVIEW_TARGET_DRAFT_STATUSES = ['SUBMITTED', 'REVIEWING'];
+  const EXCLUDED_PROJECT_STATUSES = [
+    'ACTIVE',
+    'SUCCESS',
+    'FAILED',
+    'ENDED',
+    'ONGOING',
+    'CANCELED',
+    'CANCELLED',
   ];
+  const { status } = req.query;
 
-  if (!allowedStatuses.includes(status)) {
+  const requestedStatuses = status
+    ? (Array.isArray(status) ? status : String(status).split(','))
+      .map((value) => String(value).trim().toUpperCase())
+      .filter(Boolean)
+    : REVIEW_TARGET_DRAFT_STATUSES;
+
+  const statuses = [...new Set(requestedStatuses)];
+  const hasInvalidStatus = statuses.some(
+    (value) => !REVIEW_TARGET_DRAFT_STATUSES.includes(value),
+  );
+
+  if (statuses.length === 0 || hasInvalidStatus) {
     return res.status(400).json({
       status: 400,
-      message: '잘못된 상태값입니다.',
+      message: '심사 목록은 SUBMITTED 또는 REVIEWING 상태만 조회할 수 있습니다.',
     });
   }
 
@@ -27,38 +44,162 @@ const getSubmittedFundingDrafts = async (req, res) => {
     const result = await pool.query(
       `
       SELECT
-        draft_id,
-        brewery_id,
-        title,
-        short_title,
-        category,
-        summary,
-        thumbnail_url,
-        progress_rate,
-        status,
-        submitted_at,
-        created_at,
-        updated_at
-      FROM funding_drafts
-      WHERE status = $1
-      ORDER BY submitted_at DESC NULLS LAST
+        fd.draft_id AS "draftId",
+        fd.funding_id AS "fundingId",
+        fd.title,
+        COALESCE(
+          NULLIF(fd.brewery_name, ''),
+          NULLIF(fd.business_name, ''),
+          u.nickname
+        ) AS "breweryName",
+        fd.status,
+        fd.submitted_at AS "submittedAt",
+        fd.created_at AS "createdAt"
+      FROM funding_drafts fd
+      LEFT JOIN funding_projects fp ON fp.funding_id = fd.funding_id
+      LEFT JOIN users u ON u.user_id = fd.brewery_id
+      WHERE fd.status = ANY($1::text[])
+        AND (
+          fp.funding_id IS NULL
+          OR fp.status IS NULL
+          OR fp.status <> ALL($2::text[])
+        )
+      ORDER BY fd.submitted_at DESC NULLS LAST, fd.created_at DESC
       `,
-      [status]
+      [statuses, EXCLUDED_PROJECT_STATUSES]
     );
 
     return res.status(200).json({
+      status: 200,
       drafts: result.rows,
-      message: '제출 프로젝트 목록 조회 성공',
+      message: '관리자 펀딩 심사 목록 조회 성공',
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       status: 500,
-      message: '제출 프로젝트 목록 조회 중 서버 오류가 발생했습니다.',
+      message: '관리자 펀딩 심사 목록 조회 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
+};
+
+const toPositiveInteger = (value, fallback = null) => {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    return fallback;
+  }
+
+  return Math.floor(numberValue);
+};
+
+const buildDefaultSupportOptionName = (draft, funding) => {
+  const baseName = String(
+    draft.reward_name ||
+    draft.option_name ||
+    draft.short_title ||
+    draft.title ||
+    funding.title ||
+    '기본 후원 옵션'
+  ).trim();
+  const optionName = baseName.endsWith('기본 후원')
+    ? baseName
+    : `${baseName} 기본 후원`;
+
+  return optionName.slice(0, 100);
+};
+
+const ensureDefaultFundingSupportOption = async (client, funding, draft) => {
+  const fundingId = Number(funding?.funding_id || draft?.funding_id);
+
+  if (!Number.isInteger(fundingId) || fundingId <= 0) {
+    return null;
+  }
+
+  const existingOptionResult = await client.query(
+    `
+    SELECT option_id
+    FROM funding_support_options
+    WHERE funding_id = $1
+    LIMIT 1
+    `,
+    [fundingId]
+  );
+
+  if (existingOptionResult.rows.length > 0) {
+    return null;
+  }
+
+  const projectResult = await client.query(
+    `
+    SELECT
+      funding_id,
+      title,
+      price_per_bottle,
+      summary,
+      description
+    FROM funding_projects
+    WHERE funding_id = $1
+    LIMIT 1
+    `,
+    [fundingId]
+  );
+  const project = projectResult.rows[0] || funding || {};
+  const price = toPositiveInteger(draft.price_per_bottle, toPositiveInteger(project.price_per_bottle));
+
+  if (!price) {
+    const error = new Error('후원 옵션 생성을 위한 가격 정보가 없습니다.');
+    error.status = 400;
+    throw error;
+  }
+
+  const stock = toPositiveInteger(
+    draft.total_quantity || draft.stock || draft.target_quantity,
+    100
+  );
+  const maxPerUser = toPositiveInteger(draft.max_per_user || draft.maxPerUser, 10);
+  const optionName = buildDefaultSupportOptionName(draft, project);
+  const description =
+    draft.reward_description ||
+    draft.option_description ||
+    draft.summary ||
+    project.summary ||
+    project.description ||
+    optionName;
+
+  const createdOptionResult = await client.query(
+    `
+    INSERT INTO funding_support_options (
+      funding_id,
+      name,
+      price,
+      description,
+      stock,
+      remaining_stock,
+      max_per_user
+    )
+    VALUES ($1, $2, $3, $4, $5, $5, $6)
+    RETURNING option_id
+    `,
+    [
+      fundingId,
+      optionName,
+      price,
+      description,
+      stock,
+      maxPerUser,
+    ]
+  );
+
+  console.log('Default funding support option created', {
+    fundingId,
+    draftId: draft.draft_id,
+    optionId: createdOptionResult.rows[0]?.option_id,
+  });
+
+  return createdOptionResult.rows[0] || null;
 };
 
 // 관리자 제출 프로젝트 승인
@@ -243,6 +384,8 @@ const approveFundingDraft = async (req, res) => {
         funding = fundingResult.rows[0];
       }
 
+      await ensureDefaultFundingSupportOption(client, funding, draft);
+
       await client.query(
         `
         UPDATE funding_drafts
@@ -285,10 +428,13 @@ const approveFundingDraft = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
+    const status = error.status || 500;
 
-    return res.status(500).json({
-      status: 500,
-      message: '프로젝트 승인 중 서버 오류가 발생했습니다.',
+    return res.status(status).json({
+      status,
+      message: status === 500
+        ? '프로젝트 승인 중 서버 오류가 발생했습니다.'
+        : error.message,
       error: error.message,
     });
   }
@@ -316,7 +462,7 @@ const rejectFundingDraft = async (req, res) => {
   try {
     const draftResult = await pool.query(
       `
-      SELECT draft_id, status
+      SELECT draft_id, funding_id, status
       FROM funding_drafts
       WHERE draft_id = $1
       `,
@@ -332,31 +478,65 @@ const rejectFundingDraft = async (req, res) => {
 
     const draft = draftResult.rows[0];
 
-    if (draft.status !== 'SUBMITTED') {
+    if (!['SUBMITTED', 'REVIEWING'].includes(draft.status)) {
       return res.status(400).json({
         status: 400,
-        message: '제출된 프로젝트만 반려할 수 있습니다.',
+        message: '심사 중인 프로젝트만 반려할 수 있습니다.',
       });
     }
 
-    const result = await pool.query(
-      `
-      UPDATE funding_drafts
-      SET
-        status = 'REJECTED',
-        reject_reason = $1,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE draft_id = $2
-      RETURNING draft_id, status, reject_reason, updated_at
-      `,
-      [rejectReason.trim(), Number(draftId)]
-    );
+    const client = await pool.connect();
+    let rejectedDraft;
+    let rejectedFunding = null;
 
-    const rejectedDraft = result.rows[0];
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query(
+        `
+        UPDATE funding_drafts
+        SET
+          status = 'REJECTED',
+          reject_reason = $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE draft_id = $2
+        RETURNING draft_id, funding_id, status, reject_reason, updated_at
+        `,
+        [rejectReason.trim(), Number(draftId)]
+      );
+
+      rejectedDraft = result.rows[0];
+
+      if (rejectedDraft.funding_id) {
+        const fundingResult = await client.query(
+          `
+          UPDATE funding_projects
+          SET
+            status = 'REJECTED',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE funding_id = $1
+            AND status IN ('READY', 'REVIEWING', 'SUBMITTED', 'ONGOING')
+          RETURNING funding_id, status, updated_at
+          `,
+          [Number(rejectedDraft.funding_id)]
+        );
+
+        rejectedFunding = fundingResult.rows[0] || null;
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
 
     return res.status(200).json({
       draftId: rejectedDraft.draft_id,
+      fundingId: rejectedDraft.funding_id ? Number(rejectedDraft.funding_id) : null,
       status: rejectedDraft.status,
+      projectStatus: rejectedFunding?.status || null,
       rejectReason: rejectedDraft.reject_reason,
       updatedAt: rejectedDraft.updated_at,
       message: '프로젝트가 반려되었습니다.',
@@ -372,19 +552,124 @@ const rejectFundingDraft = async (req, res) => {
   }
 };
 
-const settleExpiredFundingProjects = async (req, res) => {
+const cancelFundingProject = async (req, res) => {
+  const { fundingId } = req.params;
+  const { cancelReason } = req.body || {};
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '올바른 펀딩 ID가 아닙니다.',
+    });
+  }
+
   try {
-    const result = await settleExpiredFundings();
+    const fundingResult = await pool.query(
+      `
+      SELECT
+        funding_id,
+        title,
+        status,
+        current_amount,
+        goal_amount
+      FROM funding_projects
+      WHERE funding_id = $1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (fundingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩을 찾을 수 없습니다.',
+      });
+    }
+
+    const funding = fundingResult.rows[0];
+    const currentStatus = String(funding.status || '').toUpperCase();
+    const nonCancelableStatuses = ['SUCCESS', 'FAILED', 'ENDED', 'CANCELED', 'CANCELLED'];
+
+    if (nonCancelableStatuses.includes(currentStatus)) {
+      return res.status(400).json({
+        status: 400,
+        message: '이미 종료되었거나 취소된 펀딩은 취소할 수 없습니다.',
+      });
+    }
+
+    const updateResult = await pool.query(
+      `
+      UPDATE funding_projects
+      SET
+        status = 'CANCELED',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE funding_id = $1
+      RETURNING
+        funding_id,
+        title,
+        status,
+        current_amount,
+        goal_amount,
+        updated_at
+      `,
+      [Number(fundingId)]
+    );
+
+    const canceledFunding = updateResult.rows[0];
+
+    console.log('[funding-cancel] funding canceled by admin', {
+      fundingId: Number(canceledFunding.funding_id),
+      previousStatus: currentStatus,
+      newStatus: canceledFunding.status,
+      cancelReason: cancelReason || null,
+      adminUserId: req.user?.userId || req.user?.id || null,
+    });
 
     return res.status(200).json({
       status: 200,
-      successCount: result.successCount,
-      failedCount: result.failedCount,
-      processedFundings: result.processedFundings,
+      message: '펀딩이 취소되었습니다.',
+      data: {
+        fundingId: Number(canceledFunding.funding_id),
+        title: canceledFunding.title,
+        previousStatus: currentStatus,
+        newStatus: canceledFunding.status,
+        currentAmount: Number(canceledFunding.current_amount || 0),
+        goalAmount: Number(canceledFunding.goal_amount || 0),
+        cancelReason: cancelReason || null,
+        updatedAt: canceledFunding.updated_at,
+      },
+    });
+  } catch (error) {
+    console.error('[funding-cancel] funding cancel failed', error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '펀딩 취소 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const settleExpiredFundingsManually = async (req, res) => {
+  try {
+    const settlementResult = await settleExpiredFundings();
+
+    console.log('[funding-settlement] manual settlement completed', {
+      successCount: settlementResult.successCount,
+      failedCount: settlementResult.failedCount,
+      processedCount: settlementResult.processedFundings.length,
+      adminUserId: req.user?.userId || req.user?.id || null,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      successCount: settlementResult.successCount,
+      failedCount: settlementResult.failedCount,
+      processedFundings: settlementResult.processedFundings,
+      data: settlementResult,
       message: '마감된 펀딩 정산이 완료되었습니다.',
     });
   } catch (error) {
-    console.error(error);
+    console.error('[funding-settlement] manual settlement failed', error);
 
     return res.status(500).json({
       status: 500,
@@ -468,6 +753,7 @@ module.exports = {
   getSubmittedFundingDrafts,
   approveFundingDraft,
   rejectFundingDraft,
-  settleExpiredFundingProjects,
+  cancelFundingProject,
+  settleExpiredFundingsManually,
   completeFundingSettlement,
 };

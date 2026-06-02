@@ -42,10 +42,14 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 CREATE TABLE IF NOT EXISTS password_reset_verifications (
   verification_id BIGSERIAL PRIMARY KEY,
   email VARCHAR(255) NOT NULL,
-  code VARCHAR(10) NOT NULL,
+  verification_code_hash TEXT,
   expires_at TIMESTAMP NOT NULL,
-  verified_at TIMESTAMP,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  used BOOLEAN NOT NULL DEFAULT false,
+  attempt_count INT NOT NULL DEFAULT 0,
+  reset_token_hash TEXT,
+  reset_token_expires_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  used_at TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_email
@@ -53,6 +57,10 @@ ON password_reset_verifications(email);
 
 CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_expires_at
 ON password_reset_verifications(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_reset_token_hash
+ON password_reset_verifications(reset_token_hash)
+WHERE reset_token_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS auth_phone_verifications (
   verification_id BIGSERIAL PRIMARY KEY,

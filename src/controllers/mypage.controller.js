@@ -20,6 +20,8 @@ const {
   deleteArchiveImage,
   normalizeArchiveFormPayload,
   normalizeArchiveDeleteImageIds,
+  getParticipatedFundings,
+  getMyFundingReview,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -496,6 +498,54 @@ const getArchiveTagsController = async (req, res) => {
   }
 };
 
+const getParticipatedFundingsController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getParticipatedFundings(userId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '참여 펀딩 목록 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '참여 펀딩 목록 조회 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
+const getMyFundingReviewController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMyFundingReview(userId, req.params.fundingId);
+
+    return res.status(200).json({
+      status: 200,
+      message: data ? '펀딩 후기 조회 성공' : '불러올 후기가 없습니다.',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '펀딩 후기 조회 중 서버 오류가 발생했습니다.',
+    );
+  }
+};
+
 const checkNicknameController = async (req, res) => {
   const userId = getAuthenticatedUserId(req, res);
 
@@ -755,6 +805,8 @@ module.exports = {
   uploadArchiveImagesController,
   deleteArchiveImageController,
   getArchiveTagsController,
+  getParticipatedFundingsController,
+  getMyFundingReviewController,
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,
