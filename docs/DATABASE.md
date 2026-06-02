@@ -28,19 +28,20 @@ Applied to `judam`:
 - `database/20260525_funding_review_likes.sql`
 - `database/20260525_funding_bank_account_verifications.sql`
 - `database/20260528_brewery_dashboard_profile_notifications.sql`
-
-Pending Judam DB application:
-
 - `database/20260530_funding_deliveries.sql`
   - Creates `funding_deliveries` for completed funding delivery management.
   - Stores one delivery row per `funding_id` through a unique constraint.
 - `database/20260530_brewery_log_video_url.sql`
   - Adds `brewery_logs.video_url`, `brewery_logs.updated_at`, and `idx_brewery_logs_funding_id`.
-  - This table was previously owned by `judam_admin`, so owner/admin privileges may be required.
 - `database/20260530_brewery_dashboard_notification_events.sql`
   - Adds event fields for brewery dashboard notification auto-generation.
   - Adds unique event-key index for duplicate prevention.
-  - 2026-05-30 attempt could not connect because the local `localhost:5433` SSM tunnel was closed and the current IAM user was denied `ssm:StartSession`.
+- `database/20260602_brewery_dashboard_settlement_notification_type.sql`
+  - Adds `SETTLEMENT_COMPLETED` to the brewery dashboard notification type check constraint.
+
+Pending Judam DB application:
+
+- None currently tracked for the dashboard migrations above.
 
 Latest verification:
 
@@ -69,11 +70,14 @@ Latest verification:
 - Applied `database/20260528_brewery_dashboard_profile_notifications.sql` on 2026-05-28.
 - Confirmed `brewery_profiles` for editable brewery dashboard profile fields.
 - Confirmed `brewery_dashboard_notifications` for brewery dashboard notification persistence.
+- Applied `database/20260530_brewery_dashboard_notification_events.sql`.
+- Confirmed `brewery_dashboard_notifications.event_key`, `funding_id`, `recipe_id`, `progress_threshold`, and `metadata`.
+- Applied `database/20260530_funding_deliveries.sql`.
+- Confirmed `funding_deliveries` FK/unique/index constraints.
+- Confirmed `brewery_logs.video_url`, `brewery_logs.updated_at`, and `idx_brewery_logs_funding_id`.
+- Applied `database/20260602_brewery_dashboard_settlement_notification_type.sql`.
+- Confirmed `chk_brewery_dashboard_notifications_type` includes `SETTLEMENT_COMPLETED`.
 
-Skipped because `brewery_logs` is owned by `judam_admin`:
+Ownership note:
 
-- `brewery_logs.video_url`
-- `brewery_logs.updated_at`
-- `idx_brewery_logs_funding_id`
-
-These skipped items require the table owner or an admin account.
+- `brewery_logs` is still owned by `judam_admin`; future migrations for that table may require owner/admin privileges.
