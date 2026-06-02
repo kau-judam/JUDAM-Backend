@@ -10,6 +10,10 @@ const {
   generateFundingDraftAiImageAndUpload,
   updateAiTasteProfile,
 } = require('../services/ai.service');
+const {
+  getKstToday,
+  isFundingSupportable,
+} = require('../services/fundingSettlement.service');
 
 const AI_TASTE_RATING_KEYS = [
   'sweetness',
@@ -9062,7 +9066,9 @@ const createFundingOrder = async (req, res) => {
         funding_id,
         title,
         price_per_bottle,
-        shipping_fee
+        shipping_fee,
+        status,
+        end_date
       FROM funding_projects
       WHERE funding_id = $1
       `,
@@ -9077,6 +9083,15 @@ const createFundingOrder = async (req, res) => {
     }
 
     const funding = fundingResult.rows[0];
+    const kstToday = await getKstToday();
+
+    if (!isFundingSupportable(funding, kstToday)) {
+      return res.status(400).json({
+        status: 400,
+        message: '종료된 펀딩에는 후원할 수 없습니다.',
+      });
+    }
+
     let supportOption = null;
 
     if (numericOptionId !== null) {

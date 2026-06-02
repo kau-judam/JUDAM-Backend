@@ -1,8 +1,6 @@
 const cron = require('node-cron');
-const {
-  KST_TIMEZONE,
-  settleExpiredFundings,
-} = require('../services/funding.service');
+const { KST_TIMEZONE } = require('../services/funding.service');
+const { settleExpiredFundings } = require('../services/fundingSettlement.service');
 
 const FUNDING_SETTLEMENT_CRON = '5 0 * * *';
 

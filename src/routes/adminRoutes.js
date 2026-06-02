@@ -8,6 +8,7 @@ const {
   rejectFundingDraft,
   cancelFundingProject,
   settleExpiredFundingsManually,
+  completeFundingSettlement,
 } = require('../controllers/admin.controller');
 
 const requireAdmin = (req, res, next) => {
@@ -37,6 +38,12 @@ router.post(
   authMiddleware,
   requireAdmin,
   settleExpiredFundingsManually,
+);
+router.post(
+  '/fundings/:fundingId/settlement-completed',
+  authMiddleware,
+  requireAdmin,
+  completeFundingSettlement,
 );
 
 module.exports = router;

@@ -1,11 +1,12 @@
-﻿const pool = require('../config/db');
+const pool = require('../config/db');
 const {
   registerFundingProjectToAiPool,
-  settleExpiredFundings,
 } = require('../services/funding.service');
 const {
   createFundingCreatedNotification,
+  createSettlementCompletedNotification,
 } = require('../services/breweryDashboardNotification.service');
+const { settleExpiredFundings } = require('../services/fundingSettlement.service');
 
 // 관리자 제출 프로젝트 목록 조회
 const getSubmittedFundingDrafts = async (req, res) => {
@@ -664,15 +665,88 @@ const settleExpiredFundingsManually = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '마감 펀딩 정산 완료',
+      successCount: settlementResult.successCount,
+      failedCount: settlementResult.failedCount,
+      processedFundings: settlementResult.processedFundings,
       data: settlementResult,
+      message: '마감된 펀딩 정산이 완료되었습니다.',
     });
   } catch (error) {
     console.error('[funding-settlement] manual settlement failed', error);
 
     return res.status(500).json({
       status: 500,
-      message: '마감 펀딩 정산 중 서버 오류가 발생했습니다.',
+      message: '마감된 펀딩 정산 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const completeFundingSettlement = async (req, res) => {
+  const { fundingId } = req.params;
+  const {
+    settlementId = null,
+    settlementAmount = null,
+    settledAt = null,
+    payoutStatus = 'COMPLETED',
+    linkUrl = null,
+  } = req.body || {};
+
+  if (!fundingId || isNaN(Number(fundingId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '펀딩 ID가 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const fundingResult = await pool.query(
+      `
+      SELECT funding_id, status
+      FROM funding_projects
+      WHERE funding_id = $1
+      LIMIT 1
+      `,
+      [Number(fundingId)]
+    );
+
+    if (fundingResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩 프로젝트를 찾을 수 없습니다.',
+      });
+    }
+
+    const funding = fundingResult.rows[0];
+
+    if (!['SUCCESS', 'SUCCESSFUL', 'FUNDING_SUCCESS'].includes(String(funding.status || '').toUpperCase())) {
+      return res.status(400).json({
+        status: 400,
+        message: '성공 확정된 펀딩만 정산 완료 처리할 수 있습니다.',
+      });
+    }
+
+    const notification = await createSettlementCompletedNotification(Number(fundingId), {
+      settlementId,
+      settlementAmount,
+      settledAt,
+      payoutStatus,
+      linkUrl,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      notification,
+      message: notification
+        ? '정산 완료 알림이 생성되었습니다.'
+        : '이미 생성된 정산 완료 알림입니다.',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '정산 완료 알림 생성 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -684,4 +758,5 @@ module.exports = {
   rejectFundingDraft,
   cancelFundingProject,
   settleExpiredFundingsManually,
+  completeFundingSettlement,
 };

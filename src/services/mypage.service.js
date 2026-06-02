@@ -45,7 +45,7 @@ const getExistingUser = async (userId) => {
   const user = await findUserById(userId);
 
   if (!user) {
-    throw createServiceError(404, '?????? ?轅붽틓?????????????욱룏???????낆젵.');
+    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
   }
 
   return user;
@@ -84,13 +84,13 @@ const updateNickname = async (userId, nickname) => {
 
 const normalizePhoneNumber = (phoneNumber) => {
   if (typeof phoneNumber !== 'string') {
-    throw createServiceError(400, '????袁ｋ쨨????브틦???살퓢?????꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.');
+    throw createServiceError(400, '전화번호 형식이 올바르지 않습니다.');
   }
 
   const normalized = phoneNumber.replace(/\s/g, '').replace(/-/g, '');
 
   if (!/^010\d{7,8}$/.test(normalized)) {
-    throw createServiceError(400, '????袁ｋ쨨????브틦???살퓢?????꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.');
+    throw createServiceError(400, '전화번호 형식이 올바르지 않습니다.');
   }
 
   return normalized;
@@ -138,13 +138,13 @@ const requestPhoneVerification = async (userId, phoneNumber) => {
     phoneNumber: normalizedPhoneNumber,
     verificationCode,
     sendTo: OCTOMO_RECEIVE_NUMBER,
-    guideMessage: `?????????筌???????節덇덩?${verificationCode}??${OCTOMO_RECEIVE_NUMBER}?????ㅼ뒧????野????嚥싲갭횧????`,
+    guideMessage: `휴대폰 문자로 ${verificationCode}을 ${OCTOMO_RECEIVE_NUMBER}로 보내주세요.`,
   };
 };
 
 const checkOctomoMessageExists = async (phoneNumber, verificationCode) => {
   if (!process.env.OCTOMO_API_KEY) {
-    throw createServiceError(500, '????袁ｋ쨨????브틦???살퓢?????꿔꺂????癒κ섶???癲ル슢怡??귦룈?????濚밸Ŧ?????????밸븶?④섣???癲???????');
+    throw createServiceError(500, '전화번호 인증 서비스 설정이 누락되었습니다.');
   }
 
   const octomoMessageExistsUrl = getOctomoMessageExistsUrl();
@@ -175,7 +175,7 @@ const checkOctomoMessageExists = async (phoneNumber, verificationCode) => {
       url: octomoMessageExistsUrl,
     });
 
-    throw createServiceError(502, '????袁ｋ쨨????브틦???살퓢?????꿔꺂????癒κ섶???癲ル슢怡??귦룈??? ???癲?????????욱룏???????낆젵.');
+    throw createServiceError(502, '전화번호 인증 서비스와 통신할 수 없습니다.');
   }
 };
 
@@ -206,13 +206,13 @@ const updatePhoneNumberWithVerification = async (userId, phoneNumber, verificati
   const verification = rows[0];
 
   if (!verification) {
-    throw createServiceError(400, '????袁ｋ쨨????브틦???살퓢?????꿔꺂????癒κ섶?????거?????????얜∥異???轅붽틓????鶯??癲???????');
+    throw createServiceError(400, '전화번호 인증 요청이 없거나 만료되었습니다.');
   }
 
   const exists = await checkOctomoMessageExists(normalizedPhoneNumber, normalizedVerificationCode);
 
   if (!exists) {
-    throw createServiceError(400, '??꿔꺂????癒κ섶????筌??????? ??꿔꺂??틝??????? ?????源낅돹??????');
+    throw createServiceError(400, '인증 문자가 확인되지 않았습니다.');
   }
 
   const client = await pool.connect();
@@ -242,7 +242,7 @@ const updatePhoneNumberWithVerification = async (userId, phoneNumber, verificati
     );
 
     if (userRows.length === 0) {
-      throw createServiceError(404, '?????? ?轅붽틓?????????????욱룏???????낆젵.');
+      throw createServiceError(404, '사용자를 찾을 수 없습니다.');
     }
 
     await client.query('COMMIT');
@@ -289,17 +289,17 @@ const changeMyPassword = async (userId, currentPassword, newPassword) => {
   const user = rows[0];
 
   if (!user) {
-    throw createServiceError(404, '?????? ?轅붽틓?????????????욱룏???????낆젵.');
+    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
   }
 
   if (user.provider !== 'local') {
-    throw createServiceError(400, '??????黎??筌????????????????嶺?????亦껋꼦裕㎩쳞????ㅼ뒧????β뼯援???????????욱룏???????낆젵.');
+    throw createServiceError(400, '소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다.');
   }
 
   const isPasswordValid = await bcrypt.compare(currentPassword, user.password || '');
 
   if (!isPasswordValid) {
-    throw createServiceError(401, '?????밸븶???????嶺?????????? ????癲?? ???????????낆젵.');
+    throw createServiceError(401, '현재 비밀번호가 올바르지 않습니다.');
   }
 
   const passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
@@ -338,6 +338,7 @@ const getArchiveCount = async (userId) => {
       SELECT COUNT(*) AS count
       FROM user_archives
       WHERE user_id = $1
+        AND deleted_at IS NULL
     `,
     [userId],
   );
@@ -348,12 +349,12 @@ const getArchiveCount = async (userId) => {
 const BADGES = [
   {
     badgeId: 'welcome',
-    name: '주담에 오신 것을 환영합니다!',
+    name: '반가워요!',
     displayOrder: 1,
   },
   {
     badgeId: 'communicate',
-    name: '소통을 시작한 전통주 친구',
+    name: '주담과 소통하기',
     displayOrder: 2,
   },
   {
@@ -363,20 +364,21 @@ const BADGES = [
   },
   {
     badgeId: 'funding-intermediate',
-    name: '펀딩 애호가',
+    name: '펀딩 중급자',
     displayOrder: 4,
   },
   {
     badgeId: 'funding-expert',
-    name: '펀딩 전문가',
+    name: '펀딩 숙련가',
     displayOrder: 5,
   },
   {
     badgeId: 'co-creator',
-    name: '함께 빚는 동료',
+    name: '공동 제작자',
     displayOrder: 6,
   },
 ];
+
 const evaluateBadgeConditions = async (userId) => {
   const [
     userRowsResult,
@@ -745,7 +747,7 @@ const validateSulbtiPayload = (payload) => {
   const typeCode = typeof payload?.type === 'string' ? payload.type.trim() : '';
 
   if (!typeCode) {
-    throw createServiceError(400, '???耀??????援????????⑤챷竊????觀????꿔꺂?????');
+    throw createServiceError(400, '술BTI 유형을 입력해주세요.');
   }
 
   const scores = {
@@ -761,7 +763,7 @@ const validateSulbtiPayload = (payload) => {
   );
 
   if (hasInvalidScore) {
-    throw createServiceError(400, '???耀???????1~5 ???????????????癲ル슢?????');
+    throw createServiceError(400, '술BTI 점수는 1~5 사이의 숫자여야 합니다.');
   }
 
   return {
@@ -772,7 +774,7 @@ const validateSulbtiPayload = (payload) => {
 
 const SULBTI_SURVEY_QUESTION_KEYS = Array.from({ length: 25 }, (_, index) => `q${index + 1}`);
 const SULBTI_SURVEY_MULTI_SCORE_KEYS = ['q24', 'q25'];
-const SULBTI_SURVEY_FORMAT_ERROR_MESSAGE = '???耀???????? ??꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.';
+const SULBTI_SURVEY_FORMAT_ERROR_MESSAGE = '술BTI 설문 답변 형식이 올바르지 않습니다.';
 
 const hasSulbtiSurveyQuestionKeys = (payload) => (
   payload
@@ -904,7 +906,7 @@ const extractSulbtiSurveyResult = (aiResponse) => {
   const alcoholLabel = result.alcohol_label || result.alcoholLabel;
 
   if (!tasteVector || !btiCode || !characterName || !alcoholLabel) {
-    throw createServiceError(502, 'AI ???耀????ㅼ뒧??????β뼯援?????筌믨퀣?? ????癲?? ???????????낆젵.');
+    throw createServiceError(502, 'AI 술BTI 변환 결과가 올바르지 않습니다.');
   }
 
   return {
@@ -960,7 +962,7 @@ const saveSulbtiSurveyResult = async (userId, surveyResult) => {
   );
 
   if (rows.length === 0) {
-    throw createServiceError(404, '?????? ?轅붽틓?????????????욱룏???????낆젵.');
+    throw createServiceError(404, '사용자를 찾을 수 없습니다.');
   }
 
   return mapSulbtiSurveySaveResponse(rows[0]);
@@ -974,7 +976,6 @@ const convertAndSaveMySulbtiSurvey = async (userId, payload) => {
   return saveSulbtiSurveyResult(userId, surveyResult);
 };
 
-
 const getMySulbtiShareLink = async (userId) => {
   const sulbti = await getMySulbti(userId);
 
@@ -986,6 +987,7 @@ const getMySulbtiShareLink = async (userId) => {
 
   return sulbti;
 };
+
 const saveMySulbti = async (userId, payload) => {
   if (isSurveyConvertPayload(payload)) {
     return convertAndSaveMySulbtiSurvey(userId, payload);
@@ -1003,7 +1005,7 @@ const saveMySulbti = async (userId, payload) => {
   const sulbtiType = await findSulbtiTypeByCode(typeCode);
 
   if (!sulbtiType) {
-    throw createServiceError(400, '?????援???? ??? ???耀??????援???????뽯쨦??');
+    throw createServiceError(400, '유효하지 않은 술BTI 유형입니다.');
   }
 
   const { rows } = await pool.query(
@@ -1070,29 +1072,51 @@ const ARCHIVE_TAG_CATEGORY_NAMES = {
   TASTE: '맛',
   AROMA: '향',
   SITUATION: '상황',
-  MOOD: '분위기',
+  MOOD: '감성',
 };
 
 const FIXED_ARCHIVE_TAG_GROUPS = [
   {
     category: 'TASTE',
-    categoryName: '맛',
-    tags: ['달콤한', '상큼한', '고소한', '깔끔한', '진한', '부드러운', '쌉싸름한', '묵직한', '산뜻한', '담백한'],
-  },
-  {
-    category: 'AROMA',
-    categoryName: '향',
-    tags: ['꽃향', '과일향', '곡물향', '허브향', '누룩향', '은은한 향'],
+    categoryName: '맛·향',
+    tags: [
+      '달콤한',
+      '깔끔한',
+      '묵직한',
+      '산미있는',
+      '쓴맛',
+      '고소한',
+      '부드러운',
+      '탄산있는',
+      '구수한',
+      '과일향',
+    ],
   },
   {
     category: 'SITUATION',
     categoryName: '상황',
-    tags: ['혼술', '친구 모임', '가족 식사', '기념일', '캠핑', '선물용', '퇴근 후', '가볍게'],
+    tags: [
+      '혼술',
+      '친구모임',
+      '데이트',
+      '특별한날',
+      '식사중',
+      '야외',
+      '집들이',
+      '기념일',
+    ],
   },
   {
     category: 'MOOD',
-    categoryName: '분위기',
-    tags: ['차분한', '활기찬', '따뜻한', '특별한', '편안한', '로맨틱한'],
+    categoryName: '감성',
+    tags: [
+      '행복한',
+      '설레는',
+      '그리운',
+      '편안한',
+      '들뜬',
+      '차분한',
+    ],
   },
 ];
 const FIXED_ARCHIVE_TAG_ROWS = FIXED_ARCHIVE_TAG_GROUPS.flatMap((group, groupIndex) => (
@@ -1201,7 +1225,7 @@ const parseNonNegativeInteger = (value, defaultValue, fieldName) => {
   const stringValue = String(value);
 
   if (!/^\d+$/.test(stringValue)) {
-    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
   }
 
   return Number(stringValue);
@@ -1213,14 +1237,14 @@ const parseArchiveListQuery = (query = {}) => {
     : 'all';
 
   if (!hasOwn(ARCHIVE_QUERY_TYPES, type)) {
-    throw createServiceError(400, '?????밸븶筌믡꺂?????????????ㅿ폑??????癲?? ???????????낆젵.');
+    throw createServiceError(400, '아카이브 타입이 올바르지 않습니다.');
   }
 
   const page = parseNonNegativeInteger(query.page, 0, 'page');
   const size = parseNonNegativeInteger(query.size, 10, 'size');
 
   if (size < 1) {
-    throw createServiceError(400, 'size ???ル봿????????癲?? ???????????낆젵.');
+    throw createServiceError(400, 'size 값이 올바르지 않습니다.');
   }
 
   return {
@@ -1235,7 +1259,7 @@ const parseArchiveId = (archiveId) => {
   const stringValue = String(archiveId);
 
   if (!/^\d+$/.test(stringValue) || Number(stringValue) < 1) {
-    throw createServiceError(400, '?????밸븶筌믡꺂??????ID???ル봿?? ????癲?? ???????????낆젵.');
+    throw createServiceError(400, '아카이브 ID가 올바르지 않습니다.');
   }
 
   return Number(stringValue);
@@ -1245,7 +1269,7 @@ const parseArchiveImageId = (imageId) => {
   const stringValue = String(imageId);
 
   if (!/^\d+$/.test(stringValue) || Number(stringValue) < 1) {
-    throw createServiceError(400, '?????밸븶筌믡꺂???????????轅붽틓??? ID???ル봿?? ????癲?? ???????????낆젵.');
+    throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
   }
 
   return Number(stringValue);
@@ -1348,13 +1372,13 @@ const normalizeArchiveType = (archiveType, isPartial) => {
   }
 
   if (typeof archiveType !== 'string') {
-    throw createServiceError(400, '?????밸븶筌믡꺂???????????援??? NORMAL ?????FUNDING?????ル봿????μ떝?롳쭗????????낆젵.');
+    throw createServiceError(400, '아카이브 유형은 NORMAL 또는 FUNDING만 가능합니다.');
   }
 
   const normalized = archiveType.trim().toUpperCase();
 
   if (!ARCHIVE_TYPES.has(normalized)) {
-    throw createServiceError(400, '?????밸븶筌믡꺂???????????援??? NORMAL ?????FUNDING?????ル봿????μ떝?롳쭗????????낆젵.');
+    throw createServiceError(400, '아카이브 유형은 NORMAL 또는 FUNDING만 가능합니다.');
   }
 
   return normalized;
@@ -1370,7 +1394,7 @@ const normalizeOptionalString = (value, fieldName) => {
   }
 
   if (typeof value !== 'string') {
-    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
   }
 
   const trimmed = value.trim();
@@ -1387,11 +1411,11 @@ const normalizeOptionalNumber = (value, fieldName, min, max = null) => {
   }
 
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
   }
 
   if (value < min || (max !== null && value > max)) {
-    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
   }
 
   return value;
@@ -1407,7 +1431,7 @@ const normalizeOptionalId = (value, fieldName) => {
   }
 
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-    throw createServiceError(400, `${fieldName} ???ル봿????????癲?? ???????????낆젵.`);
+    throw createServiceError(400, `${fieldName} 값이 올바르지 않습니다.`);
   }
 
   return value;
@@ -1423,13 +1447,13 @@ const normalizeOptionalRecordDate = (value) => {
   }
 
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw createServiceError(400, '?????????덉땃??????댟? ??꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.');
+    throw createServiceError(400, '기록 날짜 형식이 올바르지 않습니다.');
   }
 
   const date = new Date(`${value}T00:00:00.000Z`);
 
   if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
-    throw createServiceError(400, '?????????덉땃??????댟? ??꿔꺂??틝???놁뗄??????癲?? ???????????낆젵.');
+    throw createServiceError(400, '기록 날짜 형식이 올바르지 않습니다.');
   }
 
   return value;
@@ -1467,7 +1491,7 @@ const validateArchivePayload = (payload = {}, isPartial = false) => {
 
   if (hasOwn(body, 'tagIds')) {
     if (!Array.isArray(body.tagIds)) {
-      throw createServiceError(400, 'tagIds????ш끽維뽳쭩?壤굿??뽯쑆?????욱룑?????癲ル슢?????');
+      throw createServiceError(400, 'tagIds는 배열이어야 합니다.');
     }
 
     validated.tagIds = body.tagIds;
@@ -1482,7 +1506,7 @@ const validateArchivePayload = (payload = {}, isPartial = false) => {
     const alcoholId = hasOwn(validated, 'alcoholId') ? validated.alcoholId : null;
 
     if (!customName && alcoholId === null) {
-      throw createServiceError(400, 'customName??alcoholId ?????棺堉?뤃管????????밸븶???癲ル슢?????');
+      throw createServiceError(400, 'customName과 alcoholId 중 하나는 필요합니다.');
     }
   }
 
@@ -1501,7 +1525,7 @@ const validateTagIds = async (clientOrPool, tagIds) => {
       (tagId) => typeof tagId !== 'number' || !Number.isInteger(tagId) || tagId < 1,
     )
   ) {
-    throw createServiceError(400, '?????援???? ??? ?????밸븶筌믡꺂?????????怨뚮뼺?源놁벀??????뽯쨦??');
+    throw createServiceError(400, '유효하지 않은 아카이브 태그입니다.');
   }
 
   if (uniqueTagIds.length === 0) {
@@ -1518,7 +1542,7 @@ const validateTagIds = async (clientOrPool, tagIds) => {
   );
 
   if (rows.length !== uniqueTagIds.length) {
-    throw createServiceError(400, '?????援???? ??? ?????밸븶筌믡꺂?????????怨뚮뼺?源놁벀??????뽯쨦??');
+    throw createServiceError(400, '유효하지 않은 아카이브 태그입니다.');
   }
 
   return uniqueTagIds;
@@ -1534,7 +1558,7 @@ const normalizeCustomTags = (customTags) => {
   }
 
   if (!Array.isArray(customTags)) {
-    throw createServiceError(400, 'customTags????ш끽維뽳쭩?壤굿??뽯쑆?????욱룑?????癲ル슢?????');
+    throw createServiceError(400, 'customTags는 배열이어야 합니다.');
   }
 
   return [...new Set(
@@ -1610,7 +1634,7 @@ const ensureArchiveHasDrinkName = (archiveData, currentArchive = null) => {
     : currentArchive?.alcohol_id || null;
 
   if (!customName && alcoholId === null) {
-    throw createServiceError(400, 'customName??alcoholId ?????棺堉?뤃管????????밸븶???癲ル슢?????');
+    throw createServiceError(400, 'customName과 alcoholId 중 하나는 필요합니다.');
   }
 };
 
@@ -1816,7 +1840,7 @@ const parseArchiveFormTagIds = (tagIds) => {
 
       return parsed.map((tagId) => Number(tagId));
     } catch (error) {
-      throw createServiceError(400, 'tagIds????ш끽維뽳쭩?壤굿??뽯쑆???꿔꺂??틝???놁뗄?????욱룑?????癲ル슢?????');
+      throw createServiceError(400, 'tagIds는 배열 형식이어야 합니다.');
     }
   }
 
@@ -1854,7 +1878,7 @@ const parseArchiveFormCustomTags = (customTags) => {
 
       return normalizeCustomTags(parsed);
     } catch (error) {
-      throw createServiceError(400, 'customTags????ш끽維뽳쭩?壤굿??뽯쑆???꿔꺂??틝???놁뗄?????욱룑?????癲ル슢?????');
+      throw createServiceError(400, 'customTags는 배열 형식이어야 합니다.');
     }
   }
 
@@ -1894,7 +1918,7 @@ const normalizeArchiveDeleteImageIds = (deleteImageIds) => {
 
       parsedValues = parsed;
     } catch (error) {
-      throw createServiceError(400, '?????밸븶筌믡꺂???????????轅붽틓??? ID???ル봿?? ????癲?? ???????????낆젵.');
+      throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
     }
   } else {
     parsedValues = stringValue.split(',');
@@ -1907,7 +1931,7 @@ const normalizeArchiveDeleteImageIds = (deleteImageIds) => {
       (imageId) => !Number.isInteger(imageId) || imageId < 1,
     )
   ) {
-    throw createServiceError(400, '?????밸븶筌믡꺂???????????轅붽틓??? ID???ル봿?? ????癲?? ???????????낆젵.');
+    throw createServiceError(400, '아카이브 이미지 ID가 올바르지 않습니다.');
   }
 
   return [...new Set(imageIds)];
@@ -2031,7 +2055,7 @@ const getMyArchiveDetail = async (userId, archiveId) => {
   const archiveRow = await findMyArchiveRow(pool, userId, parsedArchiveId);
 
   if (!archiveRow) {
-    throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
+    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
   }
 
   const [archive] = await mapArchivesWithRelations([archiveRow]);
@@ -2047,7 +2071,7 @@ const createMyArchive = async (userId, payload) => {
   try {
     await client.query('BEGIN');
 
-    // ??????FUNDING)?? ??????癲ル슢????1??????????????덉땃????ル봿???????????? ??? ?????⑤베???????????????덉땃?????濚밸Ŧ寃㎩쳞????μ떝?띄몭??袁㏉떄?????????轅붽틓?蹂잛젂?④낮釉???
+    // 펀딩 술(FUNDING)은 한 펀딩당 1회만 기록 가능 — 삭제되지 않은 동일 펀딩 기록이 있으면 중복 작성 차단
     if (archiveData.archiveType === 'FUNDING' && archiveData.fundingId) {
       const { rows: existingFundingArchive } = await client.query(
         `
@@ -2063,7 +2087,7 @@ const createMyArchive = async (userId, payload) => {
       );
 
       if (existingFundingArchive.length > 0) {
-        throw createServiceError(400, '???? ?????????덉땃????????????????낆젵.');
+        throw createServiceError(400, '이미 기록한 펀딩입니다.');
       }
     }
 
@@ -2159,7 +2183,7 @@ const updateMyArchive = async (userId, archiveId, payload) => {
     const currentArchive = await findMyArchiveRow(client, userId, parsedArchiveId);
 
     if (!currentArchive) {
-      throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
+      throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
     }
 
     ensureArchiveHasDrinkName(archiveData, currentArchive);
@@ -2251,7 +2275,7 @@ const deleteMyArchive = async (userId, archiveId) => {
   );
 
   if (rows.length === 0) {
-    throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
+    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
   }
 };
 
@@ -2332,7 +2356,7 @@ const uploadArchiveImages = async (userId, archiveId, files) => {
   const parsedArchiveId = parseArchiveId(archiveId);
 
   if (!Array.isArray(files) || files.length === 0) {
-    throw createServiceError(400, '????野?????????????轅붽틓??????轅붽틓????낅마??????觀????꿔꺂?????');
+    throw createServiceError(400, '업로드할 이미지를 첨부해주세요.');
   }
 
   const client = await pool.connect();
@@ -2343,7 +2367,7 @@ const uploadArchiveImages = async (userId, archiveId, files) => {
     const archive = await findMyArchiveForImage(userId, parsedArchiveId, client);
 
     if (!archive) {
-      throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
+      throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
     }
 
     const { rows: countRows } = await client.query(
@@ -2357,7 +2381,7 @@ const uploadArchiveImages = async (userId, archiveId, files) => {
     const existingImageCount = Number(countRows[0]?.count || 0);
 
     if (existingImageCount + files.length > 3) {
-      throw createServiceError(400, '?????밸븶筌믡꺂???????????轅붽틓??????轅붽틓????彛? 3?饔앷옇??????? ????野?????????????????????낆젵.');
+      throw createServiceError(400, '아카이브 이미지는 최대 3장까지 업로드할 수 있습니다.');
     }
 
     const uploadedImages = [];
@@ -2407,7 +2431,7 @@ const deleteArchiveImage = async (userId, archiveId, imageId) => {
   const archive = await findMyArchiveForImage(userId, parsedArchiveId);
 
   if (!archive) {
-    throw createServiceError(404, '?????밸븶筌믡꺂?????癲ル슢흮????轅붽틓?????????????욱룏???????낆젵.');
+    throw createServiceError(404, '아카이브를 찾을 수 없습니다.');
   }
 
   const { rows } = await pool.query(
@@ -2421,11 +2445,11 @@ const deleteArchiveImage = async (userId, archiveId, imageId) => {
   );
 
   if (rows.length === 0) {
-    throw createServiceError(404, '?????밸븶筌믡꺂???????????轅붽틓??????轅붽틓?????????????욱룏???????낆젵.');
+    throw createServiceError(404, '아카이브 이미지를 찾을 수 없습니다.');
   }
 };
 
-// raw_materials(JSONB ??ш끽維뽳쭩?壤굿??뽯쑆?????????꿔꺂?ｉ뜮???????ㅿ폁??????살퓢癲??????嶺뚮죭釉뚮댘???????곕츣?? ???ル봿?????????쇨덧?筌먦렜逾?null.
+// raw_materials(JSONB 배열)에서 재료명을 추출해 쉼표로 연결. 값이 없으면 null.
 const buildIngredientsText = (rawMaterials) => {
   if (!rawMaterials) {
     return null;
@@ -2464,7 +2488,7 @@ const buildIngredientsText = (rawMaterials) => {
   return names.length > 0 ? names.join(', ') : null;
 };
 
-// funding_reviews.image_urls(JSONB ??ш끽維뽳쭩?壤굿??뽯쑆? ??[{ imageId, imageUrl, sortOrder }]
+// funding_reviews.image_urls(JSONB 배열) → [{ imageId, imageUrl, sortOrder }]
 const mapFundingReviewImages = (imageUrls) => {
   let list = imageUrls;
   if (typeof list === 'string') {
@@ -2488,18 +2512,65 @@ const mapFundingReviewImages = (imageUrls) => {
     }));
 };
 
-// ?轅붽틓????????蹂κ텤?熬곎逾???? ?轅붽틓????????????轅붽틓??熬곥끇釉띄춯誘좊???(GET /api/mypage/fundings/participated)
-// ??β뼯援?????????밸븶??PAID)??????용츧?嶺뚮?援ο쭩????????뀀땽 ?????????????癲ル슢????1??嚥싲갭큔??????ш끽維뽳쭩??? ?轅붽틓????彛???轅붽틓????????
-const getParticipatedFundings = async (userId) => {
+// funding_deliveries에서 펀딩별 운송장 존재 여부를 조회.
+// funding_deliveries 소유자/권한 이슈로 SELECT가 막혀도 목록 전체가 깨지지 않도록 분리 + graceful degrade.
+const getDeliveryTrackingMap = async (fundingIds) => {
+  const map = new Map();
+
+  if (!Array.isArray(fundingIds) || fundingIds.length === 0) {
+    return map;
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT funding_id, tracking_number
+        FROM funding_deliveries
+        WHERE funding_id = ANY($1::bigint[])
+      `,
+      [fundingIds],
+    );
+
+    rows.forEach((row) => {
+      map.set(Number(row.funding_id), row.tracking_number || null);
+    });
+  } catch (error) {
+    // funding_deliveries 접근 불가 시 배송 정보 없이 진행
+  }
+
+  return map;
+};
+
+// 마이페이지 참여 펀딩 목록 (GET /api/mypage/fundings/participated)
+// 결제 완료(PAID)한 주문이 있는 펀딩을 펀딩당 1행으로 반환. 최근 참여순.
+// excludeArchived=true일 때만 이미 FUNDING 아카이브로 기록한 펀딩을 제외(아카이브 작성 picker용).
+const getParticipatedFundings = async (userId, options = {}) => {
+  const excludeArchived = options.excludeArchived === true;
+
+  const archiveExclusion = excludeArchived
+    ? `AND NOT EXISTS (
+            SELECT 1
+            FROM user_archives ua
+            WHERE ua.user_id = $1
+              AND ua.archive_type = 'FUNDING'
+              AND ua.funding_id = o.funding_id
+              AND ua.deleted_at IS NULL
+          )`
+    : '';
+
   const { rows } = await pool.query(
     `
       SELECT
         recent.funding_id,
         recent.order_id,
+        recent.participated_at,
+        agg.my_amount,
         fp.title AS project_name,
         fp.alcohol_percentage AS abv,
         fp.thumbnail_url,
         fp.status AS funding_status,
+        fp.current_amount,
+        fp.goal_amount,
         fp.raw_materials,
         ba.brewery_name,
         u.nickname AS brewery_nickname,
@@ -2507,22 +2578,23 @@ const getParticipatedFundings = async (userId) => {
       FROM (
         SELECT DISTINCT ON (o.funding_id)
           o.funding_id,
-          o.order_id
+          o.order_id,
+          o.created_at AS participated_at
         FROM orders o
         WHERE o.user_id = $1
           AND o.order_status = 'PAID'
           AND o.funding_id IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1
-            FROM user_archives ua
-            WHERE ua.user_id = $1
-              AND ua.archive_type = 'FUNDING'
-              AND ua.funding_id = o.funding_id
-              AND ua.deleted_at IS NULL
-          )
+          ${archiveExclusion}
         ORDER BY o.funding_id, o.order_id DESC
       ) recent
       JOIN funding_projects fp ON fp.funding_id = recent.funding_id
+      LEFT JOIN LATERAL (
+        SELECT SUM(o2.total_amount) AS my_amount
+        FROM orders o2
+        WHERE o2.user_id = $1
+          AND o2.order_status = 'PAID'
+          AND o2.funding_id = recent.funding_id
+      ) agg ON TRUE
       LEFT JOIN users u ON u.user_id = fp.brewery_user_id
       LEFT JOIN LATERAL (
         SELECT brewery_name
@@ -2547,10 +2619,22 @@ const getParticipatedFundings = async (userId) => {
     [userId],
   );
 
+  const deliveryTrackingMap = await getDeliveryTrackingMap(
+    rows.map((row) => Number(row.funding_id)),
+  );
+
   return rows.map((row) => {
     const reviewId = row.review_id === null || row.review_id === undefined
       ? null
       : Number(row.review_id);
+    const currentAmount = Number(row.current_amount || 0);
+    const goalAmount = Number(row.goal_amount || 0);
+    const progressRate = goalAmount > 0
+      ? Math.round((currentAmount / goalAmount) * 1000) / 10
+      : 0;
+    const fundingStatus = row.funding_status;
+    const hasTrackingNumber = Boolean(deliveryTrackingMap.get(Number(row.funding_id)));
+    const canViewDelivery = fundingStatus === 'SUCCESS' && hasTrackingNumber;
 
     return {
       fundingId: Number(row.funding_id),
@@ -2561,20 +2645,134 @@ const getParticipatedFundings = async (userId) => {
       ingredients: buildIngredientsText(row.raw_materials),
       abv: toNullableNumber(row.abv),
       thumbnailUrl: row.thumbnail_url || null,
-      fundingStatus: row.funding_status,
+      fundingStatus,
+      myAmount: Number(row.my_amount || 0),
+      participatedAt: row.participated_at,
+      currentAmount,
+      goalAmount,
+      progressRate,
+      canViewDelivery,
+      deliveryStatus: hasTrackingNumber ? 'SHIPPED' : null,
+      hasTrackingNumber,
       hasReview: reviewId !== null,
       reviewId,
     };
   });
 };
 
-// ????????袁ㅻ쇀?????怨쀫뎐??????怨쀫탾??(GET /api/mypage/fundings/{fundingId}/review)
-// ???ㅼ뒧?戮レ땡??????????????袁ㅻ쇀??1?轅몄뫅??????????밸븶筌믡꺂??????????????嚥싲갭큔?댁옊???????????????뀀땽 ??꿔꺂?€〓뀥??????ш끽維뽳쭩??? ?????쇨덧?筌먦렜逾?null.
+// 단일 펀딩의 배송 정보(택배사·운송장)를 조회. 권한/부재 시 null로 graceful degrade.
+const getFundingDelivery = async (fundingId) => {
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT courier, tracking_number, created_at
+        FROM funding_deliveries
+        WHERE funding_id = $1
+        ORDER BY delivery_id DESC
+        LIMIT 1
+      `,
+      [fundingId],
+    );
+    return rows[0] || null;
+  } catch (error) {
+    // funding_deliveries 접근 불가 시 배송 정보 없이 진행
+    return null;
+  }
+};
+
+// 마이페이지 참여 펀딩 주문·배송 상세 (GET /api/mypage/fundings/orders/{orderId})
+// 본인 소유 주문 1건의 결제·배송 상세를 반환. 주문이 없거나 타인 주문이면 404.
+const getParticipatedFundingOrderDetail = async (userId, orderId) => {
+  const parsedOrderId = Number(orderId);
+
+  if (!Number.isInteger(parsedOrderId) || parsedOrderId <= 0) {
+    throw createServiceError(400, '유효하지 않은 주문 ID입니다.');
+  }
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        o.order_id,
+        o.funding_id,
+        o.total_amount,
+        o.shipping_fee,
+        o.order_status,
+        o.created_at AS ordered_at,
+        o.recipient_name,
+        o.recipient_phone,
+        o.shipping_address,
+        o.shipping_detail_address,
+        fp.title AS project_name,
+        ba.brewery_name,
+        u.nickname AS brewery_nickname,
+        opt.name AS reward_name
+      FROM orders o
+      JOIN funding_projects fp ON fp.funding_id = o.funding_id
+      LEFT JOIN users u ON u.user_id = fp.brewery_user_id
+      LEFT JOIN LATERAL (
+        SELECT brewery_name
+        FROM brewery_auth
+        WHERE user_id = fp.brewery_user_id
+        ORDER BY
+          CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
+          updated_at DESC,
+          application_id DESC
+        LIMIT 1
+      ) ba ON TRUE
+      LEFT JOIN funding_support_options opt ON opt.option_id = o.option_id
+      WHERE o.order_id = $1
+        AND o.user_id = $2
+      LIMIT 1
+    `,
+    [parsedOrderId, userId],
+  );
+
+  const order = rows[0];
+  if (!order) {
+    throw createServiceError(404, '주문을 찾을 수 없습니다.');
+  }
+
+  const delivery = await getFundingDelivery(order.funding_id);
+  const trackingNumber = delivery?.tracking_number || null;
+  const hasTrackingNumber = Boolean(trackingNumber);
+
+  const totalAmount = Number(order.total_amount || 0);
+  const shippingFee = Number(order.shipping_fee || 0);
+  const receiverAddress = [order.shipping_address, order.shipping_detail_address]
+    .filter((part) => typeof part === 'string' && part.trim().length > 0)
+    .join(' ') || null;
+
+  return {
+    orderId: Number(order.order_id),
+    fundingId: order.funding_id === null || order.funding_id === undefined
+      ? null
+      : Number(order.funding_id),
+    projectName: order.project_name,
+    breweryName: order.brewery_name || order.brewery_nickname || null,
+    rewardName: order.reward_name || null,
+    paidAmount: totalAmount - shippingFee,
+    shippingFee,
+    totalAmount,
+    orderedAt: order.ordered_at,
+    paymentStatus: order.order_status,
+    deliveryStatus: hasTrackingNumber ? 'SHIPPED' : null,
+    courierName: delivery?.courier || null,
+    trackingNumber,
+    shippedAt: hasTrackingNumber ? (delivery?.created_at || null) : null,
+    deliveredAt: null,
+    receiverName: order.recipient_name || null,
+    receiverPhone: order.recipient_phone || null,
+    receiverAddress,
+  };
+};
+
+// 펀딩 후기 불러오기 (GET /api/mypage/fundings/{fundingId}/review)
+// 본인이 작성한 후기 1건을 아카이브 작성 폼에 채울 수 있는 형태로 반환. 없으면 null.
 const getMyFundingReview = async (userId, fundingId) => {
   const parsedFundingId = Number(fundingId);
 
   if (!Number.isInteger(parsedFundingId) || parsedFundingId <= 0) {
-    throw createServiceError(400, '?????援???? ??? ????ID??????뽯쨦??');
+    throw createServiceError(400, '유효하지 않은 펀딩 ID입니다.');
   }
 
   const { rows } = await pool.query(
@@ -2610,6 +2808,217 @@ const getMyFundingReview = async (userId, fundingId) => {
   };
 };
 
+// ── 마이페이지 활동(관심 / 댓글 / Q&A) ──────────────────────────
+
+const ACTIVITY_DEFAULT_SIZE = 20;
+const ACTIVITY_MAX_SIZE = 100;
+
+const parseActivityPagination = (query = {}) => {
+  const rawPage = Number(query.page);
+  const rawSize = Number(query.size);
+  const page = Number.isInteger(rawPage) && rawPage >= 0 ? rawPage : 0;
+  const size = Number.isInteger(rawSize) && rawSize > 0
+    ? Math.min(rawSize, ACTIVITY_MAX_SIZE)
+    : ACTIVITY_DEFAULT_SIZE;
+  return { page, size, offset: page * size };
+};
+
+const normalizeActivityType = (type, allowed) => {
+  if (typeof type !== 'string') {
+    return null;
+  }
+  const upper = type.trim().toUpperCase();
+  return allowed.includes(upper) ? upper : null;
+};
+
+const buildActivityListResponse = (key, items, totalElements, page, size) => ({
+  [key]: items,
+  totalElements,
+  totalPages: size > 0 ? Math.ceil(totalElements / size) : 0,
+  currentPage: page,
+});
+
+// 마이페이지 활동 - 관심 목록 (GET /api/mypage/activity/interests)
+// 관심(찜) 대상을 RECIPE / POST / FUNDING로 통합. type 생략 시 전체.
+const getMyActivityInterests = async (userId, query = {}) => {
+  const { page, size, offset } = parseActivityPagination(query);
+  const type = normalizeActivityType(query.type, ['RECIPE', 'POST', 'FUNDING']);
+
+  const baseCte = `
+    WITH interest_items AS (
+      SELECT r.recipe_id AS target_id, 'RECIPE' AS target_type, r.title AS title,
+             r.summary AS summary, r.image_url AS thumbnail_url, ri.created_at AS interested_at
+      FROM recipe_interests ri
+      JOIN recipes r ON r.recipe_id = ri.recipe_id
+      WHERE ri.user_id = $1
+      UNION ALL
+      SELECT p.post_id, 'POST', p.title,
+             NULL, (
+               SELECT pi.image_url FROM post_images pi
+               WHERE pi.post_id = p.post_id
+               ORDER BY pi.sequence ASC, pi.image_id ASC
+               LIMIT 1
+             ), pl.created_at
+      FROM post_likes pl
+      JOIN posts p ON p.post_id = pl.post_id
+      WHERE pl.user_id = $1
+      UNION ALL
+      SELECT fp.funding_id, 'FUNDING', fp.title,
+             fp.summary, fp.thumbnail_url, fl.created_at
+      FROM funding_likes fl
+      JOIN funding_projects fp ON fp.funding_id = fl.funding_id
+      WHERE fl.user_id = $1
+    )
+  `;
+
+  const [{ rows: countRows }, { rows }] = await Promise.all([
+    pool.query(
+      `${baseCte}
+       SELECT COUNT(*) AS count FROM interest_items
+       WHERE ($2::text IS NULL OR target_type = $2)`,
+      [userId, type],
+    ),
+    pool.query(
+      `${baseCte}
+       SELECT * FROM interest_items
+       WHERE ($2::text IS NULL OR target_type = $2)
+       ORDER BY interested_at DESC
+       LIMIT $3 OFFSET $4`,
+      [userId, type, size, offset],
+    ),
+  ]);
+
+  const totalElements = Number(countRows[0]?.count || 0);
+  const interests = rows.map((row) => ({
+    targetId: Number(row.target_id),
+    targetType: row.target_type,
+    title: row.title,
+    summary: row.summary || null,
+    thumbnailUrl: row.thumbnail_url || null,
+    interestedAt: row.interested_at,
+  }));
+
+  return buildActivityListResponse('interests', interests, totalElements, page, size);
+};
+
+// 마이페이지 활동 - 댓글 목록 (GET /api/mypage/activity/comments)
+// 본인이 작성한 댓글을 RECIPE / POST로 통합. 원문이 삭제된 댓글은 JOIN으로 자연 제외.
+const getMyActivityComments = async (userId, query = {}) => {
+  const { page, size, offset } = parseActivityPagination(query);
+  const type = normalizeActivityType(query.type, ['RECIPE', 'POST']);
+
+  const baseCte = `
+    WITH comment_items AS (
+      SELECT rc.comment_id AS comment_id, r.recipe_id AS target_id, 'RECIPE' AS target_type,
+             r.title AS target_title, rc.content AS content,
+             rc.created_at AS created_at, rc.updated_at AS updated_at
+      FROM recipe_comments rc
+      JOIN recipes r ON r.recipe_id = rc.recipe_id
+      WHERE rc.user_id = $1
+      UNION ALL
+      SELECT pc.comment_id, p.post_id, 'POST',
+             p.title, pc.content,
+             pc.created_at, pc.updated_at
+      FROM post_comments pc
+      JOIN posts p ON p.post_id = pc.post_id
+      WHERE pc.user_id = $1
+    )
+  `;
+
+  const [{ rows: countRows }, { rows }] = await Promise.all([
+    pool.query(
+      `${baseCte}
+       SELECT COUNT(*) AS count FROM comment_items
+       WHERE ($2::text IS NULL OR target_type = $2)`,
+      [userId, type],
+    ),
+    pool.query(
+      `${baseCte}
+       SELECT * FROM comment_items
+       WHERE ($2::text IS NULL OR target_type = $2)
+       ORDER BY created_at DESC
+       LIMIT $3 OFFSET $4`,
+      [userId, type, size, offset],
+    ),
+  ]);
+
+  const totalElements = Number(countRows[0]?.count || 0);
+  const comments = rows.map((row) => ({
+    commentId: Number(row.comment_id),
+    targetId: Number(row.target_id),
+    targetType: row.target_type,
+    targetTitle: row.target_title,
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+
+  return buildActivityListResponse('comments', comments, totalElements, page, size);
+};
+
+// 마이페이지 활동 - Q&A 목록 (GET /api/mypage/activity/qna)
+// 본인이 작성한 펀딩 Q&A와 그에 달린(가장 최근) 답변을 함께 반환.
+const getMyActivityQna = async (userId, query = {}) => {
+  const { page, size, offset } = parseActivityPagination(query);
+
+  const [{ rows: countRows }, { rows }] = await Promise.all([
+    pool.query(
+      `
+        SELECT COUNT(*) AS count
+        FROM funding_questions fq
+        JOIN funding_projects fp ON fp.funding_id = fq.funding_id
+        WHERE fq.user_id = $1
+      `,
+      [userId],
+    ),
+    pool.query(
+      `
+        SELECT
+          fq.question_id,
+          fq.funding_id,
+          fp.title AS target_title,
+          fq.content AS question_content,
+          fq.created_at AS question_created_at,
+          rep.content AS answer_content,
+          rep.created_at AS answer_created_at
+        FROM funding_questions fq
+        JOIN funding_projects fp ON fp.funding_id = fq.funding_id
+        LEFT JOIN LATERAL (
+          SELECT content, created_at
+          FROM funding_question_replies
+          WHERE question_id = fq.question_id
+          ORDER BY created_at DESC, reply_id DESC
+          LIMIT 1
+        ) rep ON TRUE
+        WHERE fq.user_id = $1
+        ORDER BY fq.created_at DESC
+        LIMIT $2 OFFSET $3
+      `,
+      [userId, size, offset],
+    ),
+  ]);
+
+  const totalElements = Number(countRows[0]?.count || 0);
+  const qnas = rows.map((row) => {
+    const hasAnswer = row.answer_content !== null && row.answer_content !== undefined;
+
+    return {
+      questionId: Number(row.question_id),
+      targetId: Number(row.funding_id),
+      targetType: 'FUNDING',
+      targetTitle: row.target_title,
+      questionContent: row.question_content,
+      questionCreatedAt: row.question_created_at,
+      hasAnswer,
+      answerContent: hasAnswer ? row.answer_content : null,
+      answerCreatedAt: hasAnswer ? row.answer_created_at : null,
+      answerStatus: hasAnswer ? 'ANSWERED' : 'WAITING',
+    };
+  });
+
+  return buildActivityListResponse('qnas', qnas, totalElements, page, size);
+};
+
 module.exports = {
   getMyProfile,
   checkNickname,
@@ -2627,7 +3036,6 @@ module.exports = {
   grantEarnedBadges,
   getUserBadgeRows,
   getMySulbti,
-  getMySulbtiShareLink,
   saveMySulbti,
   convertAndSaveMySulbtiSurvey,
   findSulbtiTypeByCode,
@@ -2649,5 +3057,9 @@ module.exports = {
   validateArchivePayload,
   validateTagIds,
   getParticipatedFundings,
+  getParticipatedFundingOrderDetail,
   getMyFundingReview,
+  getMyActivityInterests,
+  getMyActivityComments,
+  getMyActivityQna,
 };

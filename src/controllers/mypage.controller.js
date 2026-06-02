@@ -22,7 +22,11 @@ const {
   normalizeArchiveFormPayload,
   normalizeArchiveDeleteImageIds,
   getParticipatedFundings,
+  getParticipatedFundingOrderDetail,
   getMyFundingReview,
+  getMyActivityInterests,
+  getMyActivityComments,
+  getMyActivityQna,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -552,7 +556,8 @@ const getParticipatedFundingsController = async (req, res) => {
   }
 
   try {
-    const data = await getParticipatedFundings(userId);
+    const excludeArchived = req.query.excludeArchived === 'true';
+    const data = await getParticipatedFundings(userId, { excludeArchived });
 
     return res.status(200).json({
       status: 200,
@@ -564,6 +569,30 @@ const getParticipatedFundingsController = async (req, res) => {
       res,
       error,
       '李몄뿬 ???紐⑸줉 議고쉶 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+    );
+  }
+};
+
+const getParticipatedFundingOrderDetailController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getParticipatedFundingOrderDetail(userId, req.params.orderId);
+
+    return res.status(200).json({
+      status: 200,
+      message: '주문/배송 상세 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return sendArchiveErrorResponse(
+      res,
+      error,
+      '주문/배송 상세 조회 중 서버 오류가 발생했습니다.',
     );
   }
 };
@@ -835,6 +864,63 @@ const changeMyPasswordController = async (req, res) => {
   }
 };
 
+const getMyActivityInterestsController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMyActivityInterests(userId, req.query);
+
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '관심 목록 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const getMyActivityCommentsController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMyActivityComments(userId, req.query);
+
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '댓글 목록 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const getMyActivityQnaController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMyActivityQna(userId, req.query);
+
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: 'Q&A 목록 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 module.exports = {
   getMyProfileController,
   getMyPageSummaryController,
@@ -853,7 +939,11 @@ module.exports = {
   deleteArchiveImageController,
   getArchiveTagsController,
   getParticipatedFundingsController,
+  getParticipatedFundingOrderDetailController,
   getMyFundingReviewController,
+  getMyActivityInterestsController,
+  getMyActivityCommentsController,
+  getMyActivityQnaController,
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,

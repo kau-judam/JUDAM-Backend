@@ -271,11 +271,11 @@ const createFundingEndedNotification = async (fundingId, options = {}) => {
   return createBreweryDashboardNotification({
     userId: funding.breweryUserId,
     type: 'FUNDING_ENDED',
-    title: '펀딩이 종료되었습니다.',
-    content: `'${funding.title}' 펀딩이 종료되었습니다.`,
+    title: '펀딩이 실패했습니다.',
+    content: `'${funding.title}' 펀딩이 목표 금액을 달성하지 못해 실패했습니다.`,
     linkUrl: `/funding/${funding.fundingId}`,
     imageUrl: funding.imageUrl,
-    eventKey: `funding:${funding.fundingId}:ended`,
+    eventKey: `funding:${funding.fundingId}:failed`,
     fundingId: funding.fundingId,
     metadata: {
       fundingId: funding.fundingId,
@@ -283,6 +283,7 @@ const createFundingEndedNotification = async (fundingId, options = {}) => {
       currentAmount: funding.currentAmount,
       targetAmount: funding.targetAmount,
       achievementRate: funding.achievementRate,
+      result: 'FAILED',
     },
     client: options.client,
   });
@@ -299,7 +300,7 @@ const createFundingSuccessNotification = async (fundingId, options = {}) => {
     userId: funding.breweryUserId,
     type: 'FUNDING_SUCCESS',
     title: '펀딩이 성공했습니다.',
-    content: `'${funding.title}' 펀딩이 목표 금액을 달성하여 성공했습니다.`,
+    content: `'${funding.title}' 펀딩이 목표 금액을 달성해 성공했습니다.`,
     linkUrl: `/funding/${funding.fundingId}`,
     imageUrl: funding.imageUrl,
     eventKey: `funding:${funding.fundingId}:success`,
@@ -310,6 +311,47 @@ const createFundingSuccessNotification = async (fundingId, options = {}) => {
       currentAmount: funding.currentAmount,
       targetAmount: funding.targetAmount,
       achievementRate: funding.achievementRate,
+      result: 'SUCCESS',
+    },
+    client: options.client,
+  });
+};
+
+const createSettlementCompletedNotification = async (fundingId, options = {}) => {
+  const funding = await getFundingNotificationSource(fundingId, options.client);
+
+  if (!funding || !funding.breweryUserId) {
+    return null;
+  }
+
+  const settledAt = options.settledAt || new Date().toISOString();
+  const settlementId = options.settlementId === undefined ? null : options.settlementId;
+  const settlementAmount = (
+    options.settlementAmount === undefined
+    || options.settlementAmount === null
+    || options.settlementAmount === ''
+  )
+    ? null
+    : Number(options.settlementAmount);
+  const payoutStatus = options.payoutStatus || 'COMPLETED';
+
+  return createBreweryDashboardNotification({
+    userId: funding.breweryUserId,
+    type: 'SETTLEMENT_COMPLETED',
+    title: '정산이 완료되었습니다.',
+    content: `'${funding.title}' 펀딩의 정산이 완료되었습니다.`,
+    linkUrl: options.linkUrl || `/funding/${funding.fundingId}`,
+    imageUrl: funding.imageUrl,
+    eventKey: `funding:${funding.fundingId}:settlement_completed`,
+    fundingId: funding.fundingId,
+    metadata: {
+      fundingId: funding.fundingId,
+      title: funding.title,
+      settlementId,
+      settlementAmount,
+      settledAt,
+      payoutStatus,
+      result: 'SETTLEMENT_COMPLETED',
     },
     client: options.client,
   });
@@ -390,5 +432,6 @@ module.exports = {
   createFundingProgressNotificationsForReachedThresholds,
   createFundingEndedNotification,
   createFundingSuccessNotification,
+  createSettlementCompletedNotification,
   createRecipePopularNotification,
 };
