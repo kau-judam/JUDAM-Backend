@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+﻿const bcrypt = require('bcrypt');
 const { getKakaoToken, getKakaoUserInfo } = require('../services/kakao.service');
 const {
   findUserByKakaoId,
@@ -95,7 +95,7 @@ const buildKakaoAuthUrl = (redirectUri, state) => {
   kakaoAuthUrl.searchParams.set('response_type', 'code');
   kakaoAuthUrl.searchParams.set('client_id', process.env.KAKAO_REST_API_KEY);
   kakaoAuthUrl.searchParams.set('scope', 'account_email profile_nickname profile_image');
-  // redirectUri??移댁뭅??媛쒕컻??肄섏넄???깅줉??媛믩쭔 ?뺤긽 ?숈옉?쒕떎.
+  // redirectUri??燁삳똻萸??揶쏆뮆而???꾩꼷????源낆쨯??揶쏅?彛??類ㅺ맒 ??덉삂??뺣뼄.
   kakaoAuthUrl.searchParams.set('redirect_uri', redirectUri);
   if (state) {
     kakaoAuthUrl.searchParams.set('state', state);
@@ -160,14 +160,14 @@ const checkEmail = async (req, res) => {
   if (!email) {
     return res.status(400).json({
       status: 400,
-      message: '?대찓?쇱쓣 ?낅젰?댁＜?몄슂.',
+      message: '??李??깆뱽 ??낆젾??곻폒?紐꾩뒄.',
     });
   }
 
   if (!EMAIL_PATTERN.test(email)) {
     return res.status(400).json({
       status: 400,
-      message: '?대찓???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
+      message: '??李???類ㅻ뻼????而?몴?? ??녿뮸??덈뼄.',
     });
   }
 
@@ -177,7 +177,7 @@ const checkEmail = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: isAvailable ? '?ъ슜 媛?ν븳 ?대찓?쇱엯?덈떎.' : '?대? ?ъ슜 以묒씤 ?대찓?쇱엯?덈떎.',
+      message: isAvailable ? '????揶쎛?館釉???李??깆뿯??덈뼄.' : '??? ????餓λ쵐????李??깆뿯??덈뼄.',
       data: {
         email,
         isAvailable,
@@ -186,7 +186,7 @@ const checkEmail = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '?대찓??以묐났 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '??李??餓λ쵎???類ㅼ뵥 餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -197,14 +197,14 @@ const checkNickname = async (req, res) => {
   if (!nickname) {
     return res.status(400).json({
       status: 400,
-      message: '?됰꽕?꾩쓣 ?낅젰?댁＜?몄슂.',
+      message: '??곌퐬?袁⑹뱽 ??낆젾??곻폒?紐꾩뒄.',
     });
   }
 
   if (!NICKNAME_PATTERN.test(nickname)) {
     return res.status(400).json({
       status: 400,
-      message: '?됰꽕?꾩? 2???댁긽 12???댄븯???쒓?, ?곷Ц, ?レ옄留??ъ슜?????덉뒿?덈떎.',
+      message: '??곌퐬?袁? 2????곴맒 12????꾨릭?????, ?怨론? ??ъ쁽筌??????????됰뮸??덈뼄.',
     });
   }
 
@@ -213,7 +213,7 @@ const checkNickname = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: isAvailable ? '?ъ슜 媛?ν븳 ?됰꽕?꾩엯?덈떎.' : '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
+      message: isAvailable ? '????揶쎛?館釉???곌퐬?袁⑹뿯??덈뼄.' : '??? ????餓λ쵐????곌퐬?袁⑹뿯??덈뼄.',
       data: {
         nickname,
         isAvailable,
@@ -222,7 +222,7 @@ const checkNickname = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '?됰꽕??以묐났 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '??곌퐬??餓λ쵎???類ㅼ뵥 餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -245,42 +245,42 @@ const signup = async (req, res) => {
   if (!email || !password || !nickname) {
     return res.status(400).json({
       status: 400,
-      message: 'email, password, nickname? ?꾩닔?낅땲??',
+      message: 'email, password, nickname?? ?袁⑸땾??낅빍??',
     });
   }
 
   if (!EMAIL_PATTERN.test(email)) {
     return res.status(400).json({
       status: 400,
-      message: '?대찓???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
+      message: '??李???類ㅻ뻼????而?몴?? ??녿뮸??덈뼄.',
     });
   }
 
   if (!PASSWORD_PATTERN.test(password)) {
     return res.status(400).json({
       status: 400,
-      message: '鍮꾨?踰덊샇??8???댁긽?대ŉ ?곷Ц ?臾몄옄, ?곷Ц ?뚮Ц?? ?レ옄瑜?紐⑤몢 ?ы븿?댁빞 ?⑸땲??',
+      message: '??쑬?甕곕뜇???8????곴맒??흭 ?怨론????얜챷?? ?怨론?????? ??ъ쁽??筌뤴뫀紐???釉??곷튊 ??몃빍??',
     });
   }
 
   if (!NICKNAME_PATTERN.test(nickname)) {
     return res.status(400).json({
       status: 400,
-      message: '?됰꽕?꾩? 2???댁긽 12???댄븯???쒓?, ?곷Ц, ?レ옄留??ъ슜?????덉뒿?덈떎.',
+      message: '??곌퐬?袁? 2????곴맒 12????꾨릭?????, ?怨론? ??ъ쁽筌??????????됰뮸??덈뼄.',
     });
   }
 
   if (!termsAgreed || !privacyAgreed) {
     return res.status(400).json({
       status: 400,
-      message: '?꾩닔 ?쎄????숈쓽?댁＜?몄슂.',
+      message: '?袁⑸땾 ???????덉벥??곻폒?紐꾩뒄.',
     });
   }
 
   if (!ALLOWED_SIGNUP_ROLES.has(role)) {
     return res.status(400).json({
       status: 400,
-      message: '?좏슚?섏? ?딆? ?ъ슜???좏삎?낅땲??',
+      message: '?醫륁뒞??? ??? ??????醫륁굨??낅빍??',
     });
   }
 
@@ -295,7 +295,7 @@ const signup = async (req, res) => {
       if (!phoneVerification.isValid) {
         return res.status(400).json({
           status: 400,
-          message: '?꾪솕踰덊샇 ?몄쬆???꾩슂?⑸땲??',
+          message: '?袁れ넅甕곕뜇???紐꾩쵄???袁⑹뒄??몃빍??',
         });
       }
 
@@ -307,7 +307,7 @@ const signup = async (req, res) => {
     if (existingUser) {
       return res.status(409).json({
         status: 409,
-        message: '?대? ?ъ슜 以묒씤 ?대찓?쇱엯?덈떎.',
+        message: '??? ????餓λ쵐????李??깆뿯??덈뼄.',
       });
     }
 
@@ -316,7 +316,7 @@ const signup = async (req, res) => {
     if (duplicatedNickname) {
       return res.status(409).json({
         status: 409,
-        message: '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
+        message: '??? ????餓λ쵐????곌퐬?袁⑹뿯??덈뼄.',
       });
     }
 
@@ -337,7 +337,7 @@ const signup = async (req, res) => {
 
     return res.status(201).json({
       status: 201,
-      message: '?뚯썝媛???깃났',
+      message: '???뜚揶쎛???源껊궗',
       data: {
         ...signupUser,
         accessToken,
@@ -355,7 +355,7 @@ const signup = async (req, res) => {
       if (existingUser) {
         return res.status(409).json({
           status: 409,
-          message: '?대? ?ъ슜 以묒씤 ?대찓?쇱엯?덈떎.',
+          message: '??? ????餓λ쵐????李??깆뿯??덈뼄.',
         });
       }
 
@@ -364,13 +364,13 @@ const signup = async (req, res) => {
       if (duplicatedNickname) {
         return res.status(409).json({
           status: 409,
-          message: '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
+          message: '??? ????餓λ쵐????곌퐬?袁⑹뿯??덈뼄.',
         });
       }
 
       return res.status(409).json({
         status: 409,
-        message: '?대? ?ъ슜 以묒씤 ?대찓?쇱엯?덈떎.',
+        message: '??? ????餓λ쵐????李??깆뿯??덈뼄.',
       });
     }
 
@@ -383,7 +383,7 @@ const signup = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '?뚯썝媛??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '???뜚揶쎛??餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -395,7 +395,7 @@ const login = async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({
       status: 400,
-      message: 'email, password???꾩닔?낅땲??',
+      message: 'email, password???袁⑸땾??낅빍??',
     });
   }
 
@@ -405,14 +405,14 @@ const login = async (req, res) => {
     if (!user) {
       return res.status(401).json({
         status: 401,
-        message: '?대찓???먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
+        message: '??李???癒?뮉 ??쑬?甕곕뜇?뉐첎? ??而?몴?? ??녿뮸??덈뼄.',
       });
     }
 
     if (user.provider !== 'local') {
       return res.status(400).json({
         status: 400,
-        message: '?뚯뀥 濡쒓렇?몄쑝濡?媛?낅맂 怨꾩젙?낅땲??',
+        message: '????嚥≪뮄??紐꾩몵嚥?揶쎛??낅쭆 ?④쑴???낅빍??',
       });
     }
 
@@ -421,7 +421,7 @@ const login = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         status: 401,
-        message: '?대찓???먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
+        message: '??李???癒?뮉 ??쑬?甕곕뜇?뉐첎? ??而?몴?? ??녿뮸??덈뼄.',
       });
     }
 
@@ -431,7 +431,7 @@ const login = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '濡쒓렇???깃났',
+      message: '嚥≪뮄????源껊궗',
       data: {
         accessToken,
         refreshToken,
@@ -441,7 +441,7 @@ const login = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '濡쒓렇??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '嚥≪뮄???餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -453,14 +453,14 @@ const updateMyRole = async (req, res) => {
   if (!userId) {
     return res.status(401).json({
       status: 401,
-      message: '?좏슚?섏? ?딄굅??留뚮즺???좏겙?낅땲??',
+      message: '?醫륁뒞??? ??꾧탢??筌띾슢利???醫뤾쿃??낅빍??',
     });
   }
 
   if (!ALLOWED_SIGNUP_ROLES.has(role)) {
     return res.status(400).json({
       status: 400,
-      message: '蹂寃쏀븷 ???녿뒗 ?ъ슜???좏삎?낅땲??',
+      message: '癰궰野껋?釉?????용뮉 ??????醫륁굨??낅빍??',
     });
   }
 
@@ -469,7 +469,7 @@ const updateMyRole = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?ъ슜???좏삎 蹂寃??깃났',
+      message: '??????醫륁굨 癰궰野??源껊궗',
       data: {
         user: mapLoginUserResponse(user),
       },
@@ -484,7 +484,7 @@ const updateMyRole = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '?ъ슜???좏삎 蹂寃?以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '??????醫륁굨 癰궰野?餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -495,7 +495,7 @@ const requestAuthPhoneVerificationController = async (req, res) => {
   if (phoneNumber === undefined || phoneNumber === null || normalizeString(phoneNumber) === '') {
     return res.status(400).json({
       status: 400,
-      message: '?꾪솕踰덊샇瑜??낅젰?댁＜?몄슂.',
+      message: '?袁れ넅甕곕뜇?뉒몴???낆젾??곻폒?紐꾩뒄.',
     });
   }
 
@@ -504,13 +504,13 @@ const requestAuthPhoneVerificationController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?꾪솕踰덊샇 ?몄쬆 ?붿껌???앹꽦?섏뿀?듬땲??',
+      message: '?袁れ넅甕곕뜇???紐꾩쵄 ?遺욧퍕????밴쉐??뤿???щ빍??',
       data,
     });
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       status: error.statusCode || 500,
-      message: error.message || '?꾪솕踰덊샇 ?몄쬆 ?붿껌 ?앹꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: error.message || '?袁れ넅甕곕뜇???紐꾩쵄 ?遺욧퍕 ??밴쉐 餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -522,14 +522,14 @@ const confirmAuthPhoneVerificationController = async (req, res) => {
   if (phoneNumber === undefined || phoneNumber === null || normalizeString(phoneNumber) === '') {
     return res.status(400).json({
       status: 400,
-      message: '?꾪솕踰덊샇瑜??낅젰?댁＜?몄슂.',
+      message: '?袁れ넅甕곕뜇?뉒몴???낆젾??곻폒?紐꾩뒄.',
     });
   }
 
   if (!verificationCode) {
     return res.status(400).json({
       status: 400,
-      message: '?몄쬆踰덊샇瑜??낅젰?댁＜?몄슂.',
+      message: '?紐꾩쵄甕곕뜇?뉒몴???낆젾??곻폒?紐꾩뒄.',
     });
   }
 
@@ -538,13 +538,13 @@ const confirmAuthPhoneVerificationController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?꾪솕踰덊샇 ?몄쬆 ?깃났',
+      message: '?袁れ넅甕곕뜇???紐꾩쵄 ?源껊궗',
       data,
     });
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       status: error.statusCode || 500,
-      message: error.message || '?꾪솕踰덊샇 ?몄쬆 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: error.message || '?袁れ넅甕곕뜇???紐꾩쵄 ?類ㅼ뵥 餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -555,14 +555,14 @@ const requestPasswordReset = async (req, res) => {
   if (!email) {
     return res.status(400).json({
       status: 400,
-      message: '이메일을 입력해주세요.',
+      message: '?대찓?쇱쓣 ?낅젰?댁＜?몄슂.',
     });
   }
 
   if (!EMAIL_PATTERN.test(email)) {
     return res.status(400).json({
       status: 400,
-      message: '이메일 형식이 올바르지 않습니다.',
+      message: '?대찓???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
@@ -571,7 +571,7 @@ const requestPasswordReset = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '비밀번호 재설정 인증번호가 이메일로 발송되었습니다.',
+      message: '鍮꾨?踰덊샇 ?ъ꽕???몄쬆踰덊샇媛 ?대찓?쇰줈 諛쒖넚?섏뿀?듬땲??',
       data: {
         email,
         expiresInMinutes: PASSWORD_RESET_EXPIRES_IN_MINUTES,
@@ -582,7 +582,7 @@ const requestPasswordReset = async (req, res) => {
 
     return res.status(statusCode).json({
       status: statusCode,
-      message: error.message || '비밀번호 재설정 인증번호 발송 중 서버 오류가 발생했습니다.',
+      message: error.message || '鍮꾨?踰덊샇 ?ъ꽕???몄쬆踰덊샇 諛쒖넚 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -593,21 +593,21 @@ const verifyPasswordReset = async (req, res) => {
   if (!email) {
     return res.status(400).json({
       status: 400,
-      message: '이메일을 입력해주세요.',
+      message: '?대찓?쇱쓣 ?낅젰?댁＜?몄슂.',
     });
   }
 
   if (!EMAIL_PATTERN.test(email)) {
     return res.status(400).json({
       status: 400,
-      message: '이메일 형식이 올바르지 않습니다.',
+      message: '?대찓???뺤떇???щ컮瑜댁? ?딆뒿?덈떎.',
     });
   }
 
   if (!/^\d{6}$/.test(verificationCode)) {
     return res.status(400).json({
       status: 400,
-      message: '인증번호가 올바르지 않거나 만료되었습니다.',
+      message: '?몄쬆踰덊샇媛 ?щ컮瑜댁? ?딄굅??留뚮즺?섏뿀?듬땲??',
     });
   }
 
@@ -616,7 +616,7 @@ const verifyPasswordReset = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '인증번호 확인 성공',
+      message: '?몄쬆踰덊샇 ?뺤씤 ?깃났',
       data: {
         passwordResetToken: passwordReset.passwordResetToken,
       },
@@ -626,7 +626,7 @@ const verifyPasswordReset = async (req, res) => {
 
     return res.status(statusCode).json({
       status: statusCode,
-      message: error.message || '인증번호 확인 중 서버 오류가 발생했습니다.',
+      message: error.message || '?몄쬆踰덊샇 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -640,21 +640,21 @@ const resetPassword = async (req, res) => {
   if (!passwordResetToken) {
     return res.status(400).json({
       status: 400,
-      message: '비밀번호 재설정 토큰이 필요합니다.',
+      message: '鍮꾨?踰덊샇 ?ъ꽕???좏겙???꾩슂?⑸땲??',
     });
   }
 
   if (newPassword !== newPasswordConfirm) {
     return res.status(400).json({
       status: 400,
-      message: '새 비밀번호와 비밀번호 확인이 일치하지 않습니다.',
+      message: '??鍮꾨?踰덊샇? 鍮꾨?踰덊샇 ?뺤씤???쇱튂?섏? ?딆뒿?덈떎.',
     });
   }
 
   if (!PASSWORD_PATTERN.test(newPassword)) {
     return res.status(400).json({
       status: 400,
-      message: '비밀번호는 8자 이상이며 영문 대문자, 영문 소문자, 숫자를 모두 포함해야 합니다.',
+      message: '鍮꾨?踰덊샇??8???댁긽?대ŉ ?곷Ц ?臾몄옄, ?곷Ц ?뚮Ц?? ?レ옄瑜?紐⑤몢 ?ы븿?댁빞 ?⑸땲??',
     });
   }
 
@@ -663,14 +663,14 @@ const resetPassword = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '비밀번호가 성공적으로 변경되었습니다.',
+      message: '鍮꾨?踰덊샇媛 ?깃났?곸쑝濡?蹂寃쎈릺?덉뒿?덈떎.',
     });
   } catch (error) {
     const statusCode = error.statusCode || 500;
 
     return res.status(statusCode).json({
       status: statusCode,
-      message: error.message || '비밀번호 재설정 중 서버 오류가 발생했습니다.',
+      message: error.message || '鍮꾨?踰덊샇 ?ъ꽕??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
     });
   }
 };
@@ -687,7 +687,7 @@ const kakaoLoginUrl = (req, res) => {
   if (!process.env.KAKAO_REST_API_KEY || !redirectUri) {
     return res.status(500).json({
       status: 500,
-      message: '?쒕쾭 ?대? ?ㅻ쪟',
+      message: '??뺤쒔 ??? ??살첒',
     });
   }
 
@@ -695,7 +695,7 @@ const kakaoLoginUrl = (req, res) => {
 
   return res.status(200).json({
     status: 200,
-    message: '移댁뭅??濡쒓렇??URL 議고쉶 ?깃났',
+    message: '燁삳똻萸??嚥≪뮄???URL 鈺곌퀬???源껊궗',
     data: {
       kakaoLoginUrl: kakaoLoginUrlValue,
       url: kakaoLoginUrlValue,
@@ -758,7 +758,7 @@ const getExistingKakaoUser = async (kakaoProfile) => {
 const sendKakaoEmailDuplicateResponse = (res, email, provider = 'local') => (
   res.status(409).json({
     status: 409,
-    message: '以묐났???대찓?쇰줈 媛?낅맂 湲곕줉???덉뒿?덈떎.',
+    message: '餓λ쵎?????李??곗쨮 揶쎛??낅쭆 疫꿸퀡以????됰뮸??덈뼄.',
     data: {
       emailAlreadyExists: true,
       provider,
@@ -807,7 +807,7 @@ const kakaoLoginByCode = async (req, res) => {
   if (!code) {
     return res.status(400).json({
       status: 400,
-      message: '移댁뭅???멸? 肄붾뱶媛 ?꾩슂?⑸땲??',
+      message: '燁삳똻萸???硫? ?꾨뗀諭뜹첎? ?袁⑹뒄??몃빍??',
     });
   }
 
@@ -822,7 +822,7 @@ const kakaoLoginByCode = async (req, res) => {
 
       return res.status(401).json({
         status: 401,
-        message: '移댁뭅???몄쬆???ㅽ뙣?덉뒿?덈떎.',
+        message: '燁삳똻萸???紐꾩쵄????쎈솭??됰뮸??덈뼄.',
       });
     }
 
@@ -832,7 +832,7 @@ const kakaoLoginByCode = async (req, res) => {
     } catch (error) {
       return res.status(502).json({
         status: 502,
-        message: '移댁뭅???ъ슜???뺣낫 議고쉶???ㅽ뙣?덉뒿?덈떎.',
+        message: '燁삳똻萸????????類ｋ궖 鈺곌퀬?????쎈솭??됰뮸??덈뼄.',
       });
     }
 
@@ -853,7 +853,7 @@ const kakaoLoginByCode = async (req, res) => {
 
       return res.status(200).json({
         status: 200,
-        message: '移댁뭅???뚯썝媛??異붽? ?뺣낫媛 ?꾩슂?⑸땲??',
+        message: '燁삳똻萸?????뜚揶쎛???곕떽? ?類ｋ궖揶쎛 ?袁⑹뒄??몃빍??',
         data: buildKakaoSignupRequiredData(signupProfile, kakaoSignupToken),
       });
     }
@@ -864,7 +864,7 @@ const kakaoLoginByCode = async (req, res) => {
 
       return res.status(200).json({
         status: 200,
-        message: '移댁뭅???뚯썝媛??異붽? ?뺣낫媛 ?꾩슂?⑸땲??',
+        message: '燁삳똻萸?????뜚揶쎛???곕떽? ?類ｋ궖揶쎛 ?袁⑹뒄??몃빍??',
         data: buildKakaoSignupRequiredData(signupProfile, kakaoSignupToken, {
           reason: 'INCOMPLETE_PROFILE',
           existingUserId: String(existingUser.user_id),
@@ -878,7 +878,7 @@ const kakaoLoginByCode = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '移댁뭅??濡쒓렇???깃났',
+      message: '燁삳똻萸??嚥≪뮄????源껊궗',
       data: {
         isNewUser: false,
         signupRequired: false,
@@ -899,20 +899,20 @@ const kakaoLoginByCode = async (req, res) => {
     if (error.response?.status === 401) {
       return res.status(401).json({
         status: 401,
-        message: '移댁뭅???몄쬆???ㅽ뙣?덉뒿?덈떎.',
+        message: '燁삳똻萸???紐꾩쵄????쎈솭??됰뮸??덈뼄.',
       });
     }
 
     if (error.response?.config?.url?.includes('/v2/user/me')) {
       return res.status(502).json({
         status: 502,
-        message: '移댁뭅???ъ슜???뺣낫 議고쉶???ㅽ뙣?덉뒿?덈떎.',
+        message: '燁삳똻萸????????類ｋ궖 鈺곌퀬?????쎈솭??됰뮸??덈뼄.',
       });
     }
 
     return res.status(500).json({
       status: 500,
-      message: '?쒕쾭 ?대? ?ㅻ쪟',
+      message: '??뺤쒔 ??? ??살첒',
     });
   }
 };
@@ -935,35 +935,35 @@ const completeKakaoSignup = async (req, res) => {
   if (!kakaoSignupToken) {
     return res.status(400).json({
       status: 400,
-      message: '移댁뭅???뚯썝媛???좏겙???꾩슂?⑸땲??',
+      message: '燁삳똻萸?????뜚揶쎛???醫뤾쿃???袁⑹뒄??몃빍??',
     });
   }
 
   if (!nickname) {
     return res.status(400).json({
       status: 400,
-      message: '?됰꽕?꾩쓣 ?낅젰?댁＜?몄슂.',
+      message: '??곌퐬?袁⑹뱽 ??낆젾??곻폒?紐꾩뒄.',
     });
   }
 
   if (!NICKNAME_PATTERN.test(nickname)) {
     return res.status(400).json({
       status: 400,
-      message: '?됰꽕?꾩? 2???댁긽 12???댄븯???쒓?, ?곷Ц, ?レ옄留??ъ슜?????덉뒿?덈떎.',
+      message: '??곌퐬?袁? 2????곴맒 12????꾨릭?????, ?怨론? ??ъ쁽筌??????????됰뮸??덈뼄.',
     });
   }
 
   if (!termsAgreed || !privacyAgreed) {
     return res.status(400).json({
       status: 400,
-      message: '?꾩닔 ?쎄????숈쓽?댁＜?몄슂.',
+      message: '?袁⑸땾 ???????덉벥??곻폒?紐꾩뒄.',
     });
   }
 
   if (!ALLOWED_SIGNUP_ROLES.has(role)) {
     return res.status(400).json({
       status: 400,
-      message: '?좏슚?섏? ?딆? ?ъ슜???좏삎?낅땲??',
+      message: '?醫륁뒞??? ??? ??????醫륁굨??낅빍??',
     });
   }
 
@@ -979,7 +979,7 @@ const completeKakaoSignup = async (req, res) => {
     if (requestedEmail && requestedEmail !== kakaoEmail) {
       return res.status(400).json({
         status: 400,
-        message: '移댁뭅???대찓???뺣낫媛 ?쇱튂?섏? ?딆뒿?덈떎.',
+        message: '燁삳똻萸????李???類ｋ궖揶쎛 ??깊뒄??? ??녿뮸??덈뼄.',
       });
     }
 
@@ -989,7 +989,7 @@ const completeKakaoSignup = async (req, res) => {
       if (!phoneVerification.isValid) {
         return res.status(400).json({
           status: 400,
-          message: '?꾪솕踰덊샇 ?몄쬆???꾩슂?⑸땲??',
+          message: '?袁れ넅甕곕뜇???紐꾩쵄???袁⑹뒄??몃빍??',
         });
       }
 
@@ -1014,14 +1014,14 @@ const completeKakaoSignup = async (req, res) => {
     ) {
       return res.status(409).json({
         status: 409,
-        message: '?대? 媛?낅맂 移댁뭅??怨꾩젙?낅땲??',
+        message: '??? 揶쎛??낅쭆 燁삳똻萸???④쑴???낅빍??',
       });
     }
 
     if (duplicatedNickname) {
       return res.status(409).json({
         status: 409,
-        message: '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
+        message: '??? ????餓λ쵐????곌퐬?袁⑹뿯??덈뼄.',
       });
     }
 
@@ -1047,7 +1047,7 @@ const completeKakaoSignup = async (req, res) => {
 
     return res.status(201).json({
       status: 201,
-      message: '移댁뭅???뚯썝媛???깃났',
+      message: '燁삳똻萸?????뜚揶쎛???源껊궗',
       data: {
         accessToken,
         refreshToken,
@@ -1061,7 +1061,7 @@ const completeKakaoSignup = async (req, res) => {
     if (error.statusCode === 401) {
       return res.status(400).json({
         status: 400,
-        message: '移댁뭅???뚯썝媛???뺣낫媛 ?좏슚?섏? ?딆뒿?덈떎.',
+        message: '燁삳똻萸?????뜚揶쎛???類ｋ궖揶쎛 ?醫륁뒞??? ??녿뮸??덈뼄.',
       });
     }
 
@@ -1075,13 +1075,13 @@ const completeKakaoSignup = async (req, res) => {
     if (error.code === '23505') {
       return res.status(409).json({
         status: 409,
-        message: '?대? 媛?낅맂 移댁뭅??怨꾩젙?낅땲??',
+        message: '??? 揶쎛??낅쭆 燁삳똻萸???④쑴???낅빍??',
       });
     }
 
     return res.status(500).json({
       status: 500,
-      message: '移댁뭅???뚯썝媛??以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '燁삳똻萸?????뜚揶쎛??餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -1092,7 +1092,7 @@ const refreshAccessToken = async (req, res) => {
   if (!refreshToken) {
     return res.status(401).json({
       status: 401,
-      message: '?좏슚?섏? ?딄굅??留뚮즺??由ы봽?덉떆 ?좏겙?낅땲??',
+      message: '?醫륁뒞??? ??꾧탢??筌띾슢利???귐뗫늄??됰뻻 ?醫뤾쿃??낅빍??',
     });
   }
 
@@ -1101,7 +1101,7 @@ const refreshAccessToken = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?좏겙 ?щ컻湲??깃났',
+      message: '?醫뤾쿃 ??而삥묾??源껊궗',
       data: {
         accessToken,
         refreshToken,
@@ -1111,13 +1111,13 @@ const refreshAccessToken = async (req, res) => {
     if (error.statusCode === 401) {
       return res.status(401).json({
         status: 401,
-        message: '?좏슚?섏? ?딄굅??留뚮즺??由ы봽?덉떆 ?좏겙?낅땲??',
+        message: '?醫륁뒞??? ??꾧탢??筌띾슢利???귐뗫늄??됰뻻 ?醫뤾쿃??낅빍??',
       });
     }
 
     return res.status(500).json({
       status: 500,
-      message: '?좏겙 ?щ컻湲?以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '?醫뤾쿃 ??而삥묾?餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
@@ -1132,12 +1132,12 @@ const logout = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '濡쒓렇?꾩썐 ?깃났',
+      message: '嚥≪뮄??袁⑹뜍 ?源껊궗',
     });
   } catch (error) {
     return res.status(500).json({
       status: 500,
-      message: '濡쒓렇?꾩썐 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '嚥≪뮄??袁⑹뜍 餓???뺤쒔 ??살첒揶쎛 獄쏆뮇源??됰뮸??덈뼄.',
     });
   }
 };
