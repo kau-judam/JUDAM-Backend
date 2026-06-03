@@ -843,6 +843,77 @@ const mapFundingImageUrls = (imageUrls = []) =>
     displayOrder: index + 1,
   }));
 
+const normalizePublicProfileText = (value) => {
+  const text = toTrimmedString(value);
+  return text || null;
+};
+
+const toNullableProfileNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+};
+
+const buildPublicBreweryProfile = (row = {}) => {
+  const breweryUserId = row.brewery_user_id === null || row.brewery_user_id === undefined
+    ? null
+    : Number(row.brewery_user_id);
+  const breweryName = normalizePublicProfileText(
+    row.brewery_name ||
+      row.profile_brewery_name ||
+      row.auth_brewery_name ||
+      row.brewery_nickname
+  );
+  const profileImageUrl = normalizePublicImageUrl(row.profile_image_url) || null;
+  const oneLineIntroduction = normalizePublicProfileText(row.one_line_introduction);
+  const shortIntroduction = normalizePublicProfileText(row.short_introduction || oneLineIntroduction);
+  const brandStory = normalizePublicProfileText(row.brand_story);
+  const history = normalizePublicProfileText(row.history);
+  const description = shortIntroduction || oneLineIntroduction || brandStory || history;
+  const establishedYear = toNullableProfileNumber(row.established_year);
+  const businessRegistrationNumber = normalizePublicProfileText(row.business_registration_number);
+  const representativeName = normalizePublicProfileText(row.representative_name);
+  const address = normalizePublicProfileText(row.profile_address || row.auth_location);
+  const businessAddressDetail = normalizePublicProfileText(row.auth_business_address_detail);
+
+  return {
+    breweryUserId,
+    breweryName,
+    mainName: breweryName,
+    profileImageUrl,
+    profile_image_url: profileImageUrl,
+    profileImage: profileImageUrl,
+    profile_image: profileImageUrl,
+    imageUrl: profileImageUrl,
+    image_url: profileImageUrl,
+    oneLineIntroduction,
+    one_line_introduction: oneLineIntroduction,
+    shortIntroduction,
+    short_introduction: shortIntroduction,
+    creatorIntroduction: description,
+    creator_introduction: description,
+    breweryBio: description,
+    brewery_bio: description,
+    introduction: description,
+    bio: description,
+    description,
+    brandStory,
+    brand_story: brandStory,
+    history,
+    establishedYear,
+    established_year: establishedYear,
+    businessRegistrationNumber,
+    business_registration_number: businessRegistrationNumber,
+    representativeName,
+    representative_name: representativeName,
+    address,
+    businessAddress: address,
+    business_address: address,
+    businessAddressDetail,
+    business_address_detail: businessAddressDetail,
+  };
+};
+
 const extractFundingAiImageFlavorTags = (value) => {
   const parsed = parseJsonFieldPreserveText(value, null);
 
@@ -6710,6 +6781,7 @@ const getFundingDetail = async (req, res) => {
       `
       SELECT
         fp.funding_id,
+        fp.brewery_user_id,
         fp.title,
         fp.description,
         COALESCE(fd.summary, fp.summary) AS summary,
@@ -6754,29 +6826,21 @@ const getFundingDetail = async (req, res) => {
         COALESCE(NULLIF(fd.exchange_policy, ''), NULLIF(fp.exchange_policy, '')) AS exchange_policy,
         fd.adult_verification_notice,
         fd.risk_notice,
-        fd.brewery_name AS draft_brewery_name,
-        fd.creator_name,
-        fd.profile_image_url,
-        COALESCE(NULLIF(fd.creator_introduction, ''), NULLIF(fp.creator_introduction, '')) AS creator_introduction,
-        fd.representative_name,
-        COALESCE(NULLIF(fd.business_registration_number, ''), ba.license_number) AS business_registration_number,
-        COALESCE(NULLIF(fd.business_address, ''), ba.location) AS business_address,
-        COALESCE(NULLIF(fd.business_address_detail, ''), ba.business_address_detail) AS business_address_detail,
-        fd.contact_email,
-        COALESCE(NULLIF(fd.contact_phone, ''), ba.phone_number) AS contact_phone,
-        fd.bank_name,
-        fd.account_number,
-        fd.account_holder,
-        fd.business_type,
-        fd.business_name,
-        fd.business_category,
-        fd.business_item,
-        fd.tax_email,
-        fd.phone_verified,
-        fd.account_verified,
-        fd.identity_document_url,
-        COALESCE(NULLIF(fd.business_registration_file_url, ''), ba.document_url) AS business_registration_file_url,
-        COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
+        COALESCE(NULLIF(bp.brewery_name, ''), ba.brewery_name, u.nickname) AS brewery_name,
+        bp.brewery_name AS profile_brewery_name,
+        ba.brewery_name AS auth_brewery_name,
+        u.nickname AS brewery_nickname,
+        bp.profile_image_url,
+        bp.one_line_introduction,
+        bp.short_introduction,
+        bp.brand_story,
+        bp.history,
+        bp.established_year,
+        ba.license_number AS business_registration_number,
+        bp.representative_name,
+        bp.address AS profile_address,
+        ba.location AS auth_location,
+        ba.business_address_detail AS auth_business_address_detail,
         r.title AS recipe_title,
         COALESCE(NULLIF(fd.thumbnail_url, ''), NULLIF(fp.thumbnail_url, ''), r.image_url) AS thumbnail_url,
         COALESCE(like_counts.like_count, 0) AS like_count,
@@ -6789,6 +6853,7 @@ const getFundingDetail = async (req, res) => {
       FROM funding_projects fp
       JOIN recipes r ON r.recipe_id = fp.recipe_id
       JOIN users u ON u.user_id = fp.brewery_user_id
+      LEFT JOIN brewery_profiles bp ON bp.user_id = fp.brewery_user_id
       LEFT JOIN LATERAL (
         SELECT *
         FROM funding_drafts fd_inner
@@ -6955,6 +7020,7 @@ const getFundingDetail = async (req, res) => {
     const budgetPlan = parseOriginalTextField(funding.budget_plan);
     const schedulePlan = parseOriginalTextField(funding.schedule_plan);
     const projectPolicy = selectProjectPolicyText(funding.refund_policy, funding.exchange_policy);
+    const breweryProfile = buildPublicBreweryProfile(funding);
     const tasteProfile = taste
       ? buildTasteProfileResponse({
           ...taste,
@@ -6985,7 +7051,7 @@ const getFundingDetail = async (req, res) => {
       imageUrls: imageFields.imageUrls,
       allImageUrls: imageFields.allImageUrls,
       images: mapFundingImageUrls(imageFields.allImageUrls),
-      breweryName: breweryInfo.breweryName,
+      breweryName: breweryProfile.breweryName,
       status: funding.status,
       currentAmount: Number(funding.current_amount),
       targetAmount: Number(funding.target_amount),
@@ -6999,9 +7065,9 @@ const getFundingDetail = async (req, res) => {
       volume: funding.volume,
       alcoholPercentage: funding.alcohol_percentage,
       bottleSize: funding.bottle_size,
-      businessAddress: breweryInfo.businessAddress,
-      breweryAddress: breweryInfo.businessAddress,
-      breweryLocation: breweryInfo.businessAddress,
+      businessAddress: breweryProfile.businessAddress,
+      breweryAddress: breweryProfile.businessAddress,
+      breweryLocation: breweryProfile.businessAddress,
       matchRate: matchScore,
       sulbtiMatchScore: matchScore,
       matchScore,
@@ -7021,10 +7087,10 @@ const getFundingDetail = async (req, res) => {
         subIngredients,
         ingredients,
         rawMaterials,
-        businessNumber: breweryInfo.businessRegistrationNumber,
-        licenseNumber: breweryInfo.businessRegistrationNumber,
-        businessAddress: breweryInfo.businessAddress,
-        businessAddressDetail: breweryInfo.businessAddressDetail,
+        businessNumber: breweryProfile.businessRegistrationNumber,
+        licenseNumber: breweryProfile.businessRegistrationNumber,
+        businessAddress: breweryProfile.businessAddress,
+        businessAddressDetail: breweryProfile.businessAddressDetail,
         notice: funding.adult_verification_notice || funding.risk_notice || null,
         policy: projectPolicy,
         refundPolicy: projectPolicy,
@@ -7045,33 +7111,8 @@ const getFundingDetail = async (req, res) => {
         projectPolicy,
         ...PLAN_GUIDES,
       },
-      breweryInfo: {
-        breweryName: breweryInfo.breweryName,
-        creatorName: funding.creator_name,
-        profileImageUrl: funding.profile_image_url,
-        creatorIntroduction: funding.creator_introduction,
-        breweryBio: funding.creator_introduction,
-        representativeName: funding.representative_name,
-        businessRegistrationNumber: funding.business_registration_number,
-        businessAddress: breweryInfo.businessAddress,
-        businessAddressDetail: breweryInfo.businessAddressDetail,
-        breweryLocation: breweryInfo.businessAddress,
-        breweryAddress: breweryInfo.businessAddress,
-        contactEmail: funding.contact_email,
-        contactPhone: funding.contact_phone,
-        bankName: funding.bank_name,
-        accountNumber: funding.account_number,
-        accountHolder: funding.account_holder,
-        businessType: funding.business_type,
-        businessName: funding.business_name,
-        businessCategory: funding.business_category,
-        businessItem: funding.business_item,
-        taxEmail: funding.tax_email,
-        phoneVerified: funding.phone_verified,
-        accountVerified: funding.account_verified,
-        identityDocumentUrl: funding.identity_document_url,
-        businessRegistrationFileUrl: funding.business_registration_file_url,
-      },
+      breweryInfo: breweryProfile,
+      breweryProfile,
       notices: {
         refundPolicy: projectPolicy,
         exchangePolicy: projectPolicy,
@@ -7123,6 +7164,7 @@ const getFundingIntro = async (req, res) => {
       `
       SELECT
         fp.funding_id,
+        fp.brewery_user_id,
         fp.title,
         fp.description,
         fp.summary,
@@ -7139,9 +7181,36 @@ const getFundingIntro = async (req, res) => {
         r.content AS recipe_content,
         r.concept,
         r.main_ingredient AS recipe_main_ingredient,
-        r.ai_sub_ingredient AS recipe_sub_ingredient
+        r.ai_sub_ingredient AS recipe_sub_ingredient,
+        COALESCE(NULLIF(bp.brewery_name, ''), ba.brewery_name, u.nickname) AS brewery_name,
+        bp.brewery_name AS profile_brewery_name,
+        ba.brewery_name AS auth_brewery_name,
+        u.nickname AS brewery_nickname,
+        bp.profile_image_url,
+        bp.one_line_introduction,
+        bp.short_introduction,
+        bp.brand_story,
+        bp.history,
+        bp.established_year,
+        ba.license_number AS business_registration_number,
+        bp.representative_name,
+        bp.address AS profile_address,
+        ba.location AS auth_location,
+        ba.business_address_detail AS auth_business_address_detail
       FROM funding_projects fp
       LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
+      JOIN users u ON u.user_id = fp.brewery_user_id
+      LEFT JOIN brewery_profiles bp ON bp.user_id = fp.brewery_user_id
+      LEFT JOIN LATERAL (
+        SELECT brewery_name, location, business_address_detail, license_number
+        FROM brewery_auth
+        WHERE user_id = fp.brewery_user_id
+        ORDER BY
+          CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
+          updated_at DESC,
+          application_id DESC
+        LIMIT 1
+      ) ba ON TRUE
       LEFT JOIN LATERAL (
         SELECT
           thumbnail_url,
@@ -7183,9 +7252,12 @@ const getFundingIntro = async (req, res) => {
     const budgetPlan = parseOriginalTextField(funding.budget_plan);
     const schedulePlan = parseOriginalTextField(funding.schedule_plan);
     const projectPolicy = selectProjectPolicyText(funding.refund_policy, funding.exchange_policy);
+    const breweryProfile = buildPublicBreweryProfile(funding);
 
     return res.status(200).json({
       fundingId: Number(funding.funding_id),
+      breweryUserId: breweryProfile.breweryUserId,
+      breweryName: breweryProfile.breweryName,
       title: funding.title,
       introduction: funding.draft_introduction || funding.summary || funding.description || funding.recipe_content || '',
       story: funding.description || funding.recipe_content || funding.concept || '',
@@ -7208,6 +7280,8 @@ const getFundingIntro = async (req, res) => {
       imageUrls: imageFields.imageUrls,
       allImageUrls: imageFields.allImageUrls,
       images: mapFundingImageUrls(imageFields.allImageUrls),
+      breweryInfo: breweryProfile,
+      breweryProfile,
     });
   } catch (error) {
     return res.status(500).json({
