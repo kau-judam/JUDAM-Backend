@@ -2634,7 +2634,9 @@ const getParticipatedFundings = async (userId, options = {}) => {
       : 0;
     const fundingStatus = row.funding_status;
     const hasTrackingNumber = Boolean(deliveryTrackingMap.get(Number(row.funding_id)));
-    const canViewDelivery = fundingStatus === 'SUCCESS' && hasTrackingNumber;
+    // FE 정책: 펀딩 성공(SUCCESS)이면 배송 내역 확인 버튼 노출(참여 펀딩은 항상 주문 존재).
+    // 운송장 유무는 hasTrackingNumber로 별도 표시하므로 canViewDelivery 조건에서 제외.
+    const canViewDelivery = fundingStatus === 'SUCCESS';
 
     return {
       fundingId: Number(row.funding_id),
