@@ -970,4 +970,7 @@ module.exports = {
   cancelFundingProject,
   settleExpiredFundingsManually,
   completeFundingSettlement,
+  getFundingReportsForAdmin,
+  getFundingReportDetailForAdmin,
+  updateFundingReportStatusForAdmin,
 };
