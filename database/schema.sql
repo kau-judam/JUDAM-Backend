@@ -282,6 +282,9 @@ CREATE TABLE IF NOT EXISTS funding_reports (
   reason VARCHAR(50) NOT NULL,
   content TEXT,
   status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+  admin_memo TEXT,
+  reviewed_at TIMESTAMP,
+  reviewed_by BIGINT,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_funding_reports_funding
@@ -290,6 +293,10 @@ CREATE TABLE IF NOT EXISTS funding_reports (
     ON DELETE CASCADE,
   CONSTRAINT fk_funding_reports_reporter
     FOREIGN KEY (reporter_id)
+    REFERENCES users(user_id)
+    ON DELETE SET NULL,
+  CONSTRAINT fk_funding_reports_reviewed_by
+    FOREIGN KEY (reviewed_by)
     REFERENCES users(user_id)
     ON DELETE SET NULL
 );
