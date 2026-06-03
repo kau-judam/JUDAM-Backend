@@ -9427,33 +9427,9 @@ const getFundingShareLink = async (req, res) => {
   }
 };
 
-const FUNDING_REPORT_TABLE_CANDIDATES = ['funding_reports', 'funding_project_reports'];
-let cachedFundingReportTableName = null;
+const FUNDING_REPORT_TABLE_NAME = 'funding_reports';
 
-const getFundingReportTableName = async () => {
-  if (cachedFundingReportTableName) {
-    return cachedFundingReportTableName;
-  }
-
-  const { rows } = await pool.query(
-    `
-    SELECT table_name
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name = ANY($1::text[])
-    `,
-    [FUNDING_REPORT_TABLE_CANDIDATES]
-  );
-
-  const existingTables = new Set(rows.map((row) => row.table_name));
-  cachedFundingReportTableName = FUNDING_REPORT_TABLE_CANDIDATES.find((tableName) => existingTables.has(tableName));
-
-  if (!cachedFundingReportTableName) {
-    throw new Error('funding_reports ???? ????.');
-  }
-
-  return cachedFundingReportTableName;
-};
+const getFundingReportTableName = async () => FUNDING_REPORT_TABLE_NAME;
 
 const FUNDING_REPORT_STATUSES = ['PENDING', 'REVIEWED', 'RESOLVED', 'REJECTED'];
 

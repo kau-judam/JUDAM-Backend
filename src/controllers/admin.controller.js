@@ -624,7 +624,7 @@ const cancelFundingProject = async (req, res) => {
       previousStatus: currentStatus,
       newStatus: canceledFunding.status,
       cancelReason: cancelReason || null,
-      adminUserId: req.user?.userId || req.user?.id || null,
+      adminUserId,
     });
 
     return res.status(200).json({
@@ -700,6 +700,9 @@ const getFundingReportsForAdmin = async (req, res) => {
         fr.reason,
         fr.content,
         fr.status,
+        fr.admin_memo,
+        fr.reviewed_at,
+        fr.reviewed_by,
         fr.created_at,
         fr.updated_at
       FROM ${reportTableName} fr
@@ -756,6 +759,9 @@ const getFundingReportDetailForAdmin = async (req, res) => {
         fr.reason,
         fr.content,
         fr.status,
+        fr.admin_memo,
+        fr.reviewed_at,
+        fr.reviewed_by,
         fr.created_at,
         fr.updated_at
       FROM ${reportTableName} fr
@@ -804,16 +810,31 @@ const updateFundingReportStatusForAdmin = async (req, res) => {
 
   try {
     const reportTableName = await getAdminFundingReportTableName();
+    const adminUserId = getAdminUserId(req);
     const { rows } = await pool.query(
       `
       UPDATE ${reportTableName}
       SET
         status = $2,
+        admin_memo = $3,
+        reviewed_at = CURRENT_TIMESTAMP,
+        reviewed_by = $4,
         updated_at = CURRENT_TIMESTAMP
       WHERE report_id = $1
-      RETURNING report_id, funding_id, reporter_id, reason, content, status, created_at, updated_at
+      RETURNING
+        report_id,
+        funding_id,
+        reporter_id,
+        reason,
+        content,
+        status,
+        admin_memo,
+        reviewed_at,
+        reviewed_by,
+        created_at,
+        updated_at
       `,
-      [reportId, nextStatus],
+      [reportId, nextStatus, adminMemo || null, adminUserId],
     );
 
     if (rows.length === 0) {
