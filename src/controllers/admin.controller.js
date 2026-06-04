@@ -7,8 +7,19 @@ const {
   createSettlementCompletedNotification,
 } = require('../services/breweryDashboardNotification.service');
 const { settleExpiredFundings } = require('../services/fundingSettlement.service');
+const {
+  getLawReviewQueue,
+  getLawReviewDetail,
+  updateLawReviewStatus,
+} = require('../services/lawReview.service');
 
 // 관리자 제출 프로젝트 목록 조회
+const getAdminUserId = (req) => {
+  const rawUserId = req.user?.userId || req.user?.id || req.user?.user_id || null;
+  const userId = Number(rawUserId);
+  return Number.isInteger(userId) && userId > 0 ? userId : null;
+};
+
 const getSubmittedFundingDrafts = async (req, res) => {
   const REVIEW_TARGET_DRAFT_STATUSES = ['SUBMITTED', 'REVIEWING'];
   const EXCLUDED_PROJECT_STATUSES = [
@@ -863,6 +874,104 @@ const updateFundingReportStatusForAdmin = async (req, res) => {
   }
 };
 
+const getLawReviewQueueForAdmin = async (req, res) => {
+  try {
+    const data = await getLawReviewQueue(req.query || {});
+
+    return res.status(200).json({
+      status: 200,
+      message: '?? ?? ? ?? ??',
+      data,
+    });
+  } catch (error) {
+    const status = error.statusCode || error.status || 500;
+    console.error('[law-review] list failed', error);
+
+    return res.status(status).json({
+      status,
+      message: error.message || '?? ?? ? ?? ? ?? ??? ??????.',
+    });
+  }
+};
+
+const getLawReviewDetailForAdmin = async (req, res) => {
+  const reviewId = Number(req.params.reviewId);
+
+  if (!Number.isInteger(reviewId) || reviewId <= 0) {
+    return res.status(400).json({
+      status: 400,
+      message: '?? ?? ID? ???? ????.',
+    });
+  }
+
+  try {
+    const data = await getLawReviewDetail(reviewId);
+
+    if (!data) {
+      return res.status(404).json({
+        status: 404,
+        message: '?? ?? ??? ?? ? ????.',
+      });
+    }
+
+    return res.status(200).json({
+      status: 200,
+      message: '?? ?? ?? ?? ??',
+      data,
+    });
+  } catch (error) {
+    console.error('[law-review] detail failed', error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '?? ?? ?? ?? ? ?? ??? ??????.',
+    });
+  }
+};
+
+const updateLawReviewStatusForAdmin = async (req, res) => {
+  const reviewId = Number(req.params.reviewId);
+  const status = req.body?.status;
+  const adminMemo = typeof req.body?.adminMemo === 'string' ? req.body.adminMemo.trim() : null;
+
+  if (!Number.isInteger(reviewId) || reviewId <= 0) {
+    return res.status(400).json({
+      status: 400,
+      message: '?? ?? ID? ???? ????.',
+    });
+  }
+
+  try {
+    const data = await updateLawReviewStatus({
+      reviewId,
+      status,
+      adminMemo,
+      reviewedBy: getAdminUserId(req),
+    });
+
+    if (!data) {
+      return res.status(404).json({
+        status: 404,
+        message: '?? ?? ??? ?? ? ????.',
+      });
+    }
+
+    return res.status(200).json({
+      status: 200,
+      message: '?? ?? ??? ???????.',
+      data,
+    });
+  } catch (error) {
+    const responseStatus = error.statusCode || error.status || 500;
+    console.error('[law-review] status update failed', error);
+
+    return res.status(responseStatus).json({
+      status: responseStatus,
+      message: error.message || '?? ?? ?? ?? ? ?? ??? ??????.',
+    });
+  }
+};
+
 const settleExpiredFundingsManually = async (req, res) => {
   try {
     const settlementResult = await settleExpiredFundings();
@@ -973,4 +1082,7 @@ module.exports = {
   getFundingReportsForAdmin,
   getFundingReportDetailForAdmin,
   updateFundingReportStatusForAdmin,
+  getLawReviewQueueForAdmin,
+  getLawReviewDetailForAdmin,
+  updateLawReviewStatusForAdmin,
 };

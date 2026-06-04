@@ -108,6 +108,50 @@ const getAiErrorMessage = (data) => {
   return 'AI 서버 요청에 실패했습니다.';
 };
 
+const LAW_FILTER_VERDICTS = new Set(['block', 'pass', 'review']);
+
+const normalizeLawFilterVerdict = (aiResponse = {}) => {
+  const verdict = typeof aiResponse.verdict === 'string'
+    ? aiResponse.verdict.trim().toLowerCase()
+    : '';
+
+  if (LAW_FILTER_VERDICTS.has(verdict)) {
+    return verdict;
+  }
+
+  if (aiResponse.violation === true) {
+    return 'block';
+  }
+
+  if (aiResponse.violation === false) {
+    return 'pass';
+  }
+
+  return null;
+};
+
+const normalizeAiImagePayload = (payload = {}) => {
+  const normalizedPayload = {
+    ...(payload && typeof payload === 'object' ? payload : {}),
+  };
+
+  if (
+    normalizedPayload.taste_vector === undefined &&
+    normalizedPayload.tasteVector !== undefined
+  ) {
+    normalizedPayload.taste_vector = normalizedPayload.tasteVector;
+  }
+
+  if (
+    normalizedPayload.seed === undefined &&
+    normalizedPayload.imageSeed !== undefined
+  ) {
+    normalizedPayload.seed = normalizedPayload.imageSeed;
+  }
+
+  return normalizedPayload;
+};
+
 const requestAiChat = async ({ message, userId, history }) => {
   const baseUrl = getAiServerBaseUrl();
   const body = {
@@ -435,14 +479,18 @@ const requestLawFilter = async (payload) => {
     });
     const aiResponse = response.data;
 
-    if (!aiResponse || typeof aiResponse.violation !== 'boolean') {
-      throw createAiServiceError(502, 'AI 법률 검토 결과가 올바르지 않습니다.');
+    const verdict = normalizeLawFilterVerdict(aiResponse || {});
+
+    if (!aiResponse || !verdict) {
+      throw createAiServiceError(502, 'AI ?? ?? ??? ???? ????.');
     }
 
     return {
-      violation: aiResponse.violation,
+      verdict,
+      violation: verdict === 'block',
       details: Array.isArray(aiResponse.details) ? aiResponse.details : [],
       recommendation: aiResponse.recommendation || null,
+      raw: aiResponse,
     };
   } catch (error) {
     if (error.statusCode) {
@@ -472,7 +520,7 @@ const generateAiImageAndUpload = async ({ payload, userId }) => {
   const baseUrl = getAiServerBaseUrl();
 
   try {
-    const response = await axios.post(`${baseUrl}/api/image/generate`, payload, {
+    const response = await axios.post(`${baseUrl}/api/image/generate`, normalizeAiImagePayload(payload), {
       timeout: AI_IMAGE_GENERATION_TIMEOUT_MS,
     });
     const aiResponse = response.data || {};
@@ -518,7 +566,7 @@ const generateFundingDraftAiImageAndUpload = async ({ payload, userId }) => {
   const baseUrl = getAiServerBaseUrl();
 
   try {
-    const response = await axios.post(`${baseUrl}/api/image/generate`, payload, {
+    const response = await axios.post(`${baseUrl}/api/image/generate`, normalizeAiImagePayload(payload), {
       timeout: AI_IMAGE_GENERATION_TIMEOUT_MS,
     });
     const aiResponse = response.data || {};

@@ -70,6 +70,18 @@ const suggestSubIngredients = async ({ main_ingredient, region }) => {
   return postToAiServer('/api/recipe/suggest-sub-ingredients', body);
 };
 
+const getIngredientRegion = async ({ main_ingredient, region }) => {
+  const body = {
+    main_ingredient,
+  };
+
+  if (region) {
+    body.region = region;
+  }
+
+  return postToAiServer('/api/recipe/ingredient-region', body);
+};
+
 const suggestFlavorTags = async ({
   title,
   main_ingredient,
@@ -103,6 +115,7 @@ const suggestSummary = async ({
 };
 
 module.exports = {
+  getIngredientRegion,
   suggestSubIngredients,
   suggestFlavorTags,
   suggestSummary,
