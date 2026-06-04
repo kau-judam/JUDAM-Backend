@@ -1,8 +1,49 @@
 const {
+  getIngredientRegion,
   suggestSubIngredients,
   suggestFlavorTags,
   suggestSummary,
 } = require('../services/aiRecipe.service');
+
+const ingredientRegionController = async (req, res) => {
+  try {
+    const {
+      main_ingredient,
+      mainIngredient,
+      ingredient,
+      region,
+      location,
+      area,
+    } = req.body;
+    const normalizedMainIngredient = main_ingredient || mainIngredient || ingredient;
+    const normalizedRegion = region || location || area || null;
+
+    if (!normalizedMainIngredient) {
+      return res.status(400).json({
+        status: 400,
+        message: 'main_ingredient는 필수입니다.',
+      });
+    }
+
+    const data = await getIngredientRegion({
+      main_ingredient: normalizedMainIngredient,
+      region: normalizedRegion,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '재료 지역 정보 조회 성공',
+      data,
+    });
+  } catch (error) {
+    console.error('[AI Recipe] ingredient-region failed:', error);
+
+    return res.status(error.status || 500).json({
+      status: error.status || 500,
+      message: error.message || '재료 지역 정보 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
 
 const suggestSubIngredientsController = async (req, res) => {
   try {
@@ -119,6 +160,7 @@ const suggestSummaryController = async (req, res) => {
 };
 
 module.exports = {
+  ingredientRegionController,
   suggestSubIngredientsController,
   suggestFlavorTagsController,
   suggestSummaryController,

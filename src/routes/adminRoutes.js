@@ -10,6 +10,9 @@ const {
   getFundingReportsForAdmin,
   getFundingReportDetailForAdmin,
   updateFundingReportStatusForAdmin,
+  getLawReviewQueueForAdmin,
+  getLawReviewDetailForAdmin,
+  updateLawReviewStatusForAdmin,
   settleExpiredFundingsManually,
   completeFundingSettlement,
 } = require('../controllers/admin.controller');
@@ -39,6 +42,9 @@ router.patch(
 router.get('/funding-reports', authMiddleware, requireAdmin, getFundingReportsForAdmin);
 router.get('/funding-reports/:reportId', authMiddleware, requireAdmin, getFundingReportDetailForAdmin);
 router.patch('/funding-reports/:reportId/status', authMiddleware, requireAdmin, updateFundingReportStatusForAdmin);
+router.get('/law-reviews', authMiddleware, requireAdmin, getLawReviewQueueForAdmin);
+router.get('/law-reviews/:reviewId', authMiddleware, requireAdmin, getLawReviewDetailForAdmin);
+router.patch('/law-reviews/:reviewId/status', authMiddleware, requireAdmin, updateLawReviewStatusForAdmin);
 router.post(
   '/fundings/settle-expired',
   authMiddleware,

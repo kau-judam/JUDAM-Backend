@@ -76,14 +76,28 @@ const checkRecipeLegalFilter = async (recipeData) => {
 
     const result = await response.json();
 
-    if (result.violation) {
+    const verdict = typeof result.verdict === 'string'
+      ? result.verdict.trim().toLowerCase()
+      : (result.violation === true ? 'block' : 'pass');
+
+    if (verdict === 'block') {
       return {
         passed: false,
+        verdict,
         reason: buildViolationReason(result),
       };
     }
 
-    return { passed: true, reason: null };
+    if (verdict === 'review') {
+      return {
+        passed: false,
+        verdict,
+        needsReview: true,
+        reason: buildViolationReason(result),
+      };
+    }
+
+    return { passed: true, verdict: 'pass', reason: null };
   } catch (err) {
     if (err.name === 'AbortError') {
       console.error('[AI Filter] 요청 시간 초과');

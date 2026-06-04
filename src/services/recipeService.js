@@ -1,4 +1,5 @@
 const { requestLawFilter } = require('./ai.service');
+const { createLawReviewQueueItem } = require('./lawReview.service');
 const pool = require('../db');
 const {
   createFundingCreatedNotification,
@@ -7,8 +8,9 @@ const {
 } = require('./breweryDashboardNotification.service');
 
 const INTEREST_THRESHOLD = 100;
-const LAW_FILTER_UNAVAILABLE_MESSAGE = '법률 검토 서비스가 일시적으로 unavailable하여 레시피를 등록할 수 없습니다.';
-const LAW_FILTER_BLOCK_MESSAGE = '법률 검토 결과 등록할 수 없는 레시피입니다.';
+const LAW_FILTER_UNAVAILABLE_MESSAGE = '?? ?? ???? ????? unavailable?? ???? ??? ? ????.';
+const LAW_FILTER_BLOCK_MESSAGE = '?? ?? ?? ??? ? ?? ??????.';
+const LAW_FILTER_REVIEW_MESSAGE = '?? ??? ??? ??????. ??? ?? ? ?? ??? ?????.';
 
 const normalizeString = (value) => {
   if (value === undefined || value === null) {
@@ -107,7 +109,7 @@ const createServiceError = (statusCode, message, data) => {
   return error;
 };
 
-const runRecipeLawFilter = async (recipeData) => {
+const runRecipeLawFilter = async (recipeData, user) => {
   let lawFilter;
 
   try {
@@ -116,8 +118,23 @@ const runRecipeLawFilter = async (recipeData) => {
     throw createServiceError(error.statusCode || 502, LAW_FILTER_UNAVAILABLE_MESSAGE);
   }
 
-  if (lawFilter.violation === true) {
+  if (lawFilter.violation === true || lawFilter.verdict === 'block') {
     throw createServiceError(400, LAW_FILTER_BLOCK_MESSAGE, lawFilter);
+  }
+
+  if (lawFilter.verdict === 'review') {
+    const userId = user?.id ?? user?.userId ?? null;
+    const lawReview = await createLawReviewQueueItem({
+      targetType: 'RECIPE',
+      submitterUserId: userId,
+      requestPayload: recipeData,
+      aiResult: lawFilter,
+    });
+
+    throw createServiceError(202, LAW_FILTER_REVIEW_MESSAGE, {
+      lawFilter,
+      lawReview,
+    });
   }
 
   return lawFilter;
@@ -125,7 +142,7 @@ const runRecipeLawFilter = async (recipeData) => {
 
 // 레시피 작성 (POST /api/recipes)
 const createRecipe = async (recipeData, user) => {
-  const lawFilter = await runRecipeLawFilter(recipeData);
+  const lawFilter = await runRecipeLawFilter(recipeData, user);
 
   const author_type = user.role === 'BREWERY' ? 'BREWERY' : 'USER';
 

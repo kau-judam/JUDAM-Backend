@@ -942,6 +942,10 @@ const normalizeFundingAiImagePayload = (body = {}, draft = {}) => {
         ...extractFundingAiImageFlavorTags(draft.flavor_notes),
         ...parseFundingListField(draft.tags),
       ]);
+  const requestTasteVector = getBodyValue(body, ['taste_vector', 'tasteVector']);
+  const draftTasteVector = parseTasteProfileExtras(draft.flavor_notes).tasteVector;
+  const tasteVector = requestTasteVector !== undefined ? requestTasteVector : draftTasteVector;
+  const seed = getBodyValue(body, ['seed', 'imageSeed']);
 
   return {
     name: toTrimmedString(
@@ -960,6 +964,8 @@ const normalizeFundingAiImagePayload = (body = {}, draft = {}) => {
       draft.region ||
       draft.business_address
     ),
+    ...(tasteVector ? { taste_vector: tasteVector } : {}),
+    ...(seed !== undefined && seed !== null && seed !== '' ? { seed } : {}),
   };
 };
 

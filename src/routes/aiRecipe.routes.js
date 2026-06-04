@@ -1,6 +1,7 @@
 const express = require('express');
 
 const {
+  ingredientRegionController,
   suggestSubIngredientsController,
   suggestFlavorTagsController,
   suggestSummaryController,
@@ -8,6 +9,7 @@ const {
 
 const router = express.Router();
 
+router.post('/ingredient-region', ingredientRegionController);
 router.post('/suggest-sub-ingredients', suggestSubIngredientsController);
 router.post('/suggest-flavor-tags', suggestFlavorTagsController);
 router.post('/suggest-summary', suggestSummaryController);
