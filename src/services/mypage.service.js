@@ -2541,6 +2541,17 @@ const getDeliveryTrackingMap = async (fundingIds) => {
   return map;
 };
 
+const normalizeOrderDeliveryStatus = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = String(value).trim().toUpperCase();
+  const validStatuses = new Set(['ORDERED', 'PREPARING', 'SHIPPED', 'DELIVERED', 'CANCELED']);
+
+  return validStatuses.has(normalized) ? normalized : null;
+};
+
 // 마이페이지 참여 펀딩 목록 (GET /api/mypage/fundings/participated)
 // 결제 완료(PAID)한 주문이 있는 펀딩을 펀딩당 1행으로 반환. 최근 참여순.
 // excludeArchived=true일 때만 이미 FUNDING 아카이브로 기록한 펀딩을 제외(아카이브 작성 picker용).
@@ -2704,6 +2715,12 @@ const getParticipatedFundingOrderDetail = async (userId, orderId) => {
         o.recipient_phone,
         o.shipping_address,
         o.shipping_detail_address,
+        o.delivery_status,
+        o.courier,
+        o.courier_code,
+        o.tracking_number,
+        o.shipped_at,
+        o.delivered_at,
         fp.title AS project_name,
         ba.brewery_name,
         u.nickname AS brewery_nickname,
@@ -2734,9 +2751,26 @@ const getParticipatedFundingOrderDetail = async (userId, orderId) => {
     throw createServiceError(404, '주문을 찾을 수 없습니다.');
   }
 
-  const delivery = await getFundingDelivery(order.funding_id);
-  const trackingNumber = delivery?.tracking_number || null;
-  const hasTrackingNumber = Boolean(trackingNumber);
+  const hasOrderDeliveryInfo = !!(
+    order.delivery_status
+    || order.courier
+    || order.courier_code
+    || order.tracking_number
+    || order.shipped_at
+    || order.delivered_at
+  );
+
+  const fundingDelivery = hasOrderDeliveryInfo
+    ? null
+    : await getFundingDelivery(order.funding_id);
+
+  const courier = order.courier || null;
+  const courierCode = order.courier_code || null;
+  const trackingNumber = order.tracking_number || fundingDelivery?.tracking_number || null;
+  const shipmentStatus = normalizeOrderDeliveryStatus(order.delivery_status)
+    || (trackingNumber ? 'SHIPPED' : null);
+  const shippedAt = order.shipped_at || (fundingDelivery?.created_at || null);
+  const deliveredAt = order.delivered_at || null;
 
   const totalAmount = Number(order.total_amount || 0);
   const shippingFee = Number(order.shipping_fee || 0);
@@ -2757,11 +2791,13 @@ const getParticipatedFundingOrderDetail = async (userId, orderId) => {
     totalAmount,
     orderedAt: order.ordered_at,
     paymentStatus: order.order_status,
-    deliveryStatus: hasTrackingNumber ? 'SHIPPED' : null,
-    courierName: delivery?.courier || null,
+    deliveryStatus: shipmentStatus,
+    courier,
+    courierCode,
     trackingNumber,
-    shippedAt: hasTrackingNumber ? (delivery?.created_at || null) : null,
-    deliveredAt: null,
+    shippedAt,
+    deliveredAt,
+    courierName: courier || null,
     receiverName: order.recipient_name || null,
     receiverPhone: order.recipient_phone || null,
     receiverAddress,
