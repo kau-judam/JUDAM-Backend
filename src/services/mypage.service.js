@@ -3088,6 +3088,7 @@ module.exports = {
   grantEarnedBadges,
   getUserBadgeRows,
   getMySulbti,
+  getMySulbtiShareLink,
   saveMySulbti,
   convertAndSaveMySulbtiSurvey,
   findSulbtiTypeByCode,
