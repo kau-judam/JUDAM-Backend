@@ -1,6 +1,7 @@
 const path = require('path');
 const pool = require('../config/db');
 const { uploadFileToS3 } = require('./s3.service');
+const { requestBreweryLicenseOcr } = require('./ai.service');
 
 const MAX_BUSINESS_LICENSE_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_BREWERY_PROFILE_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -32,6 +33,16 @@ const mapApplication = (row) => ({
   originalName: row.original_name ?? null,
   mimeType: row.mime_type ?? null,
   fileSize: row.file_size === null || row.file_size === undefined ? null : Number(row.file_size),
+  ocrStatus: row.ocr_status ?? null,
+  ocrSummary: row.ocr_summary ?? null,
+  ocrError: row.ocr_error ?? null,
+  ocrCheckedAt: row.ocr_checked_at ?? null,
+  ocr: {
+    status: row.ocr_status ?? null,
+    summary: row.ocr_summary ?? null,
+    error: row.ocr_error ?? null,
+    checkedAt: row.ocr_checked_at ?? null,
+  },
   rejectReason: row.reject_reason,
   status: row.status,
   createdAt: row.created_at,
@@ -468,6 +479,142 @@ const extractS3KeyFromUrl = (fileUrl) => {
   }
 };
 
+const getFirstDefined = (...values) => values.find(
+  (value) => value !== undefined && value !== null && value !== '',
+);
+
+const getNestedValue = (source, pathSegments) => {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+
+  return pathSegments.reduce((current, segment) => {
+    if (!current || typeof current !== 'object') {
+      return undefined;
+    }
+
+    return current[segment];
+  }, source);
+};
+
+const getOcrValue = (source, paths) => getFirstDefined(
+  ...paths.map((pathValue) => getNestedValue(source, pathValue.split('.'))),
+);
+
+const summarizeBreweryOcrResult = (rawResult = {}) => {
+  const source = rawResult.data || rawResult.result || rawResult.ocrResult || rawResult;
+  const extracted = source.extracted || source.extractedInfo || source.fields || source.license || source.document || source;
+
+  return {
+    manualReviewOnly: true,
+    reviewPolicy: 'OCR_RESULT_IS_FOR_ADMIN_REVIEW_ONLY',
+    verdict: getOcrValue(source, ['verdict', 'status', 'result', 'verificationStatus']) || null,
+    confidence: getOcrValue(source, ['confidence', 'score', 'ocrConfidence']) || null,
+    businessName: getOcrValue(extracted, [
+      'businessName',
+      'business_name',
+      'companyName',
+      'company_name',
+      'breweryName',
+      'brewery_name',
+      'license.businessName',
+    ]) || null,
+    businessNumber: getOcrValue(extracted, [
+      'businessNumber',
+      'business_number',
+      'registrationNumber',
+      'registration_number',
+      'licenseNumber',
+      'license_number',
+      'bizNo',
+      'license.businessNumber',
+    ]) || null,
+    representativeName: getOcrValue(extracted, [
+      'representativeName',
+      'representative_name',
+      'ownerName',
+      'owner_name',
+      'ceoName',
+      'license.representativeName',
+    ]) || null,
+    address: getOcrValue(extracted, [
+      'address',
+      'businessAddress',
+      'business_address',
+      'location',
+      'license.address',
+    ]) || null,
+    licenseType: getOcrValue(extracted, [
+      'licenseType',
+      'license_type',
+      'documentType',
+      'document_type',
+      'permitType',
+      'license.licenseType',
+    ]) || null,
+    issueDate: getOcrValue(extracted, [
+      'issueDate',
+      'issue_date',
+      'issuedAt',
+      'issued_at',
+      'license.issueDate',
+    ]) || null,
+  };
+};
+
+const buildSkippedOcrReview = (reason) => ({
+  status: 'SKIPPED',
+  result: null,
+  summary: {
+    manualReviewOnly: true,
+    reviewPolicy: 'OCR_RESULT_IS_FOR_ADMIN_REVIEW_ONLY',
+    reason,
+  },
+  error: null,
+  checkedAt: null,
+});
+
+const runBreweryLicenseOcrReview = async ({
+  businessLicenseFile,
+  documentUrl,
+  documentKey,
+}) => {
+  if (!businessLicenseFile) {
+    return buildSkippedOcrReview('DOCUMENT_URL_ONLY');
+  }
+
+  const checkedAt = new Date();
+
+  try {
+    const result = await requestBreweryLicenseOcr({
+      file: businessLicenseFile,
+      documentUrl,
+      documentKey,
+    });
+
+    return {
+      status: 'COMPLETED',
+      result,
+      summary: summarizeBreweryOcrResult(result),
+      error: null,
+      checkedAt,
+    };
+  } catch (error) {
+    return {
+      status: 'FAILED',
+      result: null,
+      summary: {
+        manualReviewOnly: true,
+        reviewPolicy: 'OCR_RESULT_IS_FOR_ADMIN_REVIEW_ONLY',
+        reviewRequired: true,
+        reason: 'OCR_FAILED_APPLICATION_SAVED_FOR_MANUAL_REVIEW',
+      },
+      error: error.message || 'OCR request failed',
+      checkedAt,
+    };
+  }
+};
+
 const createApplication = async ({
   userId,
   breweryName,
@@ -496,6 +643,11 @@ const createApplication = async ({
         original_name,
         mime_type,
         file_size,
+        ocr_status,
+        ocr_result,
+        ocr_summary,
+        ocr_error,
+        ocr_checked_at,
         reject_reason,
         status,
         created_at,
@@ -550,6 +702,7 @@ const createApplication = async ({
   let originalName = null;
   let mimeType = null;
   let fileSize = null;
+  let ocrReview = buildSkippedOcrReview('NO_UPLOADED_FILE');
 
   if (businessLicenseFile) {
     uploadedDocumentUrl = await uploadFileToS3(
@@ -562,6 +715,13 @@ const createApplication = async ({
     originalName = businessLicenseFile.originalname;
     mimeType = businessLicenseFile.mimetype;
     fileSize = businessLicenseFile.size;
+    ocrReview = await runBreweryLicenseOcrReview({
+      businessLicenseFile,
+      documentUrl: uploadedDocumentUrl,
+      documentKey: uploadedDocumentKey,
+    });
+  } else if (uploadedDocumentUrl) {
+    ocrReview = buildSkippedOcrReview('DOCUMENT_URL_ONLY');
   }
 
   if (existing?.status === 'PENDING') {
@@ -585,9 +745,14 @@ const createApplication = async ({
             original_name = $8,
             mime_type = $9,
             file_size = $10,
+            ocr_status = $11,
+            ocr_result = $12,
+            ocr_summary = $13,
+            ocr_error = $14,
+            ocr_checked_at = $15,
             reject_reason = NULL,
             updated_at = CURRENT_TIMESTAMP
-          WHERE application_id = $11
+          WHERE application_id = $16
           RETURNING
             application_id,
             user_id,
@@ -601,6 +766,11 @@ const createApplication = async ({
             original_name,
             mime_type,
             file_size,
+            ocr_status,
+            ocr_result,
+            ocr_summary,
+            ocr_error,
+            ocr_checked_at,
             reject_reason,
             status,
             created_at,
@@ -617,6 +787,11 @@ const createApplication = async ({
           originalName,
           mimeType,
           fileSize,
+          ocrReview.status,
+          ocrReview.result,
+          ocrReview.summary,
+          ocrReview.error,
+          ocrReview.checkedAt,
           existing.application_id,
         ],
       );
@@ -679,6 +854,11 @@ const createApplication = async ({
           original_name,
           mime_type,
           file_size,
+          ocr_status,
+          ocr_result,
+          ocr_summary,
+          ocr_error,
+          ocr_checked_at,
           created_at,
           updated_at
         )
@@ -695,6 +875,11 @@ const createApplication = async ({
           $9,
           $10,
           $11,
+          $12,
+          $13,
+          $14,
+          $15,
+          $16,
           CURRENT_TIMESTAMP,
           CURRENT_TIMESTAMP
         )
@@ -711,6 +896,11 @@ const createApplication = async ({
           original_name,
           mime_type,
           file_size,
+          ocr_status,
+          ocr_result,
+          ocr_summary,
+          ocr_error,
+          ocr_checked_at,
           reject_reason,
           status,
           created_at,
@@ -728,6 +918,11 @@ const createApplication = async ({
         originalName,
         mimeType,
         fileSize,
+        ocrReview.status,
+        ocrReview.result,
+        ocrReview.summary,
+        ocrReview.error,
+        ocrReview.checkedAt,
       ],
     );
 
@@ -792,6 +987,11 @@ const getApplications = async ({ status } = {}) => {
         original_name,
         mime_type,
         file_size,
+        ocr_status,
+        ocr_result,
+        ocr_summary,
+        ocr_error,
+        ocr_checked_at,
         reject_reason,
         status,
         created_at,
@@ -822,6 +1022,11 @@ const getApplicationByUserId = async (userId) => {
         original_name,
         mime_type,
         file_size,
+        ocr_status,
+        ocr_result,
+        ocr_summary,
+        ocr_error,
+        ocr_checked_at,
         reject_reason,
         status,
         created_at,
@@ -931,6 +1136,11 @@ const rejectApplication = async ({ applicationId, rejectReason }) => {
         original_name,
         mime_type,
         file_size,
+        ocr_status,
+        ocr_result,
+        ocr_summary,
+        ocr_error,
+        ocr_checked_at,
         reject_reason,
         status,
         created_at,
@@ -1006,6 +1216,11 @@ const updateApprovedApplicationByUserId = async ({
         location AS location,
         document_url,
         document_key,
+        ocr_status,
+        ocr_result,
+        ocr_summary,
+        ocr_error,
+        ocr_checked_at,
         reject_reason,
         status,
         created_at,

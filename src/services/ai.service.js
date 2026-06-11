@@ -7,6 +7,7 @@ const AI_FUNDING_REGISTER_TIMEOUT_MS = 30000;
 const AI_LAW_FILTER_TIMEOUT_MS = 30000;
 const AI_TASTE_UPDATE_TIMEOUT_MS = 30000;
 const AI_DRINK_REQUEST_TIMEOUT_MS = 30000;
+const AI_BREWERY_OCR_TIMEOUT_MS = 30000;
 
 const getAiServerBaseUrl = () => {
   const { AI_SERVER_BASE_URL } = process.env;
@@ -516,6 +517,67 @@ const requestLawFilter = async (payload) => {
   }
 };
 
+const requestBreweryLicenseOcr = async ({
+  file,
+  documentUrl,
+  documentKey,
+}) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  if (!file?.buffer) {
+    throw createAiServiceError(400, 'OCR 요청에 사용할 면허 서류 파일이 없습니다.');
+  }
+
+  if (typeof FormData === 'undefined' || typeof Blob === 'undefined') {
+    throw createAiServiceError(500, '현재 Node 런타임에서 multipart FormData를 사용할 수 없습니다.');
+  }
+
+  const form = new FormData();
+  const mimeType = file.mimetype || 'application/octet-stream';
+  const fileName = file.originalname || 'business-license';
+
+  form.append('file', new Blob([file.buffer], { type: mimeType }), fileName);
+
+  if (documentUrl) {
+    form.append('documentUrl', documentUrl);
+    form.append('document_url', documentUrl);
+  }
+
+  if (documentKey) {
+    form.append('documentKey', documentKey);
+    form.append('document_key', documentKey);
+  }
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/brewery/verify-ocr`, form, {
+      timeout: AI_BREWERY_OCR_TIMEOUT_MS,
+    });
+
+    return response.data || {};
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI OCR 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI OCR 서버 요청에 실패했습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI OCR 서버에 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
 const generateAiImageAndUpload = async ({ payload, userId }) => {
   const baseUrl = getAiServerBaseUrl();
 
@@ -637,6 +699,7 @@ module.exports = {
   approveNewDrinkRequest,
   registerFundingToAiPool,
   requestLawFilter,
+  requestBreweryLicenseOcr,
   generateAiImageAndUpload,
   generateFundingDraftAiImageAndUpload,
 };
