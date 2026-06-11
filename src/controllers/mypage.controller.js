@@ -71,14 +71,14 @@ const sendErrorResponse = (res, error, fallbackMessage) => {
   if (status === 404) {
     return res.status(404).json({
       status: 404,
-      message: '?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎.',
+      message: '사용자를 찾을 수 없습니다.',
     });
   }
 
   if (status === 409) {
     return res.status(409).json({
       status: 409,
-      message: '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
+      message: '이미 사용 중인 닉네임입니다.',
     });
   }
 
@@ -634,7 +634,7 @@ const checkNicknameController = async (req, res) => {
   if (!nickname) {
     return res.status(400).json({
       status: 400,
-      message: '?됰꽕?꾩쓣 ?낅젰?댁＜?몄슂.',
+      message: '닉네임을 입력해주세요.',
     });
   }
 
@@ -643,13 +643,11 @@ const checkNicknameController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: data.isAvailable
-        ? '?ъ슜 媛?ν븳 ?됰꽕?꾩엯?덈떎.'
-        : '?대? ?ъ슜 以묒씤 ?됰꽕?꾩엯?덈떎.',
+      message: '닉네임 중복 확인 성공',
       data,
     });
   } catch (error) {
-    return sendErrorResponse(res, error, '?됰꽕??以묐났 ?뺤씤 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.');
+    return sendErrorResponse(res, error, '닉네임 중복 확인 중 서버 오류가 발생했습니다.');
   }
 };
 
@@ -665,7 +663,7 @@ const updateNicknameController = async (req, res) => {
   if (!nickname) {
     return res.status(400).json({
       status: 400,
-      message: '?됰꽕?꾩쓣 ?낅젰?댁＜?몄슂.',
+      message: '닉네임을 입력해주세요.',
     });
   }
 
@@ -674,11 +672,11 @@ const updateNicknameController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?됰꽕???섏젙 ?깃났',
+      message: '닉네임 수정 성공',
       data,
     });
   } catch (error) {
-    return sendErrorResponse(res, error, '?됰꽕???섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.');
+    return sendErrorResponse(res, error, '닉네임 수정 중 서버 오류가 발생했습니다.');
   }
 };
 
@@ -695,14 +693,14 @@ const updatePhoneNumberController = async (req, res) => {
   if (!phoneNumber) {
     return res.status(400).json({
       status: 400,
-      message: '?꾪솕踰덊샇瑜??낅젰?댁＜?몄슂.',
+      message: '전화번호를 입력해주세요.',
     });
   }
 
   if (!verificationCode) {
     return res.status(400).json({
       status: 400,
-      message: '?몄쬆踰덊샇瑜??낅젰?댁＜?몄슂.',
+      message: '인증번호를 입력해주세요.',
     });
   }
 
@@ -715,7 +713,7 @@ const updatePhoneNumberController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?꾪솕踰덊샇 ?섏젙 ?깃났',
+      message: '전화번호 수정 성공',
       data,
     });
   } catch (error) {
@@ -737,7 +735,7 @@ const updatePhoneNumberController = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '?꾪솕踰덊샇 ?섏젙 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '전화번호 수정 중 서버 오류가 발생했습니다.',
     });
   }
 };
@@ -754,7 +752,7 @@ const requestPhoneVerificationController = async (req, res) => {
   if (!phoneNumber) {
     return res.status(400).json({
       status: 400,
-      message: '?꾪솕踰덊샇瑜??낅젰?댁＜?몄슂.',
+      message: '전화번호를 입력해주세요.',
     });
   }
 
@@ -763,7 +761,7 @@ const requestPhoneVerificationController = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?꾪솕踰덊샇 ?몄쬆 ?붿껌???앹꽦?섏뿀?듬땲??',
+      message: '전화번호 인증 요청 성공',
       data,
     });
   } catch (error) {
@@ -778,7 +776,7 @@ const requestPhoneVerificationController = async (req, res) => {
 
     return res.status(500).json({
       status: 500,
-      message: '?꾪솕踰덊샇 ?몄쬆 ?붿껌 ?앹꽦 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      message: '전화번호 인증 요청 중 서버 오류가 발생했습니다.',
     });
   }
 };

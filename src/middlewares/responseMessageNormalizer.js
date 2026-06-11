@@ -222,12 +222,20 @@ const getMypageMessage = ({ path, method, statusCode }) => {
       : getStatusFallbackMessage(statusCode, '아카이브');
   }
 
-  if (path.includes('/nickname')) {
-    return statusCode === 200 ? '닉네임 수정 성공' : getStatusFallbackMessage(statusCode, '닉네임');
+  if (path.includes('/profile/nickname/check')) {
+    return statusCode === 200 ? '닉네임 중복 확인 성공' : getStatusFallbackMessage(statusCode, '닉네임 중복 확인');
   }
 
-  if (path.includes('/phone')) {
-    return statusCode === 200 ? '전화번호 인증 요청 성공' : getStatusFallbackMessage(statusCode, '전화번호');
+  if (path.includes('/profile/nickname')) {
+    return statusCode === 200 ? '닉네임 수정 성공' : getStatusFallbackMessage(statusCode, '닉네임 수정');
+  }
+
+  if (path.includes('/profile/phone/verification')) {
+    return statusCode === 200 ? '전화번호 인증 요청 성공' : getStatusFallbackMessage(statusCode, '전화번호 인증 요청');
+  }
+
+  if (path.includes('/profile/phone') || path.includes('/profile/phone-number')) {
+    return statusCode === 200 ? '전화번호 수정 성공' : getStatusFallbackMessage(statusCode, '전화번호 수정');
   }
 
   if (path.includes('/password')) {
