@@ -9468,18 +9468,17 @@ const getFundingShareLink = async (req, res) => {
       requestBaseUrl;
 
     const shareUrl = `${publicBaseUrl}/funding/${Number(fundingId)}`;
-    const userId = getUserId(req);
 
     const shareResult = await pool.query(
-      `INSERT INTO funding_shares (funding_id, user_id, share_url, share_count, created_at, updated_at)
-       VALUES ($1, $2, $3, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT (funding_id, user_id)
+      `INSERT INTO funding_shares (funding_id, share_url, share_count, created_at, updated_at)
+       VALUES ($1, $2, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT (funding_id)
        DO UPDATE SET
          share_url = EXCLUDED.share_url,
          share_count = funding_shares.share_count + 1,
          updated_at = CURRENT_TIMESTAMP
-       RETURNING share_id, funding_id, user_id, share_url, share_count, created_at, updated_at`,
-      [Number(fundingId), userId, shareUrl]
+       RETURNING funding_id, share_url, share_count, created_at, updated_at`,
+      [Number(fundingId), shareUrl]
     );
 
     const share = shareResult.rows[0];
