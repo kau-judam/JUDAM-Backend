@@ -10,6 +10,8 @@ const {
   getMyBreweryDashboardFundings,
   getMyBreweryDashboardFundingDelivery,
   upsertMyBreweryDashboardFundingDelivery,
+  getMyBreweryDashboardFundingOrders,
+  upsertMyBreweryDashboardFundingOrderDelivery,
   getMyBreweryDashboardNotifications,
   verifyBreweryAccount,
   createBreweryApplication,
@@ -43,10 +45,20 @@ router.get(
   authMiddleware,
   getMyBreweryDashboardFundingDelivery,
 );
+router.get(
+  '/me/dashboard/fundings/:fundingId/orders',
+  authMiddleware,
+  getMyBreweryDashboardFundingOrders,
+);
 router.patch(
   '/me/dashboard/fundings/:fundingId/delivery',
   authMiddleware,
   upsertMyBreweryDashboardFundingDelivery,
+);
+router.patch(
+  '/me/dashboard/fundings/:fundingId/orders/:orderId/delivery',
+  authMiddleware,
+  upsertMyBreweryDashboardFundingOrderDelivery,
 );
 router.get('/me/dashboard/notifications', authMiddleware, getMyBreweryDashboardNotifications);
 

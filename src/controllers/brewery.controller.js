@@ -13,6 +13,8 @@ const {
   getBreweryDashboardFundingsByUserId,
   getBreweryFundingDeliveryByUserId,
   upsertBreweryFundingDeliveryByUserId,
+  getBreweryFundingOrdersByUserId,
+  updateBreweryFundingOrderDeliveryByUserId,
   getBreweryNotificationsByUserId,
 } = require('../services/brewery.service');
 const { verifyAuthPhoneVerificationToken } = require('../services/auth-phone.service');
@@ -69,6 +71,26 @@ const getOptionalNullableString = (body, key) => {
   }
 
   return value === '' ? null : value;
+};
+
+const getOptionalTrimmedField = (body, key) => {
+  if (!Object.prototype.hasOwnProperty.call(body || {}, key)) {
+    return undefined;
+  }
+
+  const value = body[key];
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  }
+
+  const normalized = String(value).trim();
+  return normalized === '' ? null : normalized;
 };
 
 const verifyBreweryAccount = async (req, res) => {
@@ -436,6 +458,130 @@ const upsertMyBreweryDashboardFundingDelivery = async (req, res) => {
   }
 };
 
+const getMyBreweryDashboardFundingOrders = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
+  }
+
+  let fundingId;
+
+  try {
+    fundingId = parsePositiveIntegerParam(req.params.fundingId, 'fundingId');
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 400,
+      error.message,
+      error.detail || error.message,
+    );
+  }
+
+  try {
+    const data = await getBreweryFundingOrdersByUserId({
+      userId,
+      fundingId,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '?덉쭛 諛곗넚 ?듬깅??湲? ?뚯씤 ?깃났',
+      data,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '?덉쭛 諛곗넚 ?듬깅??湲? ?쇱닿???쎈솎??댁쒖낵?섎㊀.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const upsertMyBreweryDashboardFundingOrderDelivery = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  const body = req.body || {};
+
+  if (!userId) {
+    return sendError(res, 401, '濡쒓렇?몄씠 ?꾩슂?⑸땲??', 'JWT payload??userId媛 ?놁뒿?덈떎.');
+  }
+
+  let fundingId;
+  let orderId;
+
+  try {
+    fundingId = parsePositiveIntegerParam(req.params.fundingId, 'fundingId');
+    orderId = parsePositiveIntegerParam(req.params.orderId, 'orderId');
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 400,
+      error.message,
+      error.detail || error.message,
+    );
+  }
+
+  const hasDeliveryStatus = Object.prototype.hasOwnProperty.call(body, 'deliveryStatus')
+    || Object.prototype.hasOwnProperty.call(body, 'delivery_status');
+  const hasCourier = Object.prototype.hasOwnProperty.call(body, 'courier');
+  const hasCourierCode = Object.prototype.hasOwnProperty.call(body, 'courierCode')
+    || Object.prototype.hasOwnProperty.call(body, 'courier_code');
+  const hasTrackingNumber = Object.prototype.hasOwnProperty.call(body, 'trackingNumber')
+    || Object.prototype.hasOwnProperty.call(body, 'tracking_number');
+
+  const deliveryStatus = hasDeliveryStatus
+    ? getOptionalTrimmedField(body, Object.prototype.hasOwnProperty.call(body, 'deliveryStatus')
+      ? 'deliveryStatus'
+      : 'delivery_status')
+    : undefined;
+  const courier = hasCourier ? getOptionalTrimmedField(body, 'courier') : undefined;
+  const courierCode = hasCourierCode
+    ? getOptionalTrimmedField(body, Object.prototype.hasOwnProperty.call(body, 'courierCode')
+      ? 'courierCode'
+      : 'courier_code')
+    : undefined;
+  const trackingNumber = hasTrackingNumber
+    ? getOptionalTrimmedField(body, Object.prototype.hasOwnProperty.call(body, 'trackingNumber')
+      ? 'trackingNumber'
+      : 'tracking_number')
+    : undefined;
+
+  if (!hasDeliveryStatus && !hasCourier && !hasCourierCode && !hasTrackingNumber) {
+    return sendError(
+      res,
+      400,
+      'deliveryStatus, courier, courierCode, trackingNumber ?댁넖 ?쇱??뺤쭘?섎㊀.',
+      'deliveryStatus, courier, courierCode, trackingNumber ?먭삤 ???먯뒪 ?낅젰?댁＜?몄슂.',
+    );
+  }
+
+  try {
+    const data = await updateBreweryFundingOrderDeliveryByUserId({
+      userId,
+      fundingId,
+      orderId,
+      deliveryStatus,
+      courier,
+      courierCode,
+      trackingNumber,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '?덉쭛 諛곗넚 ?듬깅 ?덈뤉 ?깃났',
+      data,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '?덉쭛 諛곗넚 ?듬깅 ?덈뤉 以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+      error.detail || error.message,
+    );
+  }
+};
+
 const getMyBreweryDashboardNotifications = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
 
@@ -771,6 +917,8 @@ module.exports = {
   getMyBreweryDashboardFundings,
   getMyBreweryDashboardFundingDelivery,
   upsertMyBreweryDashboardFundingDelivery,
+  getMyBreweryDashboardFundingOrders,
+  upsertMyBreweryDashboardFundingOrderDelivery,
   getMyBreweryDashboardNotifications,
   verifyBreweryAccount,
   createBreweryApplication,

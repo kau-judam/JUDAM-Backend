@@ -278,6 +278,41 @@ const mapFundingDelivery = (row, fundingId) => ({
   updatedAt: row?.updated_at || null,
 });
 
+const DELIVERY_STATUS_VALUES = new Set(['ORDERED', 'PREPARING', 'SHIPPED', 'DELIVERED', 'CANCELED']);
+
+const toDeliveryStatus = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = String(value).trim().toUpperCase();
+  return DELIVERY_STATUS_VALUES.has(normalized) ? normalized : null;
+};
+
+const mapBreweryFundingOrderDelivery = (row) => ({
+  orderId: Number(row.order_id),
+  fundingId: Number(row.funding_id),
+  userId: row.user_id === null || row.user_id === undefined
+    ? null
+    : Number(row.user_id),
+  nickname: row.nickname || null,
+  recipientName: row.recipient_name || null,
+  recipientPhone: row.recipient_phone || null,
+  shippingAddress: row.shipping_address || null,
+  shippingDetailAddress: row.shipping_detail_address || null,
+  postalCode: row.postal_code || null,
+  totalAmount: Number(row.total_amount || 0),
+  orderStatus: row.order_status,
+  paymentStatus: row.payment_status || row.order_status,
+  deliveryStatus: toDeliveryStatus(row.delivery_status),
+  courier: row.courier || null,
+  courierCode: row.courier_code || null,
+  trackingNumber: row.tracking_number || null,
+  shippedAt: row.shipped_at || null,
+  deliveredAt: row.delivered_at || null,
+  createdAt: row.created_at,
+});
+
 const createServiceError = (statusCode, message, detail) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -1432,6 +1467,222 @@ const getBreweryFundingDeliveryByUserId = async ({ userId, fundingId }) => {
   return mapFundingDelivery(rows[0], funding.fundingId);
 };
 
+const getBreweryFundingOrdersByUserId = async ({ userId, fundingId }) => {
+  const funding = await getBreweryOwnedFundingForDashboard({ userId, fundingId });
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        o.order_id,
+        o.funding_id,
+        o.user_id,
+        u.nickname,
+        o.recipient_name,
+        o.recipient_phone,
+        o.shipping_address,
+        o.shipping_detail_address,
+        o.postal_code,
+        o.total_amount,
+        o.order_status,
+        o.delivery_status,
+        o.courier,
+        o.courier_code,
+        o.tracking_number,
+        o.shipped_at,
+        o.delivered_at,
+        o.created_at,
+        p.payment_status
+      FROM orders o
+      LEFT JOIN users u ON u.user_id = o.user_id
+      LEFT JOIN LATERAL (
+        SELECT payment_status
+        FROM payments
+        WHERE order_id = o.order_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) p ON TRUE
+      WHERE o.funding_id = $1
+        AND o.order_status = 'PAID'
+      ORDER BY o.created_at DESC, o.order_id DESC
+    `,
+    [funding.fundingId],
+  );
+
+  return rows.map(mapBreweryFundingOrderDelivery);
+};
+
+const updateBreweryFundingOrderDeliveryByUserId = async ({
+  userId,
+  fundingId,
+  orderId,
+  deliveryStatus,
+  courier,
+  courierCode,
+  trackingNumber,
+}) => {
+  const funding = await getBreweryOwnedFundingForDashboard({ userId, fundingId });
+  const normalizedOrderId = Number(orderId);
+
+  if (!Number.isInteger(normalizedOrderId) || normalizedOrderId <= 0) {
+    throw createServiceError(400, 'orderId 格뚮씪?ㅻ씤 ?뚯씠?섎㏈ ???낅젰?댁＜?몄슂.');
+  }
+
+  const { rows: orderRows } = await pool.query(
+    `
+      SELECT order_id, funding_id, order_status
+      FROM orders
+      WHERE order_id = $1
+        AND funding_id = $2
+      LIMIT 1
+    `,
+    [normalizedOrderId, funding.fundingId],
+  );
+
+  if (orderRows.length === 0) {
+    throw createServiceError(
+      404,
+      '二쇰Ц ?댁쾦 ?닿쨷 ?낅젰?댁＜?몄슂.',
+      `funding_id=${funding.fundingId}, order_id=${normalizedOrderId}`,
+    );
+  }
+
+  if (orderRows[0].order_status !== 'PAID') {
+    throw createServiceError(
+      400,
+      'PAID ?덉쭛 ?댁쾦 ?됭낵 ?ㅽ듬?먭슂?댄利좎꽭?꾨쾡.',
+    );
+  }
+
+  const normalizedDeliveryStatus = toDeliveryStatus(deliveryStatus);
+  if (deliveryStatus !== undefined && !normalizedDeliveryStatus) {
+    throw createServiceError(
+      400,
+      'deliveryStatus ?낅젰?댁＜?몄슂. (ORDERED, PREPARING, SHIPPED, DELIVERED, CANCELED)',
+    );
+  }
+
+  const hasUpdate = [
+    deliveryStatus !== undefined,
+    courier !== undefined,
+    courierCode !== undefined,
+    trackingNumber !== undefined,
+  ].some(Boolean);
+
+  if (!hasUpdate) {
+    throw createServiceError(
+      400,
+      'deliveryStatus/courier/courierCode/trackingNumber 媛? 媛? ?ㅽ듬?먭슂?댄利좎꽭?꾨쾡.',
+    );
+  }
+
+  const setClauses = [];
+  const values = [];
+
+  if (deliveryStatus !== undefined) {
+    values.push(normalizedDeliveryStatus);
+    setClauses.push(`delivery_status = $${values.length}`);
+
+    if (normalizedDeliveryStatus === 'SHIPPED') {
+      values.push(new Date());
+      setClauses.push(`shipped_at = COALESCE(shipped_at, $${values.length}::timestamp)`);
+    }
+
+    if (normalizedDeliveryStatus === 'DELIVERED') {
+      values.push(new Date());
+      setClauses.push(`delivered_at = COALESCE(delivered_at, $${values.length}::timestamp)`);
+    }
+  }
+
+  if (courier !== undefined) {
+    values.push(courier);
+    setClauses.push(`courier = $${values.length}`);
+  }
+
+  if (courierCode !== undefined) {
+    values.push(courierCode);
+    setClauses.push(`courier_code = $${values.length}`);
+  }
+
+  if (trackingNumber !== undefined) {
+    values.push(trackingNumber);
+    setClauses.push(`tracking_number = $${values.length}`);
+  }
+
+  const { rows: updatedRows } = await pool.query(
+    `
+      UPDATE orders
+      SET
+        ${setClauses.join(',\n        ')},
+        updated_at = CURRENT_TIMESTAMP
+      WHERE order_id = $${values.length + 1}
+        AND funding_id = $${values.length + 2}
+      RETURNING
+        order_id,
+        funding_id,
+        user_id,
+        recipient_name,
+        recipient_phone,
+        shipping_address,
+        shipping_detail_address,
+        postal_code,
+        total_amount,
+        order_status,
+        delivery_status,
+        courier,
+        courier_code,
+        tracking_number,
+        shipped_at,
+        delivered_at,
+        created_at
+    `,
+    [
+      ...values,
+      normalizedOrderId,
+      funding.fundingId,
+    ],
+  );
+
+  const updated = updatedRows[0];
+  if (!updated) {
+    throw createServiceError(
+      404,
+      '二쇰Ц ?댁쾦 ?닿쨷 ?낅젰?댁＜?몄슂.',
+      `order_id=${normalizedOrderId}, funding_id=${funding.fundingId}`,
+    );
+  }
+
+  const { rows: paymentRows } = await pool.query(
+    `
+      SELECT payment_status
+      FROM payments
+      WHERE order_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [normalizedOrderId],
+  );
+
+  updated.payment_status = paymentRows[0]?.payment_status || updated.order_status;
+
+  const { rows: nicknameRows } = await pool.query(
+    `
+      SELECT nickname
+      FROM users
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [updated.user_id],
+  );
+
+  updated.nickname = nicknameRows[0]?.nickname || null;
+
+  const order = mapBreweryFundingOrderDelivery(updated);
+  return {
+    ...order,
+    paymentStatus: updated.payment_status || order.orderStatus,
+  };
+};
+
 const upsertBreweryFundingDeliveryByUserId = async ({
   userId,
   fundingId,
@@ -1584,6 +1835,8 @@ module.exports = {
   getBreweryDashboardFundingsByUserId,
   getBreweryFundingDeliveryByUserId,
   upsertBreweryFundingDeliveryByUserId,
+  getBreweryFundingOrdersByUserId,
+  updateBreweryFundingOrderDeliveryByUserId,
   getBreweryNotificationsByUserId,
   markBreweryNotificationRead,
   markAllBreweryNotificationsRead,
