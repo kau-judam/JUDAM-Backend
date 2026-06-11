@@ -27,6 +27,7 @@ const {
   getMyActivityInterests,
   getMyActivityComments,
   getMyActivityQna,
+  getMyActivityFundingJournalComments,
 } = require('../services/mypage.service');
 
 const UNAUTHORIZED_RESPONSE = {
@@ -921,6 +922,25 @@ const getMyActivityQnaController = async (req, res) => {
   }
 };
 
+const getMyActivityFundingJournalCommentsController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await getMyActivityFundingJournalComments(userId, req.query);
+
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: '양조일지 댓글 목록 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 module.exports = {
   getMyProfileController,
   getMyPageSummaryController,
@@ -944,6 +964,7 @@ module.exports = {
   getMyActivityInterestsController,
   getMyActivityCommentsController,
   getMyActivityQnaController,
+  getMyActivityFundingJournalCommentsController,
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,

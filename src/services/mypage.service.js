@@ -3021,6 +3021,56 @@ const getMyActivityQna = async (userId, query = {}) => {
   return buildActivityListResponse('qnas', qnas, totalElements, page, size);
 };
 
+// 마이페이지 활동 - 펀딩 양조일지 댓글 목록 (GET /api/mypage/activity/funding-journal-comments)
+// 본인이 펀딩 양조일지에 작성한 댓글/답글을 조회. 양조일지/펀딩이 삭제되면 JOIN으로 자연 제외.
+const getMyActivityFundingJournalComments = async (userId, query = {}) => {
+  const { page, size, offset } = parseActivityPagination(query);
+
+  const baseFrom = `
+    FROM brewery_log_comments blc
+    JOIN brewery_logs bl ON bl.log_id = blc.brewery_log_id
+    JOIN funding_projects fp ON fp.funding_id = bl.funding_id
+    WHERE blc.user_id = $1
+  `;
+
+  const [{ rows: countRows }, { rows }] = await Promise.all([
+    pool.query(`SELECT COUNT(*) AS count ${baseFrom}`, [userId]),
+    pool.query(
+      `
+        SELECT
+          blc.comment_id,
+          bl.funding_id,
+          fp.title AS funding_title,
+          bl.log_id AS brewery_log_id,
+          bl.title AS brewery_log_title,
+          bl.created_at AS brewery_log_created_at,
+          blc.content,
+          blc.created_at,
+          blc.updated_at
+        ${baseFrom}
+        ORDER BY blc.created_at DESC
+        LIMIT $2 OFFSET $3
+      `,
+      [userId, size, offset],
+    ),
+  ]);
+
+  const totalElements = Number(countRows[0]?.count || 0);
+  const comments = rows.map((row) => ({
+    commentId: Number(row.comment_id),
+    fundingId: Number(row.funding_id),
+    fundingTitle: row.funding_title,
+    breweryLogId: Number(row.brewery_log_id),
+    breweryLogTitle: row.brewery_log_title,
+    breweryLogCreatedAt: row.brewery_log_created_at,
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+
+  return buildActivityListResponse('comments', comments, totalElements, page, size);
+};
+
 module.exports = {
   getMyProfile,
   checkNickname,
@@ -3064,4 +3114,5 @@ module.exports = {
   getMyActivityInterests,
   getMyActivityComments,
   getMyActivityQna,
+  getMyActivityFundingJournalComments,
 };

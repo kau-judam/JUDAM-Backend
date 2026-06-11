@@ -31,6 +31,7 @@ const {
   getMyActivityInterestsController,
   getMyActivityCommentsController,
   getMyActivityQnaController,
+  getMyActivityFundingJournalCommentsController,
 } = require('../controllers/mypage.controller');
 
 const router = express.Router();
@@ -53,6 +54,7 @@ router.get('/fundings/:fundingId/review', authMiddleware, getMyFundingReviewCont
 router.get('/activity/interests', authMiddleware, getMyActivityInterestsController);
 router.get('/activity/comments', authMiddleware, getMyActivityCommentsController);
 router.get('/activity/qna', authMiddleware, getMyActivityQnaController);
+router.get('/activity/funding-journal-comments', authMiddleware, getMyActivityFundingJournalCommentsController);
 router.get('/archives/:archiveId', authMiddleware, getMyArchiveDetailController);
 router.post('/archives', authMiddleware, createMyArchiveController);
 router.patch('/archives/:archiveId', authMiddleware, updateMyArchiveController);
