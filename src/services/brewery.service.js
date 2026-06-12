@@ -656,7 +656,7 @@ const createApplication = async ({
       WHERE user_id = $1
         AND status IN ('PENDING', 'APPROVED')
       ORDER BY
-        CASE WHEN status = 'PENDING' THEN 0 ELSE 1 END,
+        CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END,
         updated_at DESC NULLS LAST,
         created_at DESC
       LIMIT 1
@@ -735,7 +735,7 @@ const createApplication = async ({
           UPDATE brewery_auth
           SET
             license_number = $1,
-            status = 'APPROVED',
+            status = 'PENDING',
             location = $2,
             brewery_name = $3,
             business_address_detail = $4,
@@ -800,7 +800,7 @@ const createApplication = async ({
         `
           UPDATE users
           SET
-            role = 'BREWERY',
+            role = 'BREWERY_PENDING',
             updated_at = CURRENT_TIMESTAMP
           WHERE user_id = $1
             AND deleted_at IS NULL
@@ -865,7 +865,7 @@ const createApplication = async ({
         VALUES (
           $1,
           $2,
-          'APPROVED',
+          'PENDING',
           $3,
           $4,
           $5,
@@ -930,7 +930,7 @@ const createApplication = async ({
       `
         UPDATE users
         SET
-          role = 'BREWERY',
+          role = 'BREWERY_PENDING',
           updated_at = CURRENT_TIMESTAMP
         WHERE user_id = $1
           AND deleted_at IS NULL
@@ -1160,6 +1160,110 @@ const rejectApplication = async ({ applicationId, rejectReason }) => {
   return mapApplication(rows[0]);
 };
 
+const rejectApplicationWithRoleUpdate = async ({ applicationId, rejectReason }) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `
+        UPDATE brewery_auth
+        SET
+          status = 'REJECTED',
+          reject_reason = $2,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE application_id = $1
+        RETURNING
+          application_id,
+          user_id,
+          brewery_name,
+          license_number,
+          location,
+          business_address_detail,
+          phone_number,
+          document_url,
+          document_key,
+          original_name,
+          mime_type,
+          file_size,
+          ocr_status,
+          ocr_result,
+          ocr_summary,
+          ocr_error,
+          ocr_checked_at,
+          reject_reason,
+          status,
+          created_at,
+          updated_at
+      `,
+      [applicationId, rejectReason],
+    );
+
+    if (rows.length === 0) {
+      throw createServiceError(
+        404,
+        '?묒“???몄쬆 ?좎껌??李얠쓣 ???놁뒿?덈떎.',
+        `application_id=${applicationId}`,
+      );
+    }
+
+    const application = rows[0];
+    const { rows: approvedRows } = await client.query(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM brewery_auth
+          WHERE user_id = $1
+            AND status = 'APPROVED'
+        ) AS has_approved_brewery
+      `,
+      [application.user_id],
+    );
+    const nextRole = approvedRows[0]?.has_approved_brewery ? 'BREWERY' : 'USER';
+
+    const userResult = await client.query(
+      `
+        UPDATE users
+        SET
+          role = $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $2
+          AND deleted_at IS NULL
+        RETURNING
+          user_id,
+          email,
+          nickname,
+          phone_number,
+          provider,
+          role,
+          profile_image
+      `,
+      [nextRole, application.user_id],
+    );
+
+    if (userResult.rows.length === 0) {
+      throw createServiceError(
+        404,
+        '?묒“???몄쬆 ?좎껌???곌껐???ъ슜?먮? 李얠쓣 ???놁뒿?덈떎.',
+        `user_id=${application.user_id}`,
+      );
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      ...mapApplication(application),
+      user: mapUserResponse(userResult.rows[0]),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 const updateApprovedApplicationByUserId = async ({
   userId,
   breweryName,
@@ -1266,7 +1370,7 @@ const assertBreweryDashboardUser = async (userId) => {
 
   const role = String(rows[0].role || '').toUpperCase();
 
-  if (!role.startsWith('BREWERY') && !rows[0].has_approved_brewery) {
+  if (role !== 'BREWERY' && !rows[0].has_approved_brewery) {
     throw createServiceError(
       403,
       '양조장 계정만 사용할 수 있는 기능입니다.',
@@ -2040,7 +2144,7 @@ module.exports = {
   getApplications,
   getApplicationByUserId,
   approveApplication,
-  rejectApplication,
+  rejectApplication: rejectApplicationWithRoleUpdate,
   updateApprovedApplicationByUserId,
   getBreweryProfileByUserId,
   getBreweryDashboardBasicInfoByUserId,

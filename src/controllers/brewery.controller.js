@@ -697,9 +697,13 @@ const createBreweryApplication = async (req, res) => {
       documentKey: normalizedDocumentKey,
     });
 
+    const responseMessage = application.status === 'APPROVED'
+      ? '\uC774\uBBF8 \uC2B9\uC778\uB41C \uC591\uC870\uC7A5 \uC778\uC99D\uC785\uB2C8\uB2E4.'
+      : '\uC591\uC870\uC7A5 \uC778\uC99D \uC2E0\uCCAD\uC774 \uC811\uC218\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAD00\uB9AC\uC790 \uAC80\uD1A0 \uD6C4 \uC2B9\uC778\uB429\uB2C8\uB2E4.';
+
     return res.status(201).json({
       status: 201,
-      message: '?묒“???몄쬆 ?좎껌 ?깃났',
+      message: responseMessage,
       data: application,
     });
   } catch (error) {
