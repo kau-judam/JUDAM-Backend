@@ -194,11 +194,16 @@ const getRecipes = async (sort, status, page, size, userId) => {
       JOIN users u ON u.user_id = r.user_id
       LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $4
       WHERE r.status = $1
+        AND NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id)
       ${orderClause}
       LIMIT $2 OFFSET $3
     `;
     dataParams = [status, size, offset, userId];
-    countQuery = 'SELECT COUNT(*) FROM recipes WHERE status = $1';
+    countQuery = `
+      SELECT COUNT(*) FROM recipes r
+      WHERE r.status = $1
+        AND NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id)
+    `;
     countParams = [status];
   } else {
     dataQuery = `
@@ -206,11 +211,15 @@ const getRecipes = async (sort, status, page, size, userId) => {
       FROM recipes r
       JOIN users u ON u.user_id = r.user_id
       LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $3
+      WHERE NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id)
       ${orderClause}
       LIMIT $1 OFFSET $2
     `;
     dataParams = [size, offset, userId];
-    countQuery = 'SELECT COUNT(*) FROM recipes';
+    countQuery = `
+      SELECT COUNT(*) FROM recipes r
+      WHERE NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id)
+    `;
     countParams = [];
   }
 
