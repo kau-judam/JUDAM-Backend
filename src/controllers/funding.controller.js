@@ -1,4 +1,4 @@
-onst crypto = require('crypto');
+const crypto = require('crypto');
 const pool = require('../config/db');
 const { uploadFileToS3 } = require('../services/s3.service');
 const {
