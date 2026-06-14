@@ -54,13 +54,17 @@ const suggestSubIngredientsController = async (req, res) => {
       location,
       area,
     } = req.body;
-    const normalizedMainIngredient = main_ingredient || mainIngredient;
-    const normalizedRegion = region || location || area || null;
+    const normalizedMainIngredient = typeof (main_ingredient || mainIngredient) === 'string'
+      ? (main_ingredient || mainIngredient).trim()
+      : '';
+    const normalizedRegion = typeof (region || location || area) === 'string'
+      ? (region || location || area).trim()
+      : '';
 
-    if (!normalizedMainIngredient) {
+    if (!normalizedMainIngredient || !normalizedRegion) {
       return res.status(400).json({
         status: 400,
-        message: 'main_ingredient는 필수입니다.',
+        message: 'main_ingredient와 region은 필수입니다.',
       });
     }
 
