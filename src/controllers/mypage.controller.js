@@ -11,6 +11,7 @@ const {
   getMySulbti,
   getMySulbtiShareLink,
   saveMySulbti,
+  saveMySulbtiFeedback,
   getMyArchives,
   getMyArchiveDetail,
   createMyArchive,
@@ -265,6 +266,39 @@ const saveMySulbtiController = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '?잹TI 寃곌낵 ???以??쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.',
+    });
+  }
+};
+
+const saveMySulbtiFeedbackController = async (req, res) => {
+  const userId = getAuthenticatedUserId(req, res);
+
+  if (!userId) {
+    return;
+  }
+
+  try {
+    const data = await saveMySulbtiFeedback(userId, req.body);
+
+    return res.status(201).json({
+      status: 201,
+      message: '\uC220BTI \uD53C\uB4DC\uBC31\uC774 \uC800\uC7A5\uB418\uC5C8\uC2B5\uB2C8\uB2E4.',
+      data,
+    });
+  } catch (error) {
+    const status = getErrorStatus(error);
+
+    if ([400, 404, 409].includes(status)) {
+      return res.status(status).json({
+        status,
+        message: error.message,
+        ...(error.data ? { data: error.data } : {}),
+      });
+    }
+
+    return res.status(500).json({
+      status: 500,
+      message: '\uC220BTI \uD53C\uB4DC\uBC31 \uC800\uC7A5 \uC911 \uC11C\uBC84 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.',
     });
   }
 };
@@ -946,6 +980,7 @@ module.exports = {
   getMySulbtiController,
   getMySulbtiShareLinkController,
   saveMySulbtiController,
+  saveMySulbtiFeedbackController,
   getMyArchivesController,
   getMyArchiveDetailController,
   createMyArchiveController,
