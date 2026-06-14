@@ -9,6 +9,7 @@ const {
   getMySulbtiController,
   getMySulbtiShareLinkController,
   saveMySulbtiController,
+  saveMySulbtiFeedbackController,
   checkNicknameController,
   updateNicknameController,
   updatePhoneNumberController,
@@ -42,6 +43,7 @@ router.get('/badges', authMiddleware, getMyBadgesController);
 router.get('/sulbti', authMiddleware, getMySulbtiController);
 router.get('/sulbti/share-link', authMiddleware, getMySulbtiShareLinkController);
 router.post('/sulbti', authMiddleware, saveMySulbtiController);
+router.post('/sulbti/feedback', authMiddleware, saveMySulbtiFeedbackController);
 router.get('/archives/tags', authMiddleware, getArchiveTagsController);
 router.get('/archives', authMiddleware, getMyArchivesController);
 router.post('/archives/with-images', authMiddleware, upload.array('images', 3), createMyArchiveWithImagesController);

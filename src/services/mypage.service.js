@@ -604,6 +604,7 @@ const getMyPageSummary = async (userId) => {
 
 const getEmptySulbtiResponse = () => ({
   hasResult: false,
+  sulbtiResultId: null,
   type: null,
   title: null,
   description: null,
@@ -615,6 +616,11 @@ const getEmptySulbtiResponse = () => ({
   tags: [],
   createdAt: null,
   updatedAt: null,
+  feedback: {
+    hasSubmitted: false,
+    feedbackId: null,
+    submittedAt: null,
+  },
 });
 
 const normalizeSulbtiBtiCode = (btiCode) => {
@@ -655,6 +661,9 @@ const mapSulbtiResponse = (row) => {
 
   return {
     hasResult: true,
+    sulbtiResultId: row.result_id === null || row.result_id === undefined
+      ? null
+      : Number(row.result_id),
     type: normalizedType,
     title: row.character_name || row.type_name || null,
     description: row.alcohol_label || row.description || null,
@@ -666,6 +675,13 @@ const mapSulbtiResponse = (row) => {
     tags: [],
     createdAt: row.created_at,
     updatedAt: row.updated_at || row.user_updated_at || null,
+    feedback: {
+      hasSubmitted: row.feedback_id !== null && row.feedback_id !== undefined,
+      feedbackId: row.feedback_id === null || row.feedback_id === undefined
+        ? null
+        : Number(row.feedback_id),
+      submittedAt: row.feedback_created_at || null,
+    },
   };
 };
 
@@ -708,10 +724,31 @@ const getMySulbti = async (userId) => {
         r.updated_at,
         t.type_code,
         t.type_name,
-        t.description
+        t.description,
+        sf.feedback_id,
+        sf.created_at AS feedback_created_at
       FROM users u
-      LEFT JOIN sul_bti_results r ON r.user_id = u.user_id
+      LEFT JOIN LATERAL (
+        SELECT
+          result_id,
+          user_id,
+          type_id,
+          sweetness_score,
+          body_score,
+          carbonation_score,
+          flavor_score,
+          abv_score,
+          created_at,
+          updated_at
+        FROM sul_bti_results
+        WHERE user_id = u.user_id
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC, result_id DESC
+        LIMIT 1
+      ) r ON TRUE
       LEFT JOIN sul_bti_types t ON r.type_id = t.type_id
+      LEFT JOIN sulbti_feedbacks sf
+        ON sf.user_id = u.user_id
+       AND sf.sulbti_result_id = r.result_id
       WHERE u.user_id = $1
         AND u.deleted_at IS NULL
       LIMIT 1
@@ -733,6 +770,197 @@ const getMySulbti = async (userId) => {
   }
 
   return mapSulbtiResponse(row);
+};
+
+const SULBTI_FEEDBACK_AXES = new Set([
+  '\uB2E8\uB9DB',
+  '\uBC14\uB514\uAC10/\uBB35\uC9C1\uD568',
+  '\uD0C4\uC0B0\uAC10',
+  '\uD48D\uBBF8/\uD5A5',
+  '\uC798 \uBAA8\uB974\uACA0\uC74C',
+]);
+const SULBTI_FEEDBACK_COMMENT_MAX_LENGTH = 1000;
+
+const createSulbtiFeedbackError = (statusCode, message, data) => {
+  const error = createServiceError(statusCode, message);
+  error.data = data;
+  return error;
+};
+
+const normalizeSulbtiFeedbackPayload = (payload = {}) => {
+  const sulbtiResultId = Number(payload.sulbtiResultId ?? payload.sulbti_result_id);
+  const btiCode = typeof (payload.btiCode ?? payload.bti_code) === 'string'
+    ? String(payload.btiCode ?? payload.bti_code).trim().toUpperCase()
+    : '';
+  const isMatched = payload.isMatched ?? payload.is_matched;
+  const rawAxes = payload.mismatchedAxes ?? payload.mismatched_axes ?? [];
+
+  if (!Number.isInteger(sulbtiResultId) || sulbtiResultId <= 0) {
+    throw createSulbtiFeedbackError(
+      400,
+      '\uC220BTI \uACB0\uACFC ID\uB294 \uD544\uC218\uC785\uB2C8\uB2E4.',
+    );
+  }
+
+  if (!btiCode) {
+    throw createSulbtiFeedbackError(400, 'btiCode\uB294 \uD544\uC218\uC785\uB2C8\uB2E4.');
+  }
+
+  if (typeof isMatched !== 'boolean') {
+    throw createSulbtiFeedbackError(
+      400,
+      'isMatched\uB294 boolean \uAC12\uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4.',
+    );
+  }
+
+  if (!Array.isArray(rawAxes)) {
+    throw createSulbtiFeedbackError(
+      400,
+      'mismatchedAxes\uB294 \uBC30\uC5F4\uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4.',
+    );
+  }
+
+  const mismatchedAxes = [...new Set(rawAxes.map((axis) => (
+    typeof axis === 'string' ? axis.trim() : ''
+  )))];
+
+  if (mismatchedAxes.some((axis) => !SULBTI_FEEDBACK_AXES.has(axis))) {
+    throw createSulbtiFeedbackError(
+      400,
+      '\uD5C8\uC6A9\uB418\uC9C0 \uC54A\uC740 \uB9DE\uC9C0 \uC54A\uC740 \uCD95\uC774 \uD3EC\uD568\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.',
+    );
+  }
+
+  if (!isMatched && mismatchedAxes.length === 0) {
+    throw createSulbtiFeedbackError(
+      400,
+      '\uB9DE\uC9C0 \uC54A\uC740 \uCD95\uC744 1\uAC1C \uC774\uC0C1 \uC120\uD0DD\uD574\uC8FC\uC138\uC694.',
+    );
+  }
+
+  let comment = null;
+
+  if (payload.comment !== undefined && payload.comment !== null) {
+    if (typeof payload.comment !== 'string') {
+      throw createSulbtiFeedbackError(
+        400,
+        'comment\uB294 \uBB38\uC790\uC5F4\uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4.',
+      );
+    }
+
+    comment = payload.comment.trim() || null;
+
+    if (comment && comment.length > SULBTI_FEEDBACK_COMMENT_MAX_LENGTH) {
+      throw createSulbtiFeedbackError(
+        400,
+        `comment\uB294 ${SULBTI_FEEDBACK_COMMENT_MAX_LENGTH}\uC790 \uC774\uD558\uB85C \uC785\uB825\uD574\uC8FC\uC138\uC694.`,
+      );
+    }
+  }
+
+  return {
+    sulbtiResultId,
+    btiCode,
+    isMatched,
+    mismatchedAxes,
+    comment,
+  };
+};
+
+const saveMySulbtiFeedback = async (userId, payload) => {
+  const feedback = normalizeSulbtiFeedbackPayload(payload);
+  const { rows: resultRows } = await pool.query(
+    `
+      SELECT
+        r.result_id,
+        COALESCE(t.type_code, u.bti_code) AS bti_code
+      FROM sul_bti_results r
+      JOIN users u ON u.user_id = r.user_id
+      LEFT JOIN sul_bti_types t ON t.type_id = r.type_id
+      WHERE r.result_id = $1
+        AND r.user_id = $2
+        AND u.deleted_at IS NULL
+      LIMIT 1
+    `,
+    [feedback.sulbtiResultId, userId],
+  );
+
+  if (resultRows.length === 0) {
+    throw createSulbtiFeedbackError(
+      404,
+      '\uD574\uB2F9 \uC220BTI \uACB0\uACFC\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.',
+    );
+  }
+
+  const resultBtiCode = normalizeSulbtiBtiCode(resultRows[0].bti_code)?.toUpperCase() || null;
+
+  if (resultBtiCode && resultBtiCode !== feedback.btiCode) {
+    throw createSulbtiFeedbackError(
+      400,
+      'btiCode\uAC00 \uC220BTI \uACB0\uACFC\uC640 \uC77C\uCE58\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.',
+    );
+  }
+
+  const { rows: existingRows } = await pool.query(
+    `
+      SELECT feedback_id
+      FROM sulbti_feedbacks
+      WHERE user_id = $1
+        AND sulbti_result_id = $2
+      LIMIT 1
+    `,
+    [userId, feedback.sulbtiResultId],
+  );
+
+  if (existingRows.length > 0) {
+    throw createSulbtiFeedbackError(
+      409,
+      '\uC774\uBBF8 \uD574\uB2F9 \uC220BTI \uACB0\uACFC\uC5D0 \uB300\uD55C \uD53C\uB4DC\uBC31\uC744 \uC81C\uCD9C\uD588\uC2B5\uB2C8\uB2E4.',
+      { hasSubmittedFeedback: true },
+    );
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+        INSERT INTO sulbti_feedbacks (
+          user_id,
+          sulbti_result_id,
+          bti_code,
+          is_matched,
+          mismatched_axes,
+          comment,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING feedback_id
+      `,
+      [
+        userId,
+        feedback.sulbtiResultId,
+        feedback.btiCode,
+        feedback.isMatched,
+        JSON.stringify(feedback.mismatchedAxes),
+        feedback.comment,
+      ],
+    );
+
+    return {
+      feedbackId: Number(rows[0].feedback_id),
+      hasSubmittedFeedback: true,
+    };
+  } catch (error) {
+    if (error.code === '23505') {
+      throw createSulbtiFeedbackError(
+        409,
+        '\uC774\uBBF8 \uD574\uB2F9 \uC220BTI \uACB0\uACFC\uC5D0 \uB300\uD55C \uD53C\uB4DC\uBC31\uC744 \uC81C\uCD9C\uD588\uC2B5\uB2C8\uB2E4.',
+        { hasSubmittedFeedback: true },
+      );
+    }
+
+    throw error;
+  }
 };
 
 const validateSulbtiScore = (score) => (
@@ -2722,6 +2950,7 @@ const getParticipatedFundingOrderDetail = async (userId, orderId) => {
         o.shipped_at,
         o.delivered_at,
         fp.title AS project_name,
+        fp.thumbnail_url,
         ba.brewery_name,
         u.nickname AS brewery_nickname,
         opt.name AS reward_name
@@ -2785,6 +3014,8 @@ const getParticipatedFundingOrderDetail = async (userId, orderId) => {
       : Number(order.funding_id),
     projectName: order.project_name,
     breweryName: order.brewery_name || order.brewery_nickname || null,
+    thumbnailUrl: order.thumbnail_url || null,
+    imageUrl: order.thumbnail_url || null,
     rewardName: order.reward_name || null,
     paidAmount: totalAmount - shippingFee,
     shippingFee,
@@ -3126,6 +3357,7 @@ module.exports = {
   getMySulbti,
   getMySulbtiShareLink,
   saveMySulbti,
+  saveMySulbtiFeedback,
   convertAndSaveMySulbtiSurvey,
   findSulbtiTypeByCode,
   mapSulbtiResponse,
