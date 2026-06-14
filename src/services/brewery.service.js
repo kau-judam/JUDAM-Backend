@@ -574,6 +574,46 @@ const buildSkippedOcrReview = (reason) => ({
   checkedAt: null,
 });
 
+const getBreweryOcrErrorMessage = (result, fallback) => {
+  const errorValue = getFirstDefined(
+    result?.error,
+    result?.message,
+    result?.detail,
+  );
+
+  if (typeof errorValue === 'string' && errorValue.trim()) {
+    return errorValue.trim();
+  }
+
+  if (errorValue !== undefined) {
+    try {
+      return JSON.stringify(errorValue);
+    } catch (error) {
+      return String(errorValue);
+    }
+  }
+
+  return fallback;
+};
+
+const buildFailedOcrReview = ({
+  result,
+  error,
+  checkedAt,
+  reason,
+}) => ({
+  status: 'FAILED',
+  result: result || null,
+  summary: {
+    manualReviewOnly: true,
+    reviewPolicy: 'OCR_RESULT_IS_FOR_ADMIN_REVIEW_ONLY',
+    reviewRequired: true,
+    reason,
+  },
+  error,
+  checkedAt,
+});
+
 const runBreweryLicenseOcrReview = async ({
   businessLicenseFile,
   documentUrl,
@@ -591,27 +631,44 @@ const runBreweryLicenseOcrReview = async ({
       documentUrl,
       documentKey,
     });
+    const responseStatus = typeof result?.status === 'string'
+      ? result.status.trim().toUpperCase()
+      : '';
 
-    return {
-      status: 'COMPLETED',
-      result,
-      summary: summarizeBreweryOcrResult(result),
-      error: null,
-      checkedAt,
-    };
-  } catch (error) {
-    return {
-      status: 'FAILED',
-      result: null,
-      summary: {
-        manualReviewOnly: true,
-        reviewPolicy: 'OCR_RESULT_IS_FOR_ADMIN_REVIEW_ONLY',
-        reviewRequired: true,
+    if (responseStatus === 'COMPLETED') {
+      return {
+        status: 'COMPLETED',
+        result,
+        summary: summarizeBreweryOcrResult(result),
+        error: null,
+        checkedAt,
+      };
+    }
+
+    if (responseStatus === 'FAILED') {
+      return buildFailedOcrReview({
+        result,
+        error: getBreweryOcrErrorMessage(result, 'OCR processing failed'),
+        checkedAt,
         reason: 'OCR_FAILED_APPLICATION_SAVED_FOR_MANUAL_REVIEW',
-      },
+      });
+    }
+
+    const unexpectedStatus = responseStatus || 'MISSING';
+
+    return buildFailedOcrReview({
+      result,
+      error: `Unexpected OCR response status: ${unexpectedStatus}`,
+      checkedAt,
+      reason: 'UNEXPECTED_OCR_RESPONSE_STATUS',
+    });
+  } catch (error) {
+    return buildFailedOcrReview({
+      result: null,
       error: error.message || 'OCR request failed',
       checkedAt,
-    };
+      reason: 'OCR_FAILED_APPLICATION_SAVED_FOR_MANUAL_REVIEW',
+    });
   }
 };
 
