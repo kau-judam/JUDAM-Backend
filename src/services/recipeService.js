@@ -280,7 +280,10 @@ const getPopularRecipesForHome = async () => {
       FROM recipe_comments rc
       WHERE rc.recipe_id = r.recipe_id
     ) comment_counts ON TRUE
-    WHERE r.status = 'PUBLISHED'
+    WHERE r.status IN ('PUBLISHED', 'FUNDING_READY')
+      AND NOT EXISTS (
+        SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id
+      )
     ORDER BY
       GREATEST(
         COALESCE(r.interest_count, 0),
