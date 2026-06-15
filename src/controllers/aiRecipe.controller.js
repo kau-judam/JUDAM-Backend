@@ -5,6 +5,17 @@ const {
   suggestSummary,
 } = require('../services/aiRecipe.service');
 
+const normalizeRegionForAi = (region) => {
+  const normalized = typeof region === 'string' ? region.trim() : '';
+
+  if (!normalized) {
+    return '';
+  }
+
+  const regionParts = normalized.split(/\s+/);
+  return regionParts.length > 1 ? regionParts[regionParts.length - 1] : normalized;
+};
+
 const ingredientRegionController = async (req, res) => {
   try {
     const {
@@ -100,15 +111,23 @@ const suggestSubIngredientsController = async (req, res) => {
       });
     }
 
+    const aiRegion = normalizeRegionForAi(normalizedRegion);
     const data = await suggestSubIngredients({
       main_ingredient: normalizedMainIngredient,
-      region: normalizedRegion,
+      region: aiRegion,
     });
+    const responseData = data && typeof data === 'object' && !Array.isArray(data)
+      ? {
+        ...data,
+        region: data.region || aiRegion,
+        selectedRegion: normalizedRegion,
+      }
+      : data;
 
     return res.status(200).json({
       status: 200,
       message: '서브재료 추천 성공',
-      data,
+      data: responseData,
     });
   } catch (error) {
     console.error('[AI Recipe] 서브재료 추천 실패:', error);
