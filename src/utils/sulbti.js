@@ -19,9 +19,16 @@ const SULBTI_TYPE_CODES = Object.freeze([
 
 const SULBTI_TYPE_CODE_SET = new Set(SULBTI_TYPE_CODES);
 
-const normalizeSulbtiTypeCode = (value) => (
-  typeof value === 'string' ? value.trim().toUpperCase() : ''
-);
+const normalizeSulbtiTypeCode = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const compact = value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const candidate = compact.slice(0, 4);
+
+  return SULBTI_TYPE_CODE_SET.has(candidate) ? candidate : '';
+};
 
 const isSulbtiTypeCode = (value) => (
   SULBTI_TYPE_CODE_SET.has(normalizeSulbtiTypeCode(value))
