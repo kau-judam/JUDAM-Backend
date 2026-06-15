@@ -9,6 +9,7 @@ const AI_TASTE_UPDATE_TIMEOUT_MS = 30000;
 const AI_DRINK_REQUEST_TIMEOUT_MS = 30000;
 const AI_BREWERY_OCR_TIMEOUT_MS = 30000;
 const AI_BREWERY_INSIGHT_TIMEOUT_MS = 30000;
+const AI_BTI_FEEDBACK_TIMEOUT_MS = 30000;
 
 const getAiServerBaseUrl = () => {
   const { AI_SERVER_BASE_URL } = process.env;
@@ -327,6 +328,15 @@ const updateAiTasteProfile = async (payload) => {
       message: 'AI 취향 업데이트에 실패했습니다.',
     };
   }
+};
+
+const sendBtiFeedbackToAi = async (payload) => {
+  const baseUrl = getAiServerBaseUrl();
+  const response = await axios.post(`${baseUrl}/api/bti/feedback`, payload, {
+    timeout: AI_BTI_FEEDBACK_TIMEOUT_MS,
+  });
+
+  return response.data || {};
 };
 
 const requestNewDrink = async (payload) => {
@@ -729,6 +739,7 @@ module.exports = {
   requestAiChatStream,
   requestAiRecommend,
   updateAiTasteProfile,
+  sendBtiFeedbackToAi,
   requestNewDrink,
   approveNewDrinkRequest,
   registerFundingToAiPool,

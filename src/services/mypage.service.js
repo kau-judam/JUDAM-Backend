@@ -7,7 +7,10 @@ const {
 } = require('./user.service');
 const { uploadFileToS3 } = require('./s3.service');
 const { convertSurvey } = require('./aiSurvey.service');
-const { updateAiTasteProfile } = require('./ai.service');
+const {
+  updateAiTasteProfile,
+  sendBtiFeedbackToAi,
+} = require('./ai.service');
 const pool = require('../config/db');
 const {
   normalizeSulbtiTypeCode,
@@ -874,6 +877,21 @@ const normalizeSulbtiFeedbackPayload = (payload = {}) => {
   };
 };
 
+const buildSulbtiFeedbackAiPayload = (userId, feedback) => {
+  const aiPayload = {
+    user_id: String(userId),
+    bti_code: feedback.btiCode,
+    is_correct: feedback.isMatched,
+    wrong_axes: feedback.isMatched ? [] : feedback.mismatchedAxes,
+  };
+
+  if (feedback.comment) {
+    aiPayload.feedback_reason = feedback.comment;
+  }
+
+  return aiPayload;
+};
+
 const saveMySulbtiFeedback = async (userId, payload) => {
   const feedback = normalizeSulbtiFeedbackPayload(payload);
   const { rows: resultRows } = feedback.sulbtiResultId
@@ -945,6 +963,8 @@ const saveMySulbtiFeedback = async (userId, payload) => {
     );
   }
 
+  let savedFeedback;
+
   try {
     const { rows } = await pool.query(
       `
@@ -971,7 +991,7 @@ const saveMySulbtiFeedback = async (userId, payload) => {
       ],
     );
 
-    return {
+    savedFeedback = {
       feedbackId: Number(rows[0].feedback_id),
       sulbtiResultId: resolvedSulbtiResultId,
       hasSubmittedFeedback: true,
@@ -987,6 +1007,21 @@ const saveMySulbtiFeedback = async (userId, payload) => {
 
     throw error;
   }
+
+  try {
+    await sendBtiFeedbackToAi(buildSulbtiFeedbackAiPayload(userId, feedback));
+  } catch (error) {
+    console.warn('AI BTI feedback delivery failed', {
+      userId,
+      btiCode: feedback.btiCode,
+      message: error.message,
+      code: error.code,
+      status: error.response?.status || error.statusCode,
+      data: error.response?.data,
+    });
+  }
+
+  return savedFeedback;
 };
 
 const validateSulbtiScore = (score) => (
