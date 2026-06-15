@@ -8,6 +8,7 @@ const AI_LAW_FILTER_TIMEOUT_MS = 30000;
 const AI_TASTE_UPDATE_TIMEOUT_MS = 30000;
 const AI_DRINK_REQUEST_TIMEOUT_MS = 30000;
 const AI_BREWERY_OCR_TIMEOUT_MS = 30000;
+const AI_BREWERY_INSIGHT_TIMEOUT_MS = 30000;
 
 const getAiServerBaseUrl = () => {
   const { AI_SERVER_BASE_URL } = process.env;
@@ -578,6 +579,39 @@ const requestBreweryLicenseOcr = async ({
   }
 };
 
+const requestBreweryInsight = async (payload) => {
+  const baseUrl = getAiServerBaseUrl();
+
+  try {
+    const response = await axios.post(`${baseUrl}/api/insight`, payload, {
+      timeout: AI_BREWERY_INSIGHT_TIMEOUT_MS,
+    });
+
+    return response.data || {};
+  } catch (error) {
+    if (error.statusCode) {
+      throw error;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      throw createAiServiceError(504, 'AI 인사이트 서버 응답 시간이 초과되었습니다.');
+    }
+
+    if (error.response) {
+      throw createAiServiceError(
+        error.response.status || 502,
+        getAiErrorMessage(error.response.data) || 'AI 인사이트 요청에 실패했습니다.',
+      );
+    }
+
+    if (axios.isAxiosError(error)) {
+      throw createAiServiceError(502, 'AI 인사이트 서버와 연결할 수 없습니다.');
+    }
+
+    throw error;
+  }
+};
+
 const generateAiImageAndUpload = async ({ payload, userId }) => {
   const baseUrl = getAiServerBaseUrl();
 
@@ -700,6 +734,7 @@ module.exports = {
   registerFundingToAiPool,
   requestLawFilter,
   requestBreweryLicenseOcr,
+  requestBreweryInsight,
   generateAiImageAndUpload,
   generateFundingDraftAiImageAndUpload,
 };
