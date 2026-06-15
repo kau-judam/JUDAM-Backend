@@ -15,6 +15,7 @@ const {
   upsertBreweryFundingDeliveryByUserId,
   getBreweryFundingOrdersByUserId,
   updateBreweryFundingOrderDeliveryByUserId,
+  getBreweryInsightByUserId,
   getBreweryNotificationsByUserId,
 } = require('../services/brewery.service');
 const { verifyAuthPhoneVerificationToken } = require('../services/auth-phone.service');
@@ -608,6 +609,34 @@ const getMyBreweryDashboardNotifications = async (req, res) => {
   }
 };
 
+const getMyBreweryDashboardInsight = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload에 userId가 없습니다.');
+  }
+
+  try {
+    const data = await getBreweryInsightByUserId({
+      userId,
+      period: req.query.period,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '양조장 인사이트 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 인사이트 조회 중 서버 오류가 발생했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
 const createBreweryApplication = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   const {
@@ -923,6 +952,7 @@ module.exports = {
   upsertMyBreweryDashboardFundingDelivery,
   getMyBreweryDashboardFundingOrders,
   upsertMyBreweryDashboardFundingOrderDelivery,
+  getMyBreweryDashboardInsight,
   getMyBreweryDashboardNotifications,
   verifyBreweryAccount,
   createBreweryApplication,

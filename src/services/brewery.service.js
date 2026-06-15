@@ -1,7 +1,10 @@
 const path = require('path');
 const pool = require('../config/db');
 const { uploadFileToS3 } = require('./s3.service');
-const { requestBreweryLicenseOcr } = require('./ai.service');
+const {
+  requestBreweryLicenseOcr,
+  requestBreweryInsight,
+} = require('./ai.service');
 
 const MAX_BUSINESS_LICENSE_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_BREWERY_PROFILE_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -290,6 +293,14 @@ const mapFundingDelivery = (row, fundingId) => ({
 });
 
 const DELIVERY_STATUS_VALUES = new Set(['ORDERED', 'PREPARING', 'SHIPPED', 'DELIVERED', 'CANCELED']);
+const BREWERY_INSIGHT_SUCCESS_STATUSES = [
+  'SUCCESS',
+  'SUCCESSFUL',
+  'FUNDING_SUCCESS',
+  'COMPLETED',
+  'DELIVERED',
+  'DONE',
+];
 
 const toDeliveryStatus = (value) => {
   if (!value) {
@@ -477,6 +488,112 @@ const extractS3KeyFromUrl = (fileUrl) => {
     const marker = '.amazonaws.com/';
     return fileUrl.includes(marker) ? fileUrl.split(marker)[1] : null;
   }
+};
+
+const getCurrentKstPeriod = () => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+
+  return `${year}-${month}`;
+};
+
+const normalizeBreweryInsightPeriod = (period) => {
+  const normalized = typeof period === 'string' ? period.trim() : '';
+  const resolved = normalized || getCurrentKstPeriod();
+  const match = resolved.match(/^(\d{4})-(\d{2})$/);
+
+  if (!match || Number(match[2]) < 1 || Number(match[2]) > 12) {
+    throw createServiceError(
+      400,
+      'period 형식이 올바르지 않습니다.',
+      'period는 YYYY-MM 형식이어야 합니다.',
+    );
+  }
+
+  return resolved;
+};
+
+const getBreweryInsightPeriodRange = (period) => {
+  const [year, month] = period.split('-').map(Number);
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+
+  return {
+    startDate: `${period}-01`,
+    endDate: `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`,
+  };
+};
+
+const parseInsightList = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  if (typeof value === 'object') {
+    return Object.values(value).flatMap(parseInsightList);
+  }
+
+  const normalized = String(value).trim();
+
+  if (!normalized) {
+    return [];
+  }
+
+  try {
+    return parseInsightList(JSON.parse(normalized));
+  } catch (error) {
+    return normalized
+      .split(/[,;|]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+};
+
+const buildFundingInsightIngredients = (row) => (
+  [...new Set([
+    ...parseInsightList(row.main_ingredient),
+    ...parseInsightList(row.sub_ingredients),
+    ...parseInsightList(row.raw_materials),
+  ])]
+);
+
+const buildFundingInsightTasteVector = (row) => {
+  const fields = [
+    ['sweetness', row.sweetness],
+    ['acidity', row.acidity],
+    ['body', row.body],
+    ['carbonation', row.carbonation],
+    ['alcohol_intensity', row.alcohol_intensity],
+  ];
+
+  return Object.fromEntries(fields
+    .filter(([, value]) => value !== null && value !== undefined && Number.isFinite(Number(value)))
+    .map(([key, value]) => [key, Number(value)]));
+};
+
+const buildBtiInsightKeywords = (row) => {
+  const tasteKeywords = [
+    { keyword: '단맛', score: Number(row.avg_sweetness || 0) },
+    { keyword: '바디감/묵직함', score: Number(row.avg_body || 0) },
+    { keyword: '탄산감', score: Number(row.avg_carbonation || 0) },
+    { keyword: '풍미/향', score: Number(row.avg_flavor || 0) },
+  ]
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 2)
+    .map(({ keyword }) => keyword);
+  const averageAbv = Number(row.avg_abv || 0);
+  const abvKeyword = averageAbv >= 3.5 ? '고도수' : '저도수';
+
+  return [...tasteKeywords, abvKeyword];
 };
 
 const getFirstDefined = (...values) => values.find(
@@ -2109,6 +2226,188 @@ const upsertBreweryFundingDeliveryByUserId = async ({
   return mapFundingDelivery(rows[0], funding.fundingId);
 };
 
+const getBreweryInsightByUserId = async ({ userId, period }) => {
+  await assertBreweryDashboardUser(userId);
+
+  const normalizedPeriod = normalizeBreweryInsightPeriod(period);
+  const { startDate, endDate } = getBreweryInsightPeriodRange(normalizedPeriod);
+
+  const [
+    postTrendResult,
+    fundingSuccessResult,
+    btiKeywordResult,
+  ] = await Promise.all([
+    pool.query(
+      `
+        SELECT
+          recipe_metrics.keyword,
+          COUNT(*)::int AS post_count,
+          COALESCE(SUM(recipe_metrics.like_count), 0)::int AS likes,
+          COALESCE(SUM(recipe_metrics.comment_count), 0)::int AS comments,
+          0::int AS views
+        FROM (
+          SELECT
+            r.recipe_id,
+            BTRIM(r.main_ingredient) AS keyword,
+            COALESCE(r.interest_count, 0)::int AS like_count,
+            COUNT(rc.comment_id)::int AS comment_count
+          FROM recipes r
+          LEFT JOIN recipe_comments rc ON rc.recipe_id = r.recipe_id
+          WHERE r.created_at >= $1::date
+            AND r.created_at < $2::date
+            AND UPPER(COALESCE(r.status, 'PUBLISHED')) = 'PUBLISHED'
+            AND NULLIF(BTRIM(r.main_ingredient), '') IS NOT NULL
+          GROUP BY
+            r.recipe_id,
+            BTRIM(r.main_ingredient),
+            r.interest_count
+        ) recipe_metrics
+        GROUP BY recipe_metrics.keyword
+        ORDER BY
+          likes DESC,
+          comments DESC,
+          post_count DESC,
+          recipe_metrics.keyword ASC
+        LIMIT 10
+      `,
+      [startDate, endDate],
+    ),
+    pool.query(
+      `
+        SELECT
+          fp.funding_id,
+          fp.title,
+          fp.current_amount,
+          fp.goal_amount,
+          fp.status,
+          COALESCE(NULLIF(BTRIM(fd.main_ingredient), ''), NULLIF(BTRIM(r.main_ingredient), ''))
+            AS main_ingredient,
+          COALESCE(NULLIF(BTRIM(fd.sub_ingredients::text), ''), NULLIF(BTRIM(r.ai_sub_ingredient), ''))
+            AS sub_ingredients,
+          NULLIF(BTRIM(fd.raw_materials::text), '') AS raw_materials,
+          tp.sweetness,
+          tp.acidity,
+          tp.body,
+          tp.carbonation,
+          tp.alcohol_intensity
+        FROM funding_projects fp
+        JOIN recipes r ON r.recipe_id = fp.recipe_id
+        LEFT JOIN LATERAL (
+          SELECT
+            main_ingredient,
+            sub_ingredients,
+            raw_materials
+          FROM funding_drafts
+          WHERE funding_id = fp.funding_id
+            AND brewery_id = fp.brewery_user_id
+          ORDER BY updated_at DESC, draft_id DESC
+          LIMIT 1
+        ) fd ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            sweetness,
+            acidity,
+            body,
+            carbonation,
+            alcohol_intensity
+          FROM taste_profiles
+          WHERE funding_id = fp.funding_id
+          ORDER BY updated_at DESC, created_at DESC, taste_profile_id DESC
+          LIMIT 1
+        ) tp ON TRUE
+        WHERE fp.brewery_user_id = $1
+          AND UPPER(fp.status) = ANY($2::text[])
+          AND fp.end_date >= $3::date
+          AND fp.end_date < $4::date
+        ORDER BY fp.end_date DESC, fp.funding_id DESC
+        LIMIT 20
+      `,
+      [
+        userId,
+        BREWERY_INSIGHT_SUCCESS_STATUSES,
+        startDate,
+        endDate,
+      ],
+    ),
+    pool.query(
+      `
+        WITH latest_results AS (
+          SELECT DISTINCT ON (r.user_id)
+            r.user_id,
+            t.type_code,
+            r.sweetness_score,
+            r.body_score,
+            r.carbonation_score,
+            r.flavor_score,
+            r.abv_score
+          FROM sul_bti_results r
+          JOIN sul_bti_types t ON t.type_id = r.type_id
+          WHERE r.created_at >= $1::date
+            AND r.created_at < $2::date
+          ORDER BY r.user_id, r.created_at DESC, r.result_id DESC
+        )
+        SELECT
+          type_code AS bti_code,
+          COUNT(*)::int AS user_count,
+          AVG(sweetness_score)::numeric(10, 2) AS avg_sweetness,
+          AVG(body_score)::numeric(10, 2) AS avg_body,
+          AVG(carbonation_score)::numeric(10, 2) AS avg_carbonation,
+          AVG(flavor_score)::numeric(10, 2) AS avg_flavor,
+          AVG(abv_score)::numeric(10, 2) AS avg_abv
+        FROM latest_results
+        GROUP BY type_code
+        ORDER BY user_count DESC, type_code ASC
+      `,
+      [startDate, endDate],
+    ),
+  ]);
+
+  const postTrends = postTrendResult.rows.map((row) => ({
+    keyword: row.keyword,
+    post_count: Number(row.post_count || 0),
+    likes: Number(row.likes || 0),
+    comments: Number(row.comments || 0),
+    views: Number(row.views || 0),
+  }));
+  const fundingSuccess = fundingSuccessResult.rows.map((row) => {
+    const currentAmount = Number(row.current_amount || 0);
+    const targetAmount = Number(row.goal_amount || 0);
+
+    return {
+      name: row.title,
+      achieved_pct: targetAmount > 0
+        ? Math.round((currentAmount / targetAmount) * 10000) / 100
+        : 0,
+      status: 'success',
+      ingredients: buildFundingInsightIngredients(row),
+      taste_vector: buildFundingInsightTasteVector(row),
+    };
+  });
+  const btiKeywords = btiKeywordResult.rows.map((row) => ({
+    bti_code: row.bti_code,
+    user_count: Number(row.user_count || 0),
+    top_keywords: buildBtiInsightKeywords(row),
+  }));
+  const insightInput = {
+    brewery_id: String(userId),
+    period: normalizedPeriod,
+    post_trends: postTrends,
+    funding_success: fundingSuccess,
+    bti_keywords: btiKeywords,
+  };
+  const insight = await requestBreweryInsight(insightInput);
+
+  return {
+    period: normalizedPeriod,
+    input: {
+      post_trends: postTrends,
+      funding_success: fundingSuccess,
+      bti_keywords: btiKeywords,
+    },
+    insight,
+  };
+};
+
 const getBreweryNotificationsByUserId = async (userId) => {
   await assertBreweryDashboardUser(userId);
   const eventSelect = await getBreweryNotificationEventSelect();
@@ -2213,6 +2512,7 @@ module.exports = {
   upsertBreweryFundingDeliveryByUserId,
   getBreweryFundingOrdersByUserId,
   updateBreweryFundingOrderDeliveryByUserId,
+  getBreweryInsightByUserId,
   getBreweryNotificationsByUserId,
   markBreweryNotificationRead,
   markAllBreweryNotificationsRead,
