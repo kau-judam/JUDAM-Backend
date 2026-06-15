@@ -788,17 +788,24 @@ const createSulbtiFeedbackError = (statusCode, message, data) => {
 };
 
 const normalizeSulbtiFeedbackPayload = (payload = {}) => {
-  const sulbtiResultId = Number(payload.sulbtiResultId ?? payload.sulbti_result_id);
+  const rawSulbtiResultId = payload.sulbtiResultId ?? payload.sulbti_result_id;
+  const hasSulbtiResultId = rawSulbtiResultId !== undefined
+    && rawSulbtiResultId !== null
+    && String(rawSulbtiResultId).trim() !== '';
+  const sulbtiResultId = hasSulbtiResultId ? Number(rawSulbtiResultId) : null;
   const btiCode = typeof (payload.btiCode ?? payload.bti_code) === 'string'
     ? String(payload.btiCode ?? payload.bti_code).trim().toUpperCase()
     : '';
   const isMatched = payload.isMatched ?? payload.is_matched;
   const rawAxes = payload.mismatchedAxes ?? payload.mismatched_axes ?? [];
 
-  if (!Number.isInteger(sulbtiResultId) || sulbtiResultId <= 0) {
+  if (
+    hasSulbtiResultId
+    && (!Number.isInteger(sulbtiResultId) || sulbtiResultId <= 0)
+  ) {
     throw createSulbtiFeedbackError(
       400,
-      '\uC220BTI \uACB0\uACFC ID\uB294 \uD544\uC218\uC785\uB2C8\uB2E4.',
+      '\uC220BTI \uACB0\uACFC ID \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.',
     );
   }
 
@@ -869,21 +876,38 @@ const normalizeSulbtiFeedbackPayload = (payload = {}) => {
 
 const saveMySulbtiFeedback = async (userId, payload) => {
   const feedback = normalizeSulbtiFeedbackPayload(payload);
-  const { rows: resultRows } = await pool.query(
-    `
-      SELECT
-        r.result_id,
-        COALESCE(t.type_code, u.bti_code) AS bti_code
-      FROM sul_bti_results r
-      JOIN users u ON u.user_id = r.user_id
-      LEFT JOIN sul_bti_types t ON t.type_id = r.type_id
-      WHERE r.result_id = $1
-        AND r.user_id = $2
-        AND u.deleted_at IS NULL
-      LIMIT 1
-    `,
-    [feedback.sulbtiResultId, userId],
-  );
+  const { rows: resultRows } = feedback.sulbtiResultId
+    ? await pool.query(
+      `
+        SELECT
+          r.result_id,
+          COALESCE(t.type_code, u.bti_code) AS bti_code
+        FROM sul_bti_results r
+        JOIN users u ON u.user_id = r.user_id
+        LEFT JOIN sul_bti_types t ON t.type_id = r.type_id
+        WHERE r.result_id = $1
+          AND r.user_id = $2
+          AND u.deleted_at IS NULL
+        LIMIT 1
+      `,
+      [feedback.sulbtiResultId, userId],
+    )
+    : await pool.query(
+      `
+        SELECT
+          r.result_id,
+          t.type_code AS bti_code
+        FROM sul_bti_results r
+        JOIN users u ON u.user_id = r.user_id
+        JOIN sul_bti_types t ON t.type_id = r.type_id
+        WHERE r.user_id = $1
+          AND UPPER(TRIM(t.type_code)) = $2
+          AND u.deleted_at IS NULL
+        ORDER BY r.updated_at DESC NULLS LAST, r.result_id DESC
+        LIMIT 1
+      `,
+      [userId, feedback.btiCode],
+    );
 
   if (resultRows.length === 0) {
     throw createSulbtiFeedbackError(
@@ -892,6 +916,7 @@ const saveMySulbtiFeedback = async (userId, payload) => {
     );
   }
 
+  const resolvedSulbtiResultId = Number(resultRows[0].result_id);
   const resultBtiCode = normalizeSulbtiBtiCode(resultRows[0].bti_code)?.toUpperCase() || null;
 
   if (resultBtiCode && resultBtiCode !== feedback.btiCode) {
@@ -909,7 +934,7 @@ const saveMySulbtiFeedback = async (userId, payload) => {
         AND sulbti_result_id = $2
       LIMIT 1
     `,
-    [userId, feedback.sulbtiResultId],
+    [userId, resolvedSulbtiResultId],
   );
 
   if (existingRows.length > 0) {
@@ -938,7 +963,7 @@ const saveMySulbtiFeedback = async (userId, payload) => {
       `,
       [
         userId,
-        feedback.sulbtiResultId,
+        resolvedSulbtiResultId,
         feedback.btiCode,
         feedback.isMatched,
         JSON.stringify(feedback.mismatchedAxes),
@@ -948,6 +973,7 @@ const saveMySulbtiFeedback = async (userId, payload) => {
 
     return {
       feedbackId: Number(rows[0].feedback_id),
+      sulbtiResultId: resolvedSulbtiResultId,
       hasSubmittedFeedback: true,
     };
   } catch (error) {
