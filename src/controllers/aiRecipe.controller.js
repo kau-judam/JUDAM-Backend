@@ -45,6 +45,38 @@ const ingredientRegionController = async (req, res) => {
   }
 };
 
+const getIngredientRegionController = async (req, res) => {
+  try {
+    const normalizedMainIngredient = typeof req.query?.ingredient === 'string'
+      ? req.query.ingredient.trim()
+      : '';
+
+    if (!normalizedMainIngredient) {
+      return res.status(400).json({
+        status: 400,
+        message: 'ingredient는 필수입니다.',
+      });
+    }
+
+    const data = await getIngredientRegion({
+      main_ingredient: normalizedMainIngredient,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '재료 생산지역 정보 조회 성공',
+      data,
+    });
+  } catch (error) {
+    console.error('[AI Recipe] GET ingredient-region failed:', error);
+
+    return res.status(error.status || 500).json({
+      status: error.status || 500,
+      message: error.message || '재료 생산지역 정보 조회 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
 const suggestSubIngredientsController = async (req, res) => {
   try {
     const {
@@ -165,6 +197,7 @@ const suggestSummaryController = async (req, res) => {
 
 module.exports = {
   ingredientRegionController,
+  getIngredientRegionController,
   suggestSubIngredientsController,
   suggestFlavorTagsController,
   suggestSummaryController,
