@@ -529,22 +529,40 @@ const getBreweryInsightPeriodRange = (period) => {
   };
 };
 
+const INSIGHT_INGREDIENT_NAME_KEYS = [
+  'name',
+  'ingredient',
+  'ingredient_name',
+  'ingredientName',
+  'title',
+  'mainIngredient',
+  'main_ingredient',
+];
+
 const parseInsightList = (value) => {
   if (value === null || value === undefined || value === '') {
     return [];
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => String(item).trim()).filter(Boolean);
+    return value.flatMap(parseInsightList);
   }
 
   if (typeof value === 'object') {
-    return Object.values(value).flatMap(parseInsightList);
+    const ingredientName = INSIGHT_INGREDIENT_NAME_KEYS
+      .map((key) => value[key])
+      .find((item) => item !== undefined && item !== null && item !== '');
+
+    return ingredientName === undefined ? [] : parseInsightList(ingredientName);
   }
 
-  const normalized = String(value).trim();
+  if (typeof value !== 'string') {
+    return [];
+  }
 
-  if (!normalized) {
+  const normalized = value.trim();
+
+  if (!normalized || normalized === '[object Object]') {
     return [];
   }
 
