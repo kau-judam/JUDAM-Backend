@@ -9,6 +9,10 @@ const { uploadFileToS3 } = require('./s3.service');
 const { convertSurvey } = require('./aiSurvey.service');
 const { updateAiTasteProfile } = require('./ai.service');
 const pool = require('../config/db');
+const {
+  normalizeSulbtiTypeCode,
+  isSulbtiTypeCode,
+} = require('../utils/sulbti');
 
 const createServiceError = (statusCode, message) => {
   const error = new Error(message);
@@ -624,17 +628,8 @@ const getEmptySulbtiResponse = () => ({
 });
 
 const normalizeSulbtiBtiCode = (btiCode) => {
-  if (btiCode === undefined || btiCode === null) {
-    return null;
-  }
-
-  const normalized = String(btiCode).trim();
-
-  if (!normalized) {
-    return null;
-  }
-
-  return normalized.length >= 5 ? normalized.slice(0, 4) : normalized;
+  const normalized = normalizeSulbtiTypeCode(btiCode);
+  return isSulbtiTypeCode(normalized) ? normalized : null;
 };
 
 const hasSulbtiScoreColumns = (row) => [
@@ -811,6 +806,13 @@ const normalizeSulbtiFeedbackPayload = (payload = {}) => {
 
   if (!btiCode) {
     throw createSulbtiFeedbackError(400, 'btiCode\uB294 \uD544\uC218\uC785\uB2C8\uB2E4.');
+  }
+
+  if (!isSulbtiTypeCode(btiCode)) {
+    throw createSulbtiFeedbackError(
+      400,
+      '\uC720\uD6A8\uD558\uC9C0 \uC54A\uC740 \uC220BTI \uC720\uD615\uC785\uB2C8\uB2E4.',
+    );
   }
 
   if (typeof isMatched !== 'boolean') {
@@ -998,10 +1000,15 @@ const validateSulbtiScore = (score) => (
 );
 
 const validateSulbtiPayload = (payload) => {
-  const typeCode = typeof payload?.type === 'string' ? payload.type.trim() : '';
+  const rawTypeCode = payload?.type ?? payload?.btiCode ?? payload?.bti_code;
+  const typeCode = normalizeSulbtiTypeCode(rawTypeCode);
 
   if (!typeCode) {
     throw createServiceError(400, '술BTI 유형을 입력해주세요.');
+  }
+
+  if (!isSulbtiTypeCode(typeCode)) {
+    throw createServiceError(400, '유효하지 않은 술BTI 유형입니다.');
   }
 
   const scores = {
