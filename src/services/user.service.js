@@ -645,27 +645,102 @@ const updateUserProfile = async (userId, updateData) => {
   return rows[0];
 };
 
-const deleteUserAccount = async (userId) => {
+const WITHDRAWAL_BLOCKING_ORDER_STATUSES = ['PENDING', 'PAID'];
+const WITHDRAWAL_FINAL_DELIVERY_STATUSES = ['DELIVERED', 'CANCELED', 'CANCELLED'];
+const WITHDRAWAL_BLOCKING_PAYMENT_STATUSES = ['READY', 'PENDING'];
+const WITHDRAWAL_BLOCKING_FUNDING_STATUSES = [
+  'DRAFT',
+  'SUBMITTED',
+  'REVIEWING',
+  'APPROVED',
+  'READY',
+  'SCHEDULED',
+  'ACTIVE',
+  'ONGOING',
+  'PRODUCTION',
+  'IN_PRODUCTION',
+  'PRODUCING',
+  'MAKING',
+  'SHIPPING',
+  'DELIVERING',
+];
+
+const deleteUserAccount = async ({ userId, nickname }) => {
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    const { rows } = await client.query(
+    const normalizedNickname = typeof nickname === 'string' ? nickname.trim() : '';
+    const { rows: userRows } = await client.query(
       `
-        UPDATE users
-        SET
-          deleted_at = CURRENT_TIMESTAMP,
-          updated_at = CURRENT_TIMESTAMP
+        SELECT
+          user_id,
+          nickname
+        FROM users
         WHERE user_id = $1
           AND deleted_at IS NULL
-        RETURNING user_id
+        LIMIT 1
       `,
       [userId],
     );
 
-    if (rows.length === 0) {
+    if (userRows.length === 0) {
       throw createServiceError(404, 'user not found');
+    }
+
+    if (!normalizedNickname || userRows[0].nickname !== normalizedNickname) {
+      throw createServiceError(400, '닉네임이 일치하지 않습니다.');
+    }
+
+    const { rows: blockingOrderRows } = await client.query(
+      `
+        SELECT order_id
+        FROM orders
+        WHERE user_id = $1
+          AND UPPER(order_status) = ANY($2::text[])
+          AND (
+            delivery_status IS NULL
+            OR UPPER(delivery_status) <> ALL($3::text[])
+          )
+        LIMIT 1
+      `,
+      [userId, WITHDRAWAL_BLOCKING_ORDER_STATUSES, WITHDRAWAL_FINAL_DELIVERY_STATUSES],
+    );
+
+    if (blockingOrderRows.length > 0) {
+      throw createServiceError(409, '진행 중인 펀딩 또는 주문이 있어 탈퇴할 수 없습니다.');
+    }
+
+    const { rows: blockingPaymentRows } = await client.query(
+      `
+        SELECT p.payment_id
+        FROM payments p
+        JOIN orders o ON o.order_id = p.order_id
+        WHERE o.user_id = $1
+          AND UPPER(p.payment_status) = ANY($2::text[])
+        LIMIT 1
+      `,
+      [userId, WITHDRAWAL_BLOCKING_PAYMENT_STATUSES],
+    );
+
+    if (blockingPaymentRows.length > 0) {
+      throw createServiceError(409, '진행 중인 펀딩 또는 주문이 있어 탈퇴할 수 없습니다.');
+    }
+
+    const { rows: blockingFundingRows } = await client.query(
+      `
+        SELECT funding_id
+        FROM funding_projects
+        WHERE brewery_user_id = $1
+          AND UPPER(status) = ANY($2::text[])
+        LIMIT 1
+      `,
+      [userId, WITHDRAWAL_BLOCKING_FUNDING_STATUSES],
+    );
+
+    if (blockingFundingRows.length > 0) {
+      throw createServiceError(409, '진행 중인 펀딩 또는 주문이 있어 탈퇴할 수 없습니다.');
     }
 
     await client.query(
@@ -677,6 +752,74 @@ const deleteUserAccount = async (userId) => {
       `,
       [userId],
     );
+
+    await client.query(
+      `
+        UPDATE orders
+        SET
+          recipient_name = NULL,
+          recipient_phone = NULL,
+          shipping_address = NULL,
+          shipping_detail_address = NULL,
+          postal_code = NULL,
+          supporter_email = NULL,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+      `,
+      [userId],
+    );
+
+    await client.query(
+      `
+        UPDATE brewery_profiles
+        SET
+          profile_image_url = NULL,
+          representative_name = NULL,
+          address = NULL,
+          contact_email = NULL,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+      `,
+      [userId],
+    );
+
+    await client.query(
+      `
+        UPDATE brewery_auth
+        SET
+          phone_number = NULL,
+          document_url = NULL,
+          document_key = NULL,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+      `,
+      [userId],
+    );
+
+    const { rows } = await client.query(
+      `
+        UPDATE users
+        SET
+          email = NULL,
+          password = NULL,
+          nickname = $2,
+          phone_number = NULL,
+          kakao_id = NULL,
+          profile_image = NULL,
+          marketing_agreed = FALSE,
+          marketing_agreed_at = NULL,
+          deleted_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+          AND deleted_at IS NULL
+        RETURNING user_id
+      `,
+      [userId, `탈퇴회원_${userId}`],
+    );
+
+    if (rows.length === 0) {
+      throw createServiceError(404, 'user not found');
+    }
 
     await client.query('COMMIT');
   } catch (error) {
