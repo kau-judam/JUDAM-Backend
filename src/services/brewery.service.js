@@ -644,7 +644,8 @@ const getOcrValue = (source, paths) => getFirstDefined(
 
 const summarizeBreweryOcrResult = (rawResult = {}) => {
   const source = rawResult.data || rawResult.result || rawResult.ocrResult || rawResult;
-  const extracted = source.extracted || source.extractedInfo || source.fields || source.license || source.document || source;
+  // AI verify-ocr 응답은 추출 필드를 summary 객체에 담아 반환한다.
+  const extracted = source.summary || source.extracted || source.extractedInfo || source.fields || source.license || source.document || source;
 
   return {
     manualReviewOnly: true,

@@ -2934,6 +2934,7 @@ const getFundingDocumentOcrSources = (result) => {
   };
 
   pushObject(result);
+  pushObject(result?.summary);
   pushObject(result?.data);
   pushObject(result?.result);
   pushObject(result?.ocrResult);
@@ -2951,6 +2952,7 @@ const getFundingDocumentOcrSources = (result) => {
   pushObject(result?.data?.extractedFields);
   pushObject(result?.data?.extracted_fields);
   pushObject(result?.data?.fields);
+  pushObject(result?.data?.summary);
   pushObject(result?.data?.businessLicense);
   pushObject(result?.data?.business_license);
 
@@ -2999,6 +3001,8 @@ const normalizeFundingDocumentOcrFields = (result) => ({
   businessName: getFundingDocumentOcrTextValue(result, [
     'businessName',
     'business_name',
+    'breweryName',
+    'brewery_name',
     'companyName',
     'company_name',
     'storeName',
