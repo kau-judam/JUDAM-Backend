@@ -5583,52 +5583,11 @@ const submitFundingDraft = async (req, res) => {
         });
       }
 
-      /**
-       * 펀딩 임시저장 처리 로직
-       * 펀딩 임시저장 처리 로직
-       * 펀딩 임시저장 처리 로직
-       */
-      const recipeResult = await client.query(
-        `
-        INSERT INTO recipes (
-          user_id,
-          title,
-          content,
-          abv_range,
-          main_ingredient,
-          ai_sub_ingredient,
-          target_flavor,
-          concept,
-          summary,
-          author_type,
-          status,
-          is_fundable,
-          image_url,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, 'BREWERY', 'PUBLISHED', TRUE, $10,
-          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-        )
-        RETURNING recipe_id
-        `,
-        [
-          breweryUserId,
-          draft.title,
-          draft.introduction || draft.summary || '',
-          `${draft.alcohol_percentage || 0}%`,
-          draft.main_ingredient || null,
-          normalizeJsonStorageValue(draft.sub_ingredients, []),
-          normalizeJsonStorageValue(draft.flavor_notes, []),
-          draft.category || null,
-          draft.summary || '',
-          draft.thumbnail_url || null,
-        ]
-      );
-
-      const recipeId = recipeResult.rows[0].recipe_id;
+      // 드래프트에 저장된 원본 레시피 ID를 그대로 사용한다.
+      // recipe_id가 없으면 직접 만든 펀딩으로 보고 null로 처리한다.
+      const recipeId = (draft.recipe_id != null && Number(draft.recipe_id) > 0)
+        ? Number(draft.recipe_id)
+        : null;
 
       const fundingResult = await client.query(
         `
@@ -5769,7 +5728,7 @@ const submitFundingDraft = async (req, res) => {
         draftId: Number(submittedDraft.draft_id),
         fundingId: Number(funding.funding_id),
         numericFundingId: Number(funding.funding_id),
-        recipeId: Number(recipeId),
+        recipeId: recipeId !== null ? Number(recipeId) : null,
         status: submittedDraft.status,
         fundingStatus: funding.status,
         progressRate: Number(submittedDraft.progress_rate || 0),

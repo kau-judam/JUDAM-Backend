@@ -412,6 +412,22 @@ const approveFundingDraft = async (req, res) => {
         [Number(draftId), funding.funding_id]
       );
 
+      // 펀딩 승인 시 연결된 원본 레시피를 펀딩 진행중(FUNDING_IN_PROGRESS) 상태로 전이한다.
+      // recipe_id가 없으면(레시피 없이 만든 직접 펀딩) 전이 대상이 없으므로 건너뛴다.
+      const linkedRecipeId = (draft.recipe_id != null && Number(draft.recipe_id) > 0)
+        ? Number(draft.recipe_id)
+        : null;
+      if (linkedRecipeId) {
+        await client.query(
+          `
+          UPDATE recipes
+          SET status = 'FUNDING_IN_PROGRESS', updated_at = CURRENT_TIMESTAMP
+          WHERE recipe_id = $1
+          `,
+          [linkedRecipeId]
+        );
+      }
+
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

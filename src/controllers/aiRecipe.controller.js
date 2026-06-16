@@ -104,10 +104,10 @@ const suggestSubIngredientsController = async (req, res) => {
       ? (region || location || area).trim()
       : '';
 
-    if (!normalizedMainIngredient || !normalizedRegion) {
+    if (!normalizedMainIngredient) {
       return res.status(400).json({
         status: 400,
-        message: 'main_ingredient와 region은 필수입니다.',
+        message: 'main_ingredient는 필수입니다.',
       });
     }
 
