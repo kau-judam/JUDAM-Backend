@@ -14,6 +14,7 @@ const aiSurveyRoutes = require('./aiSurvey.routes');
 const mypageRoutes = require('./mypage.routes');
 const postRoutes = require('./postRoutes');
 const notificationRoutes = require('./notification.routes');
+const statsRoutes = require('./stats.routes');
 
 const mountRoutes = (app) => {
   app.use('/api/auth', authRoutes);
@@ -32,6 +33,7 @@ const mountRoutes = (app) => {
   app.use('/api/mypage', mypageRoutes);
   app.use('/api/posts', postRoutes);
   app.use('/api/notifications', notificationRoutes);
+  app.use('/api/stats', statsRoutes);
 };
 
 module.exports = mountRoutes;

@@ -12,6 +12,7 @@ const {
   getLawReviewDetail,
   updateLawReviewStatus,
 } = require('../services/lawReview.service');
+const { restoreRecipeStatusAfterVoidedFunding } = require('../services/recipeService');
 
 // 관리자 제출 프로젝트 목록 조회
 const getAdminUserId = (req) => {
@@ -1170,12 +1171,18 @@ const rejectFundingDraft = async (req, res) => {
             status = 'REJECTED',
             updated_at = CURRENT_TIMESTAMP
           WHERE funding_id = $1
-          RETURNING funding_id, status, updated_at
+            AND status IN ('READY', 'REVIEWING', 'SUBMITTED', 'ONGOING')
+          RETURNING funding_id, recipe_id, status, updated_at
           `,
           [Number(rejectedDraft.funding_id)]
         );
 
         rejectedFunding = fundingResult.rows[0] || null;
+
+        // 반려로 펀딩이 무효화되면, 살아있는 다른 펀딩이 없는 한 원본 레시피 상태를 원복한다.
+        if (rejectedFunding?.recipe_id) {
+          await restoreRecipeStatusAfterVoidedFunding(client, Number(rejectedFunding.recipe_id));
+        }
       }
 
       await client.query('COMMIT');
@@ -1214,6 +1221,7 @@ const rejectFundingDraft = async (req, res) => {
 const cancelFundingProject = async (req, res) => {
   const { fundingId } = req.params;
   const { cancelReason } = req.body || {};
+  const adminUserId = getAdminUserId(req);
 
   if (!fundingId || isNaN(Number(fundingId))) {
     return res.status(400).json({
@@ -1255,25 +1263,45 @@ const cancelFundingProject = async (req, res) => {
       });
     }
 
-    const updateResult = await pool.query(
-      `
-      UPDATE funding_projects
-      SET
-        status = 'CANCELED',
-        updated_at = CURRENT_TIMESTAMP
-      WHERE funding_id = $1
-      RETURNING
-        funding_id,
-        title,
-        status,
-        current_amount,
-        goal_amount,
-        updated_at
-      `,
-      [Number(fundingId)]
-    );
+    const client = await pool.connect();
+    let canceledFunding;
 
-    const canceledFunding = updateResult.rows[0];
+    try {
+      await client.query('BEGIN');
+
+      const updateResult = await client.query(
+        `
+        UPDATE funding_projects
+        SET
+          status = 'CANCELED',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE funding_id = $1
+        RETURNING
+          funding_id,
+          recipe_id,
+          title,
+          status,
+          current_amount,
+          goal_amount,
+          updated_at
+        `,
+        [Number(fundingId)]
+      );
+
+      canceledFunding = updateResult.rows[0];
+
+      // 취소로 펀딩이 무효화되면, 살아있는 다른 펀딩이 없는 한 원본 레시피 상태를 원복한다.
+      if (canceledFunding?.recipe_id) {
+        await restoreRecipeStatusAfterVoidedFunding(client, Number(canceledFunding.recipe_id));
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
 
     console.log('[funding-cancel] funding canceled by admin', {
       fundingId: Number(canceledFunding.funding_id),

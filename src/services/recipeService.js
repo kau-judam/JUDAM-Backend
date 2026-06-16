@@ -194,7 +194,7 @@ const getRecipes = async (sort, status, page, size, userId) => {
       JOIN users u ON u.user_id = r.user_id
       LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $4
       WHERE r.status = $1
-        AND NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id)
+        AND NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id AND fp.status NOT IN ('REJECTED', 'CANCELED'))
       ${orderClause}
       LIMIT $2 OFFSET $3
     `;
@@ -202,7 +202,7 @@ const getRecipes = async (sort, status, page, size, userId) => {
     countQuery = `
       SELECT COUNT(*) FROM recipes r
       WHERE r.status = $1
-        AND NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id)
+        AND NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id AND fp.status NOT IN ('REJECTED', 'CANCELED'))
     `;
     countParams = [status];
   } else {
@@ -211,14 +211,14 @@ const getRecipes = async (sort, status, page, size, userId) => {
       FROM recipes r
       JOIN users u ON u.user_id = r.user_id
       LEFT JOIN recipe_interests ri ON ri.recipe_id = r.recipe_id AND ri.user_id = $3
-      WHERE NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id)
+      WHERE NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id AND fp.status NOT IN ('REJECTED', 'CANCELED'))
       ${orderClause}
       LIMIT $1 OFFSET $2
     `;
     dataParams = [size, offset, userId];
     countQuery = `
       SELECT COUNT(*) FROM recipes r
-      WHERE NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id)
+      WHERE NOT EXISTS (SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id AND fp.status NOT IN ('REJECTED', 'CANCELED'))
     `;
     countParams = [];
   }
@@ -282,7 +282,9 @@ const getPopularRecipesForHome = async () => {
     ) comment_counts ON TRUE
     WHERE r.status IN ('PUBLISHED', 'FUNDING_READY')
       AND NOT EXISTS (
-        SELECT 1 FROM funding_projects fp WHERE fp.recipe_id = r.recipe_id
+        SELECT 1 FROM funding_projects fp
+        WHERE fp.recipe_id = r.recipe_id
+          AND fp.status NOT IN ('REJECTED', 'CANCELED')
       )
     ORDER BY
       GREATEST(
@@ -567,6 +569,26 @@ const deleteRecipe = async (recipeId, userId) => {
   await pool.query('DELETE FROM recipes WHERE recipe_id = $1', [recipeId]);
 };
 
+// 펀딩이 무효(반려/취소) 처리된 뒤, 해당 레시피에 살아있는(무효 외) 펀딩이 더 없으면
+// recipe.status를 원복한다. 관심 임계값(INTEREST_THRESHOLD) 이상이면 FUNDING_READY,
+// 아니면 PUBLISHED로 되돌린다. 호출 측 트랜잭션 client를 받아 같은 트랜잭션 안에서 실행한다.
+const restoreRecipeStatusAfterVoidedFunding = async (client, recipeId) => {
+  if (!recipeId) return;
+  await client.query(
+    `UPDATE recipes r
+     SET status = CASE WHEN r.interest_count >= $2 THEN 'FUNDING_READY' ELSE 'PUBLISHED' END,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE r.recipe_id = $1
+       AND r.status = 'FUNDING_IN_PROGRESS'
+       AND NOT EXISTS (
+         SELECT 1 FROM funding_projects fp
+         WHERE fp.recipe_id = r.recipe_id
+           AND fp.status NOT IN ('REJECTED', 'CANCELED')
+       )`,
+    [recipeId, INTEREST_THRESHOLD]
+  );
+};
+
 module.exports = {
   createRecipe,
   getRecipes,
@@ -577,4 +599,5 @@ module.exports = {
   getConsumerRecipes,
   convertRecipeToFunding,
   deleteRecipe,
+  restoreRecipeStatusAfterVoidedFunding,
 };
