@@ -6809,12 +6809,33 @@ const getFundingList = async (req, res) => {
     });
   }
 
+  // 펀딩 탭(공개 목록)에는 진행 중(ACTIVE/ONGOING)·성사(SUCCESS)된 펀딩만 노출한다.
+  // 준비(READY)/심사중(REVIEWING)/실패(FAILED)/반려(REJECTED)/취소(CANCELED) 등은 숨긴다.
+  // 단, 양조장 본인 관리 목록(mine)은 모든 상태를 볼 수 있어야 하므로 이 제한에서 제외한다.
+  const PUBLIC_VISIBLE_STATUSES = ['ACTIVE', 'ONGOING', 'SUCCESS'];
+  const ACTIVE_STATUSES = ['ACTIVE', 'ONGOING'];
+
   const values = [];
   const conditions = [];
 
-  if (normalizedStatus) {
-    values.push(normalizedStatus);
-    conditions.push(`fp.status = $${values.length}`);
+  if (mineRequested) {
+    if (normalizedStatus) {
+      values.push(normalizedStatus);
+      conditions.push(`fp.status = $${values.length}`);
+    }
+  } else {
+    // 프론트의 진행중/성사 선택은 그대로 존중하고, 미지정(전체 프로젝트)이거나
+    // 비공개 상태를 요청한 경우에도 노출 가능한 상태로만 제한한다.
+    let visibleStatuses;
+    if (normalizedStatus === 'SUCCESS') {
+      visibleStatuses = ['SUCCESS'];
+    } else if (normalizedStatus === 'ACTIVE' || normalizedStatus === 'ONGOING') {
+      visibleStatuses = ACTIVE_STATUSES;
+    } else {
+      visibleStatuses = PUBLIC_VISIBLE_STATUSES;
+    }
+    values.push(visibleStatuses);
+    conditions.push(`fp.status = ANY($${values.length}::text[])`);
   }
 
   if (normalizedKeyword) {
