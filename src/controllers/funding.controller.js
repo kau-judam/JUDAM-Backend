@@ -1296,23 +1296,29 @@ const normalizeSulbtiScore = (score) => {
   return Math.max(0, Math.min(100, (numberScore - 1) * 25));
 };
 
+const normalizeFundingMatchScore = (score, fallback = 0) => {
+  const numberScore = Number(score);
+  if (!Number.isFinite(numberScore)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(numberScore)));
+};
+
 const calculateSulbtiMatchScore = (sulbti, taste) => {
-  if (!sulbti || !taste) return null;
+  if (!sulbti || !taste) return 0;
 
   const axes = [
     [normalizeSulbtiScore(sulbti.sweetness_score), taste.sweetness],
     [normalizeSulbtiScore(sulbti.body_score), taste.body],
     [normalizeSulbtiScore(sulbti.carbonation_score), taste.carbonation],
     [normalizeSulbtiScore(sulbti.abv_score), taste.alcohol_intensity],
-  ].filter(([preferred, actual]) => preferred !== null && actual !== null && actual !== undefined);
+  ].filter(([preferred, actual]) => preferred !== null && Number.isFinite(Number(actual)));
 
-  if (axes.length === 0) return null;
+  if (axes.length === 0) return 0;
 
   const total = axes.reduce((sum, [preferred, actual]) => (
     sum + Math.max(0, 100 - Math.abs(preferred - Number(actual)))
   ), 0);
 
-  return Math.round(total / axes.length);
+  return normalizeFundingMatchScore(total / axes.length);
 };
 
 const mapFundingDocument = (document) => ({
@@ -6687,6 +6693,7 @@ const mapFundingListRow = (row) => {
     row.brewery_user_id === null || row.brewery_user_id === undefined
       ? null
       : Number(row.brewery_user_id);
+  const matchRate = normalizeFundingMatchScore(row.match_rate);
 
   return {
     fundingId: Number(row.funding_id),
@@ -6711,12 +6718,12 @@ const mapFundingListRow = (row) => {
     expectedDeliveryDate: row.expected_delivery_date,
     pricePerBottle: row.price_per_bottle,
     shippingFee: row.shipping_fee,
-    matchRate: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
-    sulbtiMatchScore: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
-    matchScore: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
-    tasteMatchScore: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
-    recommendationScore: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
-    matchPercent: row.match_rate === null || row.match_rate === undefined ? null : Number(row.match_rate),
+    matchRate,
+    sulbtiMatchScore: matchRate,
+    matchScore: matchRate,
+    tasteMatchScore: matchRate,
+    recommendationScore: matchRate,
+    matchPercent: matchRate,
     liked: row.liked,
     likeCount: Number(row.like_count || 0),
     supporterCount: Number(row.supporter_count || 0),
@@ -6898,13 +6905,12 @@ const getFundingList = async (req, res) => {
           abv_score
         FROM sul_bti_results
         WHERE user_id = ${userIdParam}
-        ORDER BY created_at DESC
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC, result_id DESC
         LIMIT 1
       ) sb_match ON TRUE
-      LEFT JOIN users requester ON requester.user_id = ${userIdParam}
     `;
     const orderBy = {
-      RECOMMENDED: 'ORDER BY match_rate DESC NULLS LAST, COALESCE(like_counts.like_count, 0) DESC, fp.created_at DESC, fp.funding_id DESC',
+      RECOMMENDED: 'ORDER BY match_rate DESC, COALESCE(like_counts.like_count, 0) DESC, fp.created_at DESC, fp.funding_id DESC',
       POPULAR: 'ORDER BY COALESCE(like_counts.like_count, 0) DESC, fp.created_at DESC, fp.funding_id DESC',
       LATEST: 'ORDER BY fp.created_at DESC, fp.funding_id DESC',
       DEADLINE: `ORDER BY CASE WHEN fp.end_date >= ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul')::date) THEN 0 ELSE 1 END, fp.end_date ASC NULLS LAST, fp.created_at DESC, fp.funding_id DESC`,
@@ -6932,52 +6938,18 @@ const getFundingList = async (req, res) => {
         fp.price_per_bottle,
         fp.shipping_fee,
         COALESCE(like_counts.like_count, 0) AS like_count,
-        CASE
-          WHEN requester.taste_vector IS NOT NULL AND tp_match.taste_profile_id IS NOT NULL THEN ROUND((
-            (100 - ABS((
-              CASE
-                WHEN ((requester.taste_vector->>'sweetness')::numeric) <= 10
-                  THEN ((requester.taste_vector->>'sweetness')::numeric) * 10
-                ELSE ((requester.taste_vector->>'sweetness')::numeric)
-              END
-            ) - COALESCE(tp_match.sweetness, 50))) +
-            (100 - ABS((
-              CASE
-                WHEN ((requester.taste_vector->>'body')::numeric) <= 10
-                  THEN ((requester.taste_vector->>'body')::numeric) * 10
-                ELSE ((requester.taste_vector->>'body')::numeric)
-              END
-            ) - COALESCE(tp_match.body, 50))) +
-            (100 - ABS((
-              CASE
-                WHEN ((requester.taste_vector->>'carbonation')::numeric) <= 10
-                  THEN ((requester.taste_vector->>'carbonation')::numeric) * 10
-                ELSE ((requester.taste_vector->>'carbonation')::numeric)
-              END
-            ) - COALESCE(tp_match.carbonation, 50))) +
-            (100 - ABS((
-              CASE
-                WHEN ((requester.taste_vector->>'alcohol')::numeric) <= 10
-                  THEN ((requester.taste_vector->>'alcohol')::numeric) * 10
-                ELSE ((requester.taste_vector->>'alcohol')::numeric)
-              END
-            ) - COALESCE(tp_match.alcohol_intensity, 50))) +
-            (100 - ABS((
-              CASE
-                WHEN ((requester.taste_vector->>'acidity')::numeric) <= 10
-                  THEN ((requester.taste_vector->>'acidity')::numeric) * 10
-                ELSE ((requester.taste_vector->>'acidity')::numeric)
-              END
-            ) - COALESCE(tp_match.acidity, 50)))
-          ) / 5.0)::int
-          WHEN sb_match.result_id IS NOT NULL AND tp_match.taste_profile_id IS NOT NULL THEN ROUND((
-            (100 - ABS(((sb_match.sweetness_score - 1) * 25) - COALESCE(tp_match.sweetness, 50))) +
-            (100 - ABS(((sb_match.body_score - 1) * 25) - COALESCE(tp_match.body, 50))) +
-            (100 - ABS(((sb_match.carbonation_score - 1) * 25) - COALESCE(tp_match.carbonation, 50))) +
-            (100 - ABS(((sb_match.abv_score - 1) * 25) - COALESCE(tp_match.alcohol_intensity, 50)))
-          ) / 4.0)::int
-          ELSE NULL
-        END AS match_rate,
+        COALESCE(
+          CASE
+            WHEN sb_match.result_id IS NOT NULL AND tp_match.taste_profile_id IS NOT NULL THEN GREATEST(0, LEAST(100, ROUND((
+              (100 - ABS(((sb_match.sweetness_score - 1) * 25) - COALESCE(tp_match.sweetness, 50))) +
+              (100 - ABS(((sb_match.body_score - 1) * 25) - COALESCE(tp_match.body, 50))) +
+              (100 - ABS(((sb_match.carbonation_score - 1) * 25) - COALESCE(tp_match.carbonation, 50))) +
+              (100 - ABS(((sb_match.abv_score - 1) * 25) - COALESCE(tp_match.alcohol_intensity, 50)))
+            ) / 4.0)::int))
+            ELSE 0
+          END,
+          0
+        ) AS match_rate,
         EXISTS (
           SELECT 1
           FROM funding_likes my_like
@@ -7321,7 +7293,7 @@ const getFundingDetail = async (req, res) => {
         abv_score
       FROM sul_bti_results
       WHERE user_id = $1
-      ORDER BY created_at DESC
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC, result_id DESC
       LIMIT 1
       `,
       [userId]
@@ -7413,6 +7385,8 @@ const getFundingDetail = async (req, res) => {
       sulbtiMatchScore: matchScore,
       matchScore,
       tasteMatchScore: matchScore,
+      matchPercent: matchScore,
+      recommendationScore: matchScore,
       liked: funding.liked,
       likeCount: Number(funding.like_count || 0),
       supporterCount: Number(funding.supporter_count || 0),
