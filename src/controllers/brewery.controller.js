@@ -16,6 +16,9 @@ const {
   getBreweryFundingOrdersByUserId,
   updateBreweryFundingOrderDeliveryByUserId,
   getBreweryInsightByUserId,
+  createBreweryInsightPaymentOrder,
+  confirmBreweryInsightTossPaymentPlaceholder,
+  getBreweryInsightAccessByUserId,
   getBreweryNotificationsByUserId,
 } = require('../services/brewery.service');
 const { verifyAuthPhoneVerificationToken } = require('../services/auth-phone.service');
@@ -637,6 +640,87 @@ const getMyBreweryDashboardInsight = async (req, res) => {
   }
 };
 
+const createMyBreweryInsightPaymentOrder = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload에 userId가 없습니다.');
+  }
+
+  try {
+    const data = await createBreweryInsightPaymentOrder({
+      userId,
+      planType: req.body?.planType,
+      amount: req.body?.amount,
+    });
+
+    return res.status(201).json({
+      status: 201,
+      ...data,
+      message: '양조장 인사이트 결제 주문 생성 성공',
+      data,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 인사이트 결제 주문 생성 중 서버 오류가 발생했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const confirmMyBreweryInsightTossPayment = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload에 userId가 없습니다.');
+  }
+
+  try {
+    const data = await confirmBreweryInsightTossPaymentPlaceholder({ userId });
+
+    return res.status(501).json({
+      status: 501,
+      message: '양조장 인사이트 토스 결제 승인은 다음 단계에서 구현합니다.',
+      data,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 인사이트 토스 결제 승인 중 서버 오류가 발생했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
+const getMyBreweryInsightAccess = async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    return sendError(res, 401, '로그인이 필요합니다.', 'JWT payload에 userId가 없습니다.');
+  }
+
+  try {
+    const data = await getBreweryInsightAccessByUserId(userId);
+
+    return res.status(200).json({
+      status: 200,
+      ...data,
+      message: '양조장 인사이트 이용권 조회 성공',
+      data,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error.statusCode || 500,
+      error.message || '양조장 인사이트 이용권 조회 중 서버 오류가 발생했습니다.',
+      error.detail || error.message,
+    );
+  }
+};
+
 const createBreweryApplication = async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   const {
@@ -953,6 +1037,9 @@ module.exports = {
   getMyBreweryDashboardFundingOrders,
   upsertMyBreweryDashboardFundingOrderDelivery,
   getMyBreweryDashboardInsight,
+  createMyBreweryInsightPaymentOrder,
+  confirmMyBreweryInsightTossPayment,
+  getMyBreweryInsightAccess,
   getMyBreweryDashboardNotifications,
   verifyBreweryAccount,
   createBreweryApplication,
