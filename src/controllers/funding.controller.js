@@ -942,10 +942,19 @@ const normalizeFundingAiImagePayload = (body = {}, draft = {}) => {
         ...extractFundingAiImageFlavorTags(draft.flavor_notes),
         ...parseFundingListField(draft.tags),
       ]);
+  const requestMainIngredient = getBodyValue(body, ['mainIngredient', 'main_ingredient']);
+  const mainIngredient = toTrimmedString(
+    requestMainIngredient !== undefined ? requestMainIngredient : draft.main_ingredient
+  );
+  const requestSubIngredients = getBodyValue(body, ['subIngredients', 'sub_ingredients']);
+  const subIngredients = requestSubIngredients !== undefined
+    ? parseFundingListField(requestSubIngredients)
+    : parseFundingListField(draft.sub_ingredients);
   const requestTasteVector = getBodyValue(body, ['taste_vector', 'tasteVector']);
   const draftTasteVector = parseTasteProfileExtras(draft.flavor_notes).tasteVector;
   const tasteVector = requestTasteVector !== undefined ? requestTasteVector : draftTasteVector;
   const seed = getBodyValue(body, ['seed', 'imageSeed']);
+  const concept = toTrimmedString(getBodyValue(body, ['concept']));
 
   return {
     name: toTrimmedString(
@@ -964,6 +973,9 @@ const normalizeFundingAiImagePayload = (body = {}, draft = {}) => {
       draft.region ||
       draft.business_address
     ),
+    ...(mainIngredient ? { main_ingredient: mainIngredient } : {}),
+    ...(subIngredients.length > 0 ? { sub_ingredients: subIngredients } : {}),
+    ...(concept ? { concept } : {}),
     ...(tasteVector ? { taste_vector: tasteVector } : {}),
     ...(seed !== undefined && seed !== null && seed !== '' ? { seed } : {}),
   };
@@ -4638,6 +4650,8 @@ const generateFundingDraftAiImage = async (req, res) => {
         introduction,
         flavor_notes,
         tags,
+        main_ingredient,
+        sub_ingredients,
         business_address,
         thumbnail_url,
         image_urls
