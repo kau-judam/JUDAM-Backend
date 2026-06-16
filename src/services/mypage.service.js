@@ -805,11 +805,7 @@ const normalizeSulbtiFeedbackPayload = (payload = {}) => {
     );
   }
 
-  if (!btiCode) {
-    throw createSulbtiFeedbackError(400, 'btiCode\uB294 \uD544\uC218\uC785\uB2C8\uB2E4.');
-  }
-
-  if (!isSulbtiTypeCode(btiCode)) {
+  if (btiCode && !isSulbtiTypeCode(btiCode)) {
     throw createSulbtiFeedbackError(
       400,
       '\uC720\uD6A8\uD558\uC9C0 \uC54A\uC740 \uC220BTI \uC720\uD615\uC785\uB2C8\uB2E4.',
@@ -894,8 +890,10 @@ const buildSulbtiFeedbackAiPayload = (userId, feedback) => {
 
 const saveMySulbtiFeedback = async (userId, payload) => {
   const feedback = normalizeSulbtiFeedbackPayload(payload);
-  const { rows: resultRows } = feedback.sulbtiResultId
-    ? await pool.query(
+  let resultRows;
+
+  if (feedback.sulbtiResultId) {
+    const result = await pool.query(
       `
         SELECT
           r.result_id,
@@ -909,8 +907,10 @@ const saveMySulbtiFeedback = async (userId, payload) => {
         LIMIT 1
       `,
       [feedback.sulbtiResultId, userId],
-    )
-    : await pool.query(
+    );
+    resultRows = result.rows;
+  } else if (feedback.btiCode) {
+    const result = await pool.query(
       `
         SELECT
           r.result_id,
@@ -926,6 +926,25 @@ const saveMySulbtiFeedback = async (userId, payload) => {
       `,
       [userId, feedback.btiCode],
     );
+    resultRows = result.rows;
+  } else {
+    const result = await pool.query(
+      `
+        SELECT
+          r.result_id,
+          t.type_code AS bti_code
+        FROM sul_bti_results r
+        JOIN users u ON u.user_id = r.user_id
+        JOIN sul_bti_types t ON t.type_id = r.type_id
+        WHERE r.user_id = $1
+          AND u.deleted_at IS NULL
+        ORDER BY r.updated_at DESC NULLS LAST, r.result_id DESC
+        LIMIT 1
+      `,
+      [userId],
+    );
+    resultRows = result.rows;
+  }
 
   if (resultRows.length === 0) {
     throw createSulbtiFeedbackError(
@@ -937,12 +956,24 @@ const saveMySulbtiFeedback = async (userId, payload) => {
   const resolvedSulbtiResultId = Number(resultRows[0].result_id);
   const resultBtiCode = normalizeSulbtiBtiCode(resultRows[0].bti_code)?.toUpperCase() || null;
 
-  if (resultBtiCode && resultBtiCode !== feedback.btiCode) {
+  if (!resultBtiCode) {
+    throw createSulbtiFeedbackError(
+      404,
+      '\uD574\uB2F9 \uC220BTI \uACB0\uACFC\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.',
+    );
+  }
+
+  if (feedback.btiCode && resultBtiCode !== feedback.btiCode) {
     throw createSulbtiFeedbackError(
       400,
       'btiCode\uAC00 \uC220BTI \uACB0\uACFC\uC640 \uC77C\uCE58\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.',
     );
   }
+
+  const resolvedFeedback = {
+    ...feedback,
+    btiCode: feedback.btiCode || resultBtiCode,
+  };
 
   const { rows: existingRows } = await pool.query(
     `
@@ -984,7 +1015,7 @@ const saveMySulbtiFeedback = async (userId, payload) => {
       [
         userId,
         resolvedSulbtiResultId,
-        feedback.btiCode,
+        resolvedFeedback.btiCode,
         feedback.isMatched,
         JSON.stringify(feedback.mismatchedAxes),
         feedback.comment,
@@ -1009,11 +1040,11 @@ const saveMySulbtiFeedback = async (userId, payload) => {
   }
 
   try {
-    await sendBtiFeedbackToAi(buildSulbtiFeedbackAiPayload(userId, feedback));
+    await sendBtiFeedbackToAi(buildSulbtiFeedbackAiPayload(userId, resolvedFeedback));
   } catch (error) {
     console.warn('AI BTI feedback delivery failed', {
       userId,
-      btiCode: feedback.btiCode,
+      btiCode: resolvedFeedback.btiCode,
       message: error.message,
       code: error.code,
       status: error.response?.status || error.statusCode,
@@ -1366,16 +1397,6 @@ const saveSulbtiSurveyResult = async (userId, surveyResult) => {
       throw createServiceError(404, '사용자를 찾을 수 없습니다.');
     }
 
-    const { rows: existingResultRows } = await client.query(
-      `
-        SELECT result_id
-        FROM sul_bti_results
-        WHERE user_id = $1
-        ORDER BY updated_at DESC NULLS LAST, created_at DESC, result_id DESC
-        LIMIT 1
-      `,
-      [userId],
-    );
     const scoreValues = [
       Math.round(surveyResult.tasteVector.sweetness),
       Math.round(surveyResult.tasteVector.body),
@@ -1383,50 +1404,28 @@ const saveSulbtiSurveyResult = async (userId, surveyResult) => {
       Math.round(surveyResult.tasteVector.flavor),
       Math.round(surveyResult.tasteVector.abv),
     ];
-    const resultQuery = existingResultRows.length > 0
-      ? {
-        sql: `
-          UPDATE sul_bti_results
-          SET
-            type_id = $1,
-            sweetness_score = $2,
-            body_score = $3,
-            carbonation_score = $4,
-            flavor_score = $5,
-            abv_score = $6,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE result_id = $7
-          RETURNING result_id
-        `,
-        values: [
-          typeRows[0].type_id,
-          ...scoreValues,
-          existingResultRows[0].result_id,
-        ],
-      }
-      : {
-        sql: `
-          INSERT INTO sul_bti_results (
-            user_id,
-            type_id,
-            sweetness_score,
-            body_score,
-            carbonation_score,
-            flavor_score,
-            abv_score,
-            created_at,
-            updated_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-          RETURNING result_id
-        `,
-        values: [
-          userId,
-          typeRows[0].type_id,
-          ...scoreValues,
-        ],
-      };
-    const { rows: resultRows } = await client.query(resultQuery.sql, resultQuery.values);
+    const { rows: resultRows } = await client.query(
+      `
+        INSERT INTO sul_bti_results (
+          user_id,
+          type_id,
+          sweetness_score,
+          body_score,
+          carbonation_score,
+          flavor_score,
+          abv_score,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING result_id
+      `,
+      [
+        userId,
+        typeRows[0].type_id,
+        ...scoreValues,
+      ],
+    );
 
     await client.query('COMMIT');
 
