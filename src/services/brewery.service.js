@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const path = require('path');
+const axios = require('axios');
 const pool = require('../config/db');
 const { uploadFileToS3 } = require('./s3.service');
 const {
@@ -2578,6 +2579,73 @@ const mapBreweryInsightOrder = (row, customer = {}) => ({
   paymentStatus: row.payment_status,
 });
 
+const isMockBreweryInsightTossPaymentAllowed = () =>
+  process.env.TOSS_ALLOW_MOCK_PAYMENT === 'true'
+  || process.env.NODE_ENV === 'test'
+  || process.env.NODE_ENV === 'development';
+
+const requestBreweryInsightTossConfirm = async ({ paymentKey, orderId, amount }) => {
+  const secretKey = process.env.TOSS_SECRET_KEY;
+
+  if (!secretKey) {
+    throw createServiceError(500, 'TOSS_SECRET_KEY가 설정되어 있지 않습니다.');
+  }
+
+  if (String(paymentKey).startsWith('test_')) {
+    if (!isMockBreweryInsightTossPaymentAllowed()) {
+      throw createServiceError(400, '운영 환경에서는 mock paymentKey를 사용할 수 없습니다.');
+    }
+
+    return {
+      paymentKey,
+      orderId,
+      totalAmount: amount,
+      status: 'DONE',
+      method: 'CARD',
+      approvedAt: new Date().toISOString(),
+      mock: true,
+    };
+  }
+
+  const encodedSecretKey = Buffer.from(`${secretKey}:`).toString('base64');
+  const response = await axios.post(
+    'https://api.tosspayments.com/v1/payments/confirm',
+    {
+      paymentKey,
+      orderId,
+      amount,
+    },
+    {
+      headers: {
+        Authorization: `Basic ${encodedSecretKey}`,
+        'Content-Type': 'application/json',
+      },
+    },
+  );
+
+  return response.data;
+};
+
+const buildBreweryInsightPaymentConfirmResponse = ({ order, access, tossPayment = null }) => ({
+  status: 200,
+  orderId: order.order_id,
+  numericOrderId: Number(order.id),
+  paymentStatus: order.payment_status,
+  amount: Number(order.amount),
+  paymentType: BREWERY_INSIGHT_PAYMENT_TYPE,
+  planType: order.plan_type,
+  paymentKey: order.toss_payment_key || tossPayment?.paymentKey || null,
+  paidAt: order.paid_at || null,
+  insightAccess: {
+    isActive: access.isActive,
+    planType: access.planType,
+    startedAt: access.startedAt,
+    expiresAt: access.expiresAt,
+  },
+  tossPayment,
+  message: '양조장 인사이트 결제가 완료되었습니다.',
+});
+
 const createBreweryInsightPaymentOrder = async ({ userId, planType, amount }) => {
   await assertApprovedBreweryUser(userId);
 
@@ -2639,16 +2707,245 @@ const createBreweryInsightPaymentOrder = async ({ userId, planType, amount }) =>
   );
 };
 
-const confirmBreweryInsightTossPaymentPlaceholder = async ({ userId }) => {
+const activateBreweryInsightAccess = async ({ client, userId, planType }) => {
+  const { rows } = await client.query(
+    `
+      INSERT INTO brewery_insight_access (
+        brewery_user_id,
+        plan_type,
+        is_active,
+        started_at,
+        expires_at,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        TRUE,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP + INTERVAL '1 month',
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT (brewery_user_id) DO UPDATE
+      SET
+        plan_type = EXCLUDED.plan_type,
+        is_active = TRUE,
+        started_at = CURRENT_TIMESTAMP,
+        expires_at = CURRENT_TIMESTAMP + INTERVAL '1 month',
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING
+        id,
+        brewery_user_id,
+        plan_type,
+        is_active,
+        started_at,
+        expires_at,
+        created_at,
+        updated_at
+    `,
+    [userId, planType],
+  );
+
+  return mapBreweryInsightAccess(rows[0], userId);
+};
+
+const markBreweryInsightOrderFailed = async ({ orderId, userId, tossError }) => {
+  await pool.query(
+    `
+      UPDATE brewery_insight_orders
+      SET
+        payment_status = 'FAILED',
+        toss_response = $3::jsonb,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE order_id = $1
+        AND brewery_user_id = $2
+        AND payment_status <> 'PAID'
+    `,
+    [
+      orderId,
+      userId,
+      JSON.stringify(tossError || { message: 'Toss confirm failed' }),
+    ],
+  );
+};
+
+const confirmBreweryInsightTossPayment = async ({
+  userId,
+  paymentKey,
+  orderId,
+  amount,
+}) => {
   await assertApprovedBreweryUser(userId);
 
-  return {
-    breweryUserId: Number(userId),
-    paymentType: 'BREWERY_INSIGHT',
-    status: 'READY',
-    implemented: false,
-    nextStep: '토스 결제 승인 로직은 다음 단계에서 구현합니다.',
-  };
+  const normalizedPaymentKey = String(paymentKey || '').trim();
+  const normalizedOrderId = String(orderId || '').trim();
+  const normalizedAmount = normalizeBreweryInsightOrderAmount(amount);
+
+  if (!normalizedPaymentKey || !normalizedOrderId) {
+    throw createServiceError(400, 'paymentKey, orderId, amount는 필수입니다.');
+  }
+
+  if (!process.env.TOSS_SECRET_KEY) {
+    throw createServiceError(500, 'TOSS_SECRET_KEY가 설정되어 있지 않습니다.');
+  }
+
+  const client = await pool.connect();
+  let shouldMarkFailed = false;
+  let tossFailurePayload = null;
+
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `
+        SELECT
+          id,
+          order_id,
+          brewery_user_id,
+          amount,
+          order_name,
+          plan_type,
+          payment_status,
+          toss_payment_key,
+          toss_response,
+          paid_at,
+          created_at,
+          updated_at
+        FROM brewery_insight_orders
+        WHERE order_id = $1
+        FOR UPDATE
+      `,
+      [normalizedOrderId],
+    );
+
+    if (rows.length === 0) {
+      throw createServiceError(404, '양조장 인사이트 결제 주문을 찾을 수 없습니다.');
+    }
+
+    const order = rows[0];
+
+    if (Number(order.brewery_user_id) !== Number(userId)) {
+      throw createServiceError(403, '해당 인사이트 결제 주문에 접근할 권한이 없습니다.');
+    }
+
+    if (Number(order.amount) !== BREWERY_INSIGHT_MONTHLY_AMOUNT) {
+      throw createServiceError(400, '주문 금액이 양조장 인사이트 이용권 금액과 일치하지 않습니다.');
+    }
+
+    if (order.plan_type !== 'MONTHLY') {
+      throw createServiceError(400, '지원하지 않는 양조장 인사이트 이용권 플랜입니다.');
+    }
+
+    if (order.payment_status === 'PAID') {
+      const access = await getBreweryInsightAccessByUserId(userId);
+
+      await client.query('COMMIT');
+
+      return buildBreweryInsightPaymentConfirmResponse({
+        order,
+        access,
+        tossPayment: order.toss_response || null,
+      });
+    }
+
+    if (order.payment_status !== 'READY') {
+      throw createServiceError(400, '결제 승인할 수 없는 주문 상태입니다.');
+    }
+
+    shouldMarkFailed = true;
+    const tossPayment = await requestBreweryInsightTossConfirm({
+      paymentKey: normalizedPaymentKey,
+      orderId: normalizedOrderId,
+      amount: normalizedAmount,
+    });
+
+    if (tossPayment?.status && tossPayment.status !== 'DONE') {
+      throw createServiceError(400, '토스 결제가 완료 상태가 아닙니다.');
+    }
+
+    if (
+      tossPayment?.totalAmount !== undefined
+      && Number(tossPayment.totalAmount) !== normalizedAmount
+    ) {
+      throw createServiceError(400, '토스 승인 금액과 주문 금액이 일치하지 않습니다.');
+    }
+
+    shouldMarkFailed = false;
+
+    const { rows: updatedOrderRows } = await client.query(
+      `
+        UPDATE brewery_insight_orders
+        SET
+          payment_status = 'PAID',
+          toss_payment_key = $1,
+          toss_response = $2::jsonb,
+          paid_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        RETURNING
+          id,
+          order_id,
+          brewery_user_id,
+          amount,
+          order_name,
+          plan_type,
+          payment_status,
+          toss_payment_key,
+          toss_response,
+          paid_at,
+          created_at,
+          updated_at
+      `,
+      [
+        normalizedPaymentKey,
+        JSON.stringify(tossPayment || {}),
+        order.id,
+      ],
+    );
+
+    const access = await activateBreweryInsightAccess({
+      client,
+      userId,
+      planType: order.plan_type,
+    });
+
+    await client.query('COMMIT');
+
+    return buildBreweryInsightPaymentConfirmResponse({
+      order: updatedOrderRows[0],
+      access,
+      tossPayment,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const tossError = error.response?.data;
+    tossFailurePayload = tossError || {
+      message: error.message || '토스 결제 승인 중 오류가 발생했습니다.',
+      code: error.code || null,
+    };
+
+    if (shouldMarkFailed) {
+      await markBreweryInsightOrderFailed({
+        orderId: normalizedOrderId,
+        userId,
+        tossError: tossFailurePayload,
+      });
+    }
+
+    const customError = new Error(
+      tossError?.message || error.message || '토스 결제 승인 중 오류가 발생했습니다.',
+    );
+    customError.statusCode = error.response?.status || error.statusCode || error.status || 500;
+    customError.code = tossError?.code || error.code;
+    customError.tossError = tossError;
+
+    throw customError;
+  } finally {
+    client.release();
+  }
 };
 
 const getBreweryInsightAccessByUserId = async (userId) => {
@@ -2820,7 +3117,7 @@ module.exports = {
   updateBreweryFundingOrderDeliveryByUserId,
   getBreweryInsightByUserId,
   createBreweryInsightPaymentOrder,
-  confirmBreweryInsightTossPaymentPlaceholder,
+  confirmBreweryInsightTossPayment,
   getBreweryInsightAccessByUserId,
   getBreweryNotificationsByUserId,
   markBreweryNotificationRead,
