@@ -151,22 +151,44 @@ const deleteMe = async (req, res) => {
     });
   }
 
+  const nickname = typeof req.body?.nickname === 'string' ? req.body.nickname.trim() : '';
+
+  if (!nickname) {
+    return res.status(400).json({
+      status: 400,
+      message: '닉네임을 입력해주세요.',
+    });
+  }
+
   try {
-    await deleteUserAccount(req.user.userId);
+    await deleteUserAccount({
+      userId: req.user.userId,
+      nickname,
+    });
 
     return res.status(200).json({
-      message: 'user deleted successfully',
+      status: 200,
+      message: '회원 탈퇴가 완료되었습니다.',
     });
   } catch (error) {
     if (error.statusCode === 404) {
       return res.status(404).json({
-        message: 'user not found',
+        status: 404,
+        message: '사용자를 찾을 수 없습니다.',
         error: 'user does not exist or already deleted',
       });
     }
 
+    if (error.statusCode === 400 || error.statusCode === 409) {
+      return res.status(error.statusCode).json({
+        status: error.statusCode,
+        message: error.message,
+      });
+    }
+
     return res.status(500).json({
-      message: 'failed to delete user',
+      status: 500,
+      message: '회원 탈퇴 처리에 실패했습니다.',
       error: error.message,
     });
   }

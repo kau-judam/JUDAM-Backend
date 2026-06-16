@@ -13,6 +13,9 @@ const {
   getMyBreweryDashboardFundingOrders,
   upsertMyBreweryDashboardFundingOrderDelivery,
   getMyBreweryDashboardInsight,
+  createMyBreweryInsightPaymentOrder,
+  confirmMyBreweryInsightTossPayment,
+  getMyBreweryInsightAccess,
   getMyBreweryDashboardNotifications,
   verifyBreweryAccount,
   createBreweryApplication,
@@ -62,6 +65,21 @@ router.patch(
   upsertMyBreweryDashboardFundingOrderDelivery,
 );
 router.get('/me/dashboard/insight', authMiddleware, getMyBreweryDashboardInsight);
+router.post(
+  '/me/dashboard/insight/payment/order',
+  authMiddleware,
+  createMyBreweryInsightPaymentOrder,
+);
+router.post(
+  '/me/dashboard/insight/payment/toss/confirm',
+  authMiddleware,
+  confirmMyBreweryInsightTossPayment,
+);
+router.get(
+  '/me/dashboard/insight/access',
+  authMiddleware,
+  getMyBreweryInsightAccess,
+);
 router.get('/me/dashboard/notifications', authMiddleware, getMyBreweryDashboardNotifications);
 
 router.post('/accounts/verify', authMiddleware, verifyBreweryAccount);
