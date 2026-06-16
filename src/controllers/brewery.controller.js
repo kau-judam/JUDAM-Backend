@@ -17,7 +17,7 @@ const {
   updateBreweryFundingOrderDeliveryByUserId,
   getBreweryInsightByUserId,
   createBreweryInsightPaymentOrder,
-  confirmBreweryInsightTossPaymentPlaceholder,
+  confirmBreweryInsightTossPayment,
   getBreweryInsightAccessByUserId,
   getBreweryNotificationsByUserId,
 } = require('../services/brewery.service');
@@ -624,6 +624,7 @@ const getMyBreweryDashboardInsight = async (req, res) => {
       userId,
       period: req.query.period,
     });
+    data.message = '양조장 인사이트 조회 성공';
 
     return res.status(200).json({
       status: 200,
@@ -678,13 +679,20 @@ const confirmMyBreweryInsightTossPayment = async (req, res) => {
   }
 
   try {
-    const data = await confirmBreweryInsightTossPaymentPlaceholder({ userId });
+    const data = await confirmBreweryInsightTossPayment({
+      userId,
+      paymentKey: req.body?.paymentKey,
+      orderId: req.body?.orderId,
+      amount: req.body?.amount,
+    });
 
-    return res.status(501).json({
-      status: 501,
-      message: '양조장 인사이트 토스 결제 승인은 다음 단계에서 구현합니다.',
+    return res.status(200).json({
+      status: 200,
+      ...data,
+      message: data.message || '양조장 인사이트 결제가 완료되었습니다.',
       data,
     });
+
   } catch (error) {
     return sendError(
       res,
