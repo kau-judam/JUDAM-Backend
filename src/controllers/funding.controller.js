@@ -1325,6 +1325,11 @@ const mapFundingDocument = (document) => ({
   fileSize: document.file_size === null || document.file_size === undefined
     ? null
     : Number(document.file_size),
+  ocrStatus: document.ocr_status || null,
+  ocrSummary: document.ocr_summary || null,
+  ocrExtractedFields: parseJsonField(document.ocr_extracted_fields, null),
+  ocrResult: parseJsonField(document.ocr_result, null),
+  ocrProcessedAt: document.ocr_processed_at || null,
   createdAt: document.created_at,
 });
 
@@ -1635,6 +1640,11 @@ const getFundingDraftDocuments = async (draftId) => {
       file_url,
       mime_type,
       file_size,
+      ocr_status,
+      ocr_result,
+      ocr_summary,
+      ocr_extracted_fields,
+      ocr_processed_at,
       created_at
     FROM funding_documents
     WHERE draft_id = $1
@@ -2814,12 +2824,199 @@ const getFundingDocumentOcrErrorMessage = (result) => {
   return result.error || result.message || result.detail || 'OCR 처리에 실패했습니다.';
 };
 
+const getFundingDocumentOcrSources = (result) => {
+  const sources = [];
+  const pushObject = (value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value) && !sources.includes(value)) {
+      sources.push(value);
+    }
+  };
+
+  pushObject(result);
+  pushObject(result?.data);
+  pushObject(result?.result);
+  pushObject(result?.ocrResult);
+  pushObject(result?.ocr_result);
+  pushObject(result?.extracted);
+  pushObject(result?.extractedFields);
+  pushObject(result?.extracted_fields);
+  pushObject(result?.fields);
+  pushObject(result?.businessLicense);
+  pushObject(result?.business_license);
+  pushObject(result?.data?.result);
+  pushObject(result?.data?.ocrResult);
+  pushObject(result?.data?.ocr_result);
+  pushObject(result?.data?.extracted);
+  pushObject(result?.data?.extractedFields);
+  pushObject(result?.data?.extracted_fields);
+  pushObject(result?.data?.fields);
+  pushObject(result?.data?.businessLicense);
+  pushObject(result?.data?.business_license);
+
+  return sources;
+};
+
+const getFundingDocumentOcrValue = (result, keys) => {
+  const sources = getFundingDocumentOcrSources(result);
+
+  for (const source of sources) {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(source, key)) {
+        const value = source[key];
+
+        if (value !== undefined && value !== null && value !== '') {
+          return value;
+        }
+      }
+    }
+  }
+
+  return null;
+};
+
+const getFundingDocumentOcrTextValue = (result, keys) => {
+  const value = getFundingDocumentOcrValue(result, keys);
+
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  return text || null;
+};
+
+const normalizeFundingDocumentOcrConfidence = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : String(value).trim() || null;
+};
+
+const normalizeFundingDocumentOcrFields = (result) => ({
+  businessName: getFundingDocumentOcrTextValue(result, [
+    'businessName',
+    'business_name',
+    'companyName',
+    'company_name',
+    'storeName',
+    'businessPlaceName',
+    '상호명',
+    '상호',
+    '법인명',
+  ]),
+  representativeName: getFundingDocumentOcrTextValue(result, [
+    'representativeName',
+    'representative_name',
+    'ownerName',
+    'owner_name',
+    'representative',
+    '대표자명',
+    '대표자',
+    '성명',
+  ]),
+  businessRegistrationNumber: getFundingDocumentOcrTextValue(result, [
+    'businessRegistrationNumber',
+    'business_registration_number',
+    'licenseNumber',
+    'license_number',
+    'registrationNumber',
+    'registration_number',
+    'businessNumber',
+    'business_number',
+    '사업자등록번호',
+    '등록번호',
+  ]),
+  businessAddress: getFundingDocumentOcrTextValue(result, [
+    'businessAddress',
+    'business_address',
+    'address',
+    'businessPlaceAddress',
+    'business_place_address',
+    '사업장주소',
+    '사업장 소재지',
+    '소재지',
+    '주소',
+  ]),
+  businessType: getFundingDocumentOcrTextValue(result, [
+    'businessType',
+    'business_type',
+    'businessCategory',
+    'business_category',
+    '업태',
+  ]),
+  businessItem: getFundingDocumentOcrTextValue(result, [
+    'businessItem',
+    'business_item',
+    'item',
+    'businessSector',
+    'business_sector',
+    '종목',
+  ]),
+  openingDate: getFundingDocumentOcrTextValue(result, [
+    'openingDate',
+    'opening_date',
+    'startDate',
+    'start_date',
+    '개업일',
+    '개업연월일',
+  ]),
+  confidence: normalizeFundingDocumentOcrConfidence(getFundingDocumentOcrValue(result, [
+    'confidence',
+    'score',
+    'ocrConfidence',
+    'ocr_confidence',
+  ])),
+});
+
+const buildFundingDocumentOcrSummary = (fields) => {
+  const summaryParts = [
+    fields.businessName ? `상호명 ${fields.businessName}` : null,
+    fields.representativeName ? `대표자 ${fields.representativeName}` : null,
+    fields.businessRegistrationNumber ? `사업자등록번호 ${fields.businessRegistrationNumber}` : null,
+    fields.businessAddress ? `사업장주소 ${fields.businessAddress}` : null,
+    fields.businessType ? `업태 ${fields.businessType}` : null,
+    fields.businessItem ? `종목 ${fields.businessItem}` : null,
+  ].filter(Boolean);
+
+  if (summaryParts.length === 0) {
+    return 'OCR 처리는 완료되었지만 주요 사업자 정보를 충분히 추출하지 못했습니다.';
+  }
+
+  return `사업자등록증에서 ${summaryParts.join(', ')}이 추출되었습니다.`;
+};
+
+const buildFundingDocumentOcrResponse = (document) => {
+  if (!document?.ocr_status) {
+    return null;
+  }
+
+  return {
+    status: document.ocr_status,
+    summary: document.ocr_summary || null,
+    extractedFields: parseJsonField(document.ocr_extracted_fields, null),
+    result: parseJsonField(document.ocr_result, null),
+    processedAt: document.ocr_processed_at || null,
+    ...(document.ocr_status === 'FAILED' ? {
+      message: document.ocr_summary || 'OCR 처리에 실패했습니다.',
+    } : {}),
+  };
+};
+
 const runFundingDocumentOcr = async ({ file, documentUrl }) => {
-  if (!file?.buffer) {
-    return {
+  const failedResult = (message = 'OCR 처리에 실패했습니다.', result = null) => ({
+    status: 'FAILED',
+    result: result || {
       status: 'FAILED',
-      message: 'OCR 처리에 실패했습니다.',
-    };
+      message,
+    },
+    summary: 'OCR 처리에 실패했습니다.',
+    extractedFields: null,
+  });
+
+  if (!file?.buffer) {
+    return failedResult();
   }
 
   try {
@@ -2832,23 +3029,25 @@ const runFundingDocumentOcr = async ({ file, documentUrl }) => {
       : '';
 
     if (ocrStatus === 'COMPLETED') {
+      const extractedFields = normalizeFundingDocumentOcrFields(result);
+
       return {
         status: 'COMPLETED',
         result,
+        summary: buildFundingDocumentOcrSummary(extractedFields),
+        extractedFields,
       };
     }
 
     if (ocrStatus === 'FAILED') {
+      const message = getFundingDocumentOcrErrorMessage(result);
       console.warn('Funding document OCR returned failed status', {
         documentUrl,
         fileName: file.originalname,
-        message: getFundingDocumentOcrErrorMessage(result),
+        message,
       });
 
-      return {
-        status: 'FAILED',
-        message: getFundingDocumentOcrErrorMessage(result),
-      };
+      return failedResult(message, result);
     }
 
     console.warn('Funding document OCR returned unexpected status', {
@@ -2857,10 +3056,7 @@ const runFundingDocumentOcr = async ({ file, documentUrl }) => {
       status: ocrStatus || 'MISSING',
     });
 
-    return {
-      status: 'FAILED',
-      message: 'OCR 처리에 실패했습니다.',
-    };
+    return failedResult('OCR 처리에 실패했습니다.', result);
   } catch (error) {
     console.warn('Funding document OCR failed', {
       documentUrl,
@@ -2868,11 +3064,48 @@ const runFundingDocumentOcr = async ({ file, documentUrl }) => {
       message: error.message,
     });
 
-    return {
-      status: 'FAILED',
-      message: 'OCR 처리에 실패했습니다.',
-    };
+    return failedResult(error.message);
   }
+};
+
+const saveFundingDocumentOcrResult = async (documentId, ocrReview) => {
+  const { rows } = await pool.query(
+    `
+    UPDATE funding_documents
+    SET
+      ocr_status = $2,
+      ocr_result = $3,
+      ocr_summary = $4,
+      ocr_extracted_fields = $5,
+      ocr_processed_at = CURRENT_TIMESTAMP
+    WHERE document_id = $1
+    RETURNING
+      document_id,
+      draft_id,
+      document_type,
+      file_name,
+      file_url,
+      mime_type,
+      file_size,
+      ocr_status,
+      ocr_result,
+      ocr_summary,
+      ocr_extracted_fields,
+      ocr_processed_at,
+      created_at
+    `,
+    [
+      Number(documentId),
+      ocrReview.status,
+      normalizeJsonStorageValue(ocrReview.result, null),
+      ocrReview.summary,
+      ocrReview.extractedFields
+        ? normalizeJsonStorageValue(ocrReview.extractedFields, null)
+        : null,
+    ]
+  );
+
+  return rows[0] || null;
 };
 
 // 펀딩 처리 로직
@@ -5432,13 +5665,36 @@ const uploadDocument = async (req, res) => {
       ]
     );
 
-    const document = result.rows[0];
-    const ocr = normalizedDocumentType === 'BUSINESS_LICENSE'
-      ? await runFundingDocumentOcr({
+    let document = result.rows[0];
+    let ocr = null;
+
+    if (normalizedDocumentType === 'BUSINESS_LICENSE') {
+      const ocrReview = await runFundingDocumentOcr({
         file,
         documentUrl: fileUrl,
-      })
-      : null;
+      });
+
+      try {
+        const updatedDocument = await saveFundingDocumentOcrResult(document.document_id, ocrReview);
+        document = updatedDocument || document;
+        ocr = buildFundingDocumentOcrResponse(document);
+      } catch (ocrSaveError) {
+        console.warn('Funding document OCR result save failed', {
+          documentId: document.document_id,
+          draftId: document.draft_id,
+          message: ocrSaveError.message,
+        });
+
+        ocr = {
+          status: 'FAILED',
+          message: 'OCR 처리에 실패했습니다.',
+          summary: 'OCR 처리에 실패했습니다.',
+          extractedFields: null,
+          result: ocrReview.result || null,
+          processedAt: null,
+        };
+      }
+    }
 
     const requiredDocumentResult = await pool.query(
       `
@@ -5907,6 +6163,11 @@ const getFundingDraft = async (req, res) => {
         file_url,
         mime_type,
         file_size,
+        ocr_status,
+        ocr_result,
+        ocr_summary,
+        ocr_extracted_fields,
+        ocr_processed_at,
         created_at
       FROM funding_documents
       WHERE draft_id = $1
@@ -6203,6 +6464,11 @@ const getFundingDraftPreview = async (req, res) => {
         file_url,
         mime_type,
         file_size,
+        ocr_status,
+        ocr_result,
+        ocr_summary,
+        ocr_extracted_fields,
+        ocr_processed_at,
         created_at
       FROM funding_documents
       WHERE draft_id = $1
@@ -7072,6 +7338,11 @@ const getFundingDetail = async (req, res) => {
           file_url,
           mime_type,
           file_size,
+          ocr_status,
+          ocr_result,
+          ocr_summary,
+          ocr_extracted_fields,
+          ocr_processed_at,
           created_at
         FROM funding_documents
         WHERE draft_id = $1
