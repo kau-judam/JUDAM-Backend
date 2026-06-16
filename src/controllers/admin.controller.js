@@ -20,7 +20,409 @@ const getAdminUserId = (req) => {
   return Number.isInteger(userId) && userId > 0 ? userId : null;
 };
 
-const getSubmittedFundingDrafts = async (req, res) => {
+const ADMIN_FUNDING_REVIEW_STATUSES = ['SUBMITTED', 'REVIEWING', 'APPROVED', 'REJECTED'];
+
+const toNullableNumber = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+};
+
+const parseJsonField = (value, fallback = []) => {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallback;
+  }
+};
+
+const toTrimmedString = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  return String(value).trim();
+};
+
+const uniqueStrings = (values) => [
+  ...new Set(
+    (values || [])
+      .map((value) => toTrimmedString(value))
+      .filter(Boolean)
+  ),
+];
+
+const parseListField = (value, fallback = []) => {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  if (Array.isArray(value)) {
+    return uniqueStrings(value);
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return parseListField(JSON.parse(value), fallback);
+    } catch (error) {
+      return uniqueStrings(value.split(','));
+    }
+  }
+
+  return fallback;
+};
+
+const parseOriginalTextField = (value, fallback = null) => {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return value;
+  }
+};
+
+const normalizeRawMaterialItem = (material) => {
+  if (material === undefined || material === null || material === '') {
+    return null;
+  }
+
+  if (typeof material !== 'object' || Array.isArray(material)) {
+    const name = toTrimmedString(material);
+    return name ? { name, origin: null } : null;
+  }
+
+  const name = toTrimmedString(
+    material.name
+      ?? material.ingredient
+      ?? material.mainIngredient
+      ?? material.main_ingredient
+      ?? material.rawMaterial
+      ?? material.raw_material
+  );
+  const origin = toTrimmedString(
+    material.origin
+      ?? material.originName
+      ?? material.origin_name
+      ?? material.countryOfOrigin
+      ?? material.country_of_origin
+      ?? material.country
+      ?? material.region
+  );
+
+  if (!name && !origin) {
+    return null;
+  }
+
+  return {
+    ...material,
+    name: name || null,
+    origin: origin || null,
+  };
+};
+
+const parseRawMaterialsField = (value, fallback = []) => {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  if (Array.isArray(value)) {
+    const materials = value.map(normalizeRawMaterialItem).filter(Boolean);
+    return materials.length > 0 ? materials : fallback;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return parseRawMaterialsField(JSON.parse(value), fallback);
+    } catch (error) {
+      const name = toTrimmedString(value);
+      return name ? [{ name, origin: null }] : fallback;
+    }
+  }
+
+  if (typeof value === 'object') {
+    const material = normalizeRawMaterialItem(value);
+    return material ? [material] : fallback;
+  }
+
+  return fallback;
+};
+
+const buildImageFields = (thumbnailUrl, imageUrlsValue) => {
+  const imageUrls = parseListField(imageUrlsValue, []);
+  const thumbnail = toTrimmedString(thumbnailUrl) || imageUrls[0] || null;
+  const allImageUrls = uniqueStrings([thumbnail, ...imageUrls]);
+
+  return {
+    thumbnailUrl: thumbnail,
+    imageUrls,
+    allImageUrls,
+  };
+};
+
+const parseTasteExtras = (flavorNotesValue) => {
+  const parsed = parseJsonField(flavorNotesValue, []);
+
+  if (Array.isArray(parsed)) {
+    return {
+      flavorNotes: parsed,
+      flavorTags: parsed,
+      finish: null,
+      aftertaste: null,
+      flavor: null,
+      aromaIntensity: null,
+      tasteInput: null,
+      tasteVector: null,
+    };
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    return {
+      flavorNotes: parseListField(parsed.flavorNotes || parsed.flavor_notes || parsed.flavorTags || parsed.flavor_tags),
+      flavorTags: parseListField(parsed.flavorTags || parsed.flavor_tags || parsed.flavorNotes || parsed.flavor_notes),
+      finish: toNullableNumber(parsed.finish ?? parsed.aftertaste),
+      aftertaste: toNullableNumber(parsed.aftertaste ?? parsed.finish),
+      flavor: toNullableNumber(parsed.flavor),
+      aromaIntensity: toNullableNumber(parsed.aromaIntensity ?? parsed.aroma_intensity),
+      tasteInput: parsed.tasteInput || parsed.taste_input || null,
+      tasteVector: parsed.tasteVector || parsed.taste_vector || null,
+    };
+  }
+
+  return {
+    flavorNotes: [],
+    flavorTags: [],
+    finish: null,
+    aftertaste: null,
+    flavor: null,
+    aromaIntensity: null,
+    tasteInput: null,
+    tasteVector: null,
+  };
+};
+
+const buildAdminTasteProfile = (draft = {}) => {
+  const extras = parseTasteExtras(draft.flavor_notes);
+
+  return {
+    sweetness: draft.sweetness,
+    acidity: draft.acidity,
+    body: draft.body,
+    carbonation: draft.carbonation,
+    alcoholIntensity: draft.alcohol_intensity,
+    alcoholPercentage: draft.alcohol_percentage,
+    alcohol: draft.alcohol_intensity,
+    aftertaste: extras.aftertaste ?? extras.finish,
+    finish: extras.finish ?? extras.aftertaste,
+    flavor: extras.flavor,
+    aromaIntensity: extras.aromaIntensity,
+    flavorNotes: extras.flavorNotes,
+    flavorTags: extras.flavorTags,
+    tasteInput: extras.tasteInput,
+    tasteVector: extras.tasteVector,
+  };
+};
+
+const mapAdminFundingDocument = (document) => ({
+  documentId: Number(document.document_id),
+  draftId: Number(document.draft_id),
+  documentType: document.document_type,
+  fileName: document.file_name,
+  fileUrl: document.file_url,
+  mimeType: document.mime_type,
+  fileSize: document.file_size === null || document.file_size === undefined
+    ? null
+    : Number(document.file_size),
+  ocrStatus: document.ocr_status || null,
+  ocrSummary: document.ocr_summary || null,
+  ocrExtractedFields: parseJsonField(document.ocr_extracted_fields, null),
+  ocrResult: parseJsonField(document.ocr_result, null),
+  ocrProcessedAt: document.ocr_processed_at || null,
+  createdAt: document.created_at,
+});
+
+const mapAdminSupportOption = (option) => ({
+  optionId: Number(option.option_id),
+  name: option.name,
+  price: Number(option.price || 0),
+  description: option.description,
+  volume: option.volume,
+  alcohol: option.alcohol,
+  alcoholPercentage: option.alcohol_percentage ?? option.alcohol,
+  stock: option.stock,
+  remainingStock: option.remaining_stock,
+  maxPerUser: option.max_per_user,
+});
+
+const selectProjectPolicyText = (refundPolicy, exchangePolicy) => {
+  const refund = parseOriginalTextField(refundPolicy);
+  const exchange = parseOriginalTextField(exchangePolicy);
+
+  if (refund && exchange && refund === exchange) {
+    return refund;
+  }
+
+  return refund || exchange || null;
+};
+
+const buildAdminFundingDraftPayload = ({ draft, documents = [], supportOptions = [] }) => {
+  const imageFields = buildImageFields(draft.thumbnail_url, draft.image_urls);
+  const subIngredients = parseListField(draft.sub_ingredients, []);
+  const tags = parseJsonField(draft.tags, []);
+  const rawMaterials = parseRawMaterialsField(draft.raw_materials, []);
+  const budgetPlan = parseOriginalTextField(draft.budget_plan);
+  const schedulePlan = parseOriginalTextField(draft.schedule_plan);
+  const projectPolicy = selectProjectPolicyText(draft.refund_policy, draft.exchange_policy);
+  const tasteProfile = buildAdminTasteProfile(draft);
+  const tasteGraph = {
+    sweetness: tasteProfile.sweetness,
+    aftertaste: tasteProfile.aftertaste,
+    finish: tasteProfile.finish,
+    acidity: tasteProfile.acidity,
+    body: tasteProfile.body,
+    carbonation: tasteProfile.carbonation,
+  };
+  const legalNoticeSource = rawMaterials.length > 0
+    ? rawMaterials
+    : (draft.volume || draft.alcohol_percentage || draft.main_ingredient
+      ? [{ name: draft.main_ingredient || null, origin: null }]
+      : []);
+  const legalNotices = legalNoticeSource.map((material) => ({
+    volume: draft.volume ?? '',
+    alcoholDegree: draft.alcohol_percentage ?? null,
+    alcoholContent: draft.alcohol_percentage ?? null,
+    mainIngredient: material.name || material.mainIngredient || material.main_ingredient || draft.main_ingredient || '',
+    origin: material.origin || material.countryOfOrigin || material.country_of_origin || material.region || '',
+  }));
+  const fundingStatus = draft.funding_status || null;
+
+  return {
+    draftId: Number(draft.draft_id),
+    fundingId: draft.funding_id === null || draft.funding_id === undefined
+      ? null
+      : Number(draft.funding_id),
+    draftStatus: draft.status,
+    fundingStatus,
+    status: draft.status,
+    rejectionReason: draft.reject_reason || null,
+    rejectReason: draft.reject_reason || null,
+    submittedAt: draft.submitted_at || null,
+    reviewedAt: draft.reviewed_at || null,
+    reviewedBy: draft.reviewed_by === null || draft.reviewed_by === undefined
+      ? null
+      : Number(draft.reviewed_by),
+    basicInfo: {
+      title: draft.title,
+      shortTitle: draft.short_title,
+      mainIngredient: draft.main_ingredient,
+      subIngredients,
+      alcoholDegree: draft.alcohol_percentage,
+      alcoholContent: draft.alcohol_percentage,
+      alcoholPercentage: draft.alcohol_percentage,
+      summary: draft.summary,
+      projectSummary: draft.summary,
+      thumbnailUrl: imageFields.thumbnailUrl,
+      representativeImageUrl: imageFields.thumbnailUrl,
+      imageUrls: imageFields.imageUrls,
+      allImageUrls: imageFields.allImageUrls,
+      searchTags: tags,
+      tags,
+    },
+    fundingInfo: {
+      bottleUnitPrice: draft.price_per_bottle,
+      unitPrice: draft.price_per_bottle,
+      pricePerBottle: draft.price_per_bottle,
+      totalSalesQuantity: draft.total_quantity,
+      totalQuantity: draft.total_quantity,
+      quantity: draft.total_quantity,
+      targetAmount: draft.target_amount,
+      startDate: draft.funding_start_date,
+      fundingStartDate: draft.funding_start_date,
+      projectDuration: draft.funding_period_days,
+      fundingPeriodDays: draft.funding_period_days,
+      endDate: draft.funding_end_date,
+      fundingEndDate: draft.funding_end_date,
+      expectedDeliveryStartDate: draft.expected_delivery_date,
+      expectedDeliveryDate: draft.expected_delivery_date,
+      scheduleSummary: draft.schedule_summary || null,
+    },
+    legalNotices,
+    tasteProfile,
+    tasteGraph,
+    storyInfo: {
+      introduction: draft.introduction,
+      projectDescription: draft.introduction,
+      budgetPlan,
+      projectBudget: budgetPlan,
+      videoUrl: draft.video_url,
+      projectSchedule: schedulePlan,
+      schedulePlan,
+    },
+    breweryInfo: {
+      breweryId: Number(draft.brewery_id),
+      breweryName: draft.brewery_name,
+      breweryDescription: draft.creator_introduction,
+      creatorName: draft.creator_name,
+      profileImageUrl: draft.profile_image_url,
+      creatorIntroduction: draft.creator_introduction,
+      representativeName: draft.representative_name,
+      businessRegistrationNumber: draft.business_registration_number,
+      businessAddress: draft.business_address,
+      businessAddressDetail: draft.business_address_detail,
+      contactEmail: draft.contact_email,
+      contactPhone: draft.contact_phone,
+      bankName: draft.bank_name,
+      accountNumber: draft.account_number,
+      accountHolder: draft.account_holder,
+      accountVerified: draft.account_verified,
+      phoneVerified: draft.phone_verified,
+      identityDocumentUrl: draft.identity_document_url,
+    },
+    taxInvoiceInfo: {
+      businessClassification: draft.business_classification || null,
+      businessType: draft.business_type || null,
+      companyName: draft.business_name || null,
+      businessName: draft.business_name || null,
+      businessRegistrationNumber: draft.business_registration_number || null,
+      representativeName: draft.representative_name || null,
+      businessAddress: draft.business_address || null,
+      businessCategory: draft.business_category || null,
+      businessItem: draft.business_item || null,
+      email: draft.tax_email || null,
+      taxEmail: draft.tax_email || null,
+      businessRegistrationFileUrl: draft.business_registration_file_url || null,
+    },
+    noticeInfo: {
+      projectPolicy,
+      policy: projectPolicy,
+      expectedDifficulties: draft.risk_notice || null,
+      risks: draft.risk_notice || null,
+      riskPlan: draft.risk_notice || null,
+      riskNotice: draft.risk_notice || null,
+    },
+    supportOptions,
+    documents: documents.map(mapAdminFundingDocument),
+  };
+};
+
+const getSubmittedFundingDraftsLegacy = async (req, res) => {
   const REVIEW_TARGET_DRAFT_STATUSES = ['SUBMITTED', 'REVIEWING'];
   const EXCLUDED_PROJECT_STATUSES = [
     'READY',
@@ -94,6 +496,200 @@ const getSubmittedFundingDrafts = async (req, res) => {
     return res.status(500).json({
       status: 500,
       message: '관리자 펀딩 심사 목록 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const getSubmittedFundingDrafts = async (req, res) => {
+  const { status } = req.query;
+  const requestedStatuses = status
+    ? (Array.isArray(status) ? status : String(status).split(','))
+      .map((value) => String(value).trim().toUpperCase())
+      .filter(Boolean)
+    : ADMIN_FUNDING_REVIEW_STATUSES;
+  const statuses = [...new Set(requestedStatuses)];
+  const hasInvalidStatus = statuses.some(
+    (value) => !ADMIN_FUNDING_REVIEW_STATUSES.includes(value),
+  );
+
+  if (statuses.length === 0 || hasInvalidStatus) {
+    return res.status(400).json({
+      status: 400,
+      message: '펀딩 심사 목록은 SUBMITTED, REVIEWING, APPROVED, REJECTED 상태만 조회할 수 있습니다.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        fd.draft_id AS "draftId",
+        fd.funding_id AS "fundingId",
+        fd.title,
+        COALESCE(
+          NULLIF(fd.brewery_name, ''),
+          NULLIF(fd.business_name, ''),
+          u.nickname
+        ) AS "breweryName",
+        u.nickname AS "applicantName",
+        fd.representative_name AS "representativeName",
+        fd.status,
+        fd.status AS "draftStatus",
+        fp.status AS "fundingStatus",
+        fd.target_amount AS "targetAmount",
+        fd.funding_start_date AS "startDate",
+        fd.funding_end_date AS "endDate",
+        fd.submitted_at AS "submittedAt",
+        fd.reviewed_at AS "reviewedAt",
+        fd.reject_reason AS "rejectionReason",
+        fd.thumbnail_url AS "thumbnailUrl",
+        fd.created_at AS "createdAt"
+      FROM funding_drafts fd
+      LEFT JOIN funding_projects fp ON fp.funding_id = fd.funding_id
+      LEFT JOIN users u ON u.user_id = fd.brewery_id
+      WHERE fd.status = ANY($1::text[])
+      ORDER BY fd.submitted_at DESC NULLS LAST, fd.created_at DESC
+      `,
+      [statuses],
+    );
+
+    return res.status(200).json({
+      status: 200,
+      drafts: result.rows,
+      data: result.rows,
+      message: '관리자 펀딩 심사 목록 조회 성공',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '관리자 펀딩 심사 목록 조회 중 서버 오류가 발생했습니다.',
+      error: error.message,
+    });
+  }
+};
+
+const getFundingDraftReviewDetail = async (req, res) => {
+  const { draftId } = req.params;
+
+  if (!draftId || isNaN(Number(draftId))) {
+    return res.status(400).json({
+      status: 400,
+      message: '펀딩 임시저장 ID가 올바르지 않습니다.',
+    });
+  }
+
+  try {
+    const draftResult = await pool.query(
+      `
+      SELECT
+        fd.*,
+        fp.status AS funding_status,
+        fp.current_amount,
+        fp.supporter_count,
+        u.nickname AS applicant_name,
+        u.email AS applicant_email
+      FROM funding_drafts fd
+      LEFT JOIN funding_projects fp ON fp.funding_id = fd.funding_id
+      LEFT JOIN users u ON u.user_id = fd.brewery_id
+      WHERE fd.draft_id = $1
+      LIMIT 1
+      `,
+      [Number(draftId)],
+    );
+
+    if (draftResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 404,
+        message: '펀딩 심사 대상을 찾을 수 없습니다.',
+      });
+    }
+
+    const draft = draftResult.rows[0];
+    const documentResult = await pool.query(
+      `
+      SELECT
+        document_id,
+        draft_id,
+        document_type,
+        file_name,
+        file_url,
+        mime_type,
+        file_size,
+        ocr_status,
+        ocr_result,
+        ocr_summary,
+        ocr_extracted_fields,
+        ocr_processed_at,
+        created_at
+      FROM funding_documents
+      WHERE draft_id = $1
+      ORDER BY document_id ASC
+      `,
+      [Number(draftId)],
+    );
+
+    let supportOptions = [];
+
+    if (draft.funding_id) {
+      const optionResult = await pool.query(
+        `
+        SELECT
+          option_id,
+          name,
+          price,
+          description,
+          volume,
+          alcohol,
+          alcohol_percentage,
+          stock,
+          remaining_stock,
+          max_per_user
+        FROM funding_support_options
+        WHERE funding_id = $1
+        ORDER BY option_id ASC
+        `,
+        [Number(draft.funding_id)],
+      );
+      supportOptions = optionResult.rows.map(mapAdminSupportOption);
+    }
+
+    if (supportOptions.length === 0 && draft.price_per_bottle) {
+      supportOptions = [{
+        optionId: null,
+        name: draft.short_title || draft.title || '기본 후원 옵션',
+        price: Number(draft.price_per_bottle || 0),
+        description: draft.summary || draft.introduction || null,
+        volume: draft.volume || null,
+        alcohol: draft.alcohol_percentage || null,
+        alcoholPercentage: draft.alcohol_percentage || null,
+        stock: draft.total_quantity || null,
+        remainingStock: draft.total_quantity || null,
+        maxPerUser: null,
+        generated: true,
+      }];
+    }
+
+    const data = buildAdminFundingDraftPayload({
+      draft,
+      documents: documentResult.rows,
+      supportOptions,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      data,
+      ...data,
+      message: '관리자 펀딩 심사 상세 조회 성공',
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      status: 500,
+      message: '관리자 펀딩 심사 상세 조회 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -219,6 +815,14 @@ const ensureDefaultFundingSupportOption = async (client, funding, draft) => {
 // 관리자 제출 프로젝트 승인
 const approveFundingDraft = async (req, res) => {
   const { draftId } = req.params;
+  const adminUserId = getAdminUserId(req);
+
+  if (!adminUserId) {
+    return res.status(401).json({
+      status: 401,
+      message: '관리자 사용자 정보를 확인할 수 없습니다.',
+    });
+  }
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
@@ -246,15 +850,16 @@ const approveFundingDraft = async (req, res) => {
 
     const draft = draftResult.rows[0];
 
-    if (draft.status !== 'SUBMITTED') {
+    if (!['SUBMITTED', 'REVIEWING'].includes(draft.status)) {
       return res.status(400).json({
         status: 400,
-        message: '제출된 프로젝트만 승인할 수 있습니다.',
+        message: '심사 중인 펀딩만 승인할 수 있습니다.',
       });
     }
 
     const client = await pool.connect();
     let funding;
+    let approvedDraft;
 
     try {
       await client.query('BEGIN');
@@ -400,17 +1005,22 @@ const approveFundingDraft = async (req, res) => {
 
       await ensureDefaultFundingSupportOption(client, funding, draft);
 
-      await client.query(
+      const approvedDraftResult = await client.query(
         `
         UPDATE funding_drafts
         SET
           status = 'APPROVED',
           funding_id = $2,
+          reject_reason = NULL,
+          reviewed_at = CURRENT_TIMESTAMP,
+          reviewed_by = $3,
           updated_at = CURRENT_TIMESTAMP
         WHERE draft_id = $1
+        RETURNING draft_id, funding_id, status, reviewed_at, reviewed_by, updated_at
         `,
-        [Number(draftId), funding.funding_id]
+        [Number(draftId), funding.funding_id, adminUserId]
       );
+      approvedDraft = approvedDraftResult.rows[0];
 
       // 펀딩 승인 시 연결된 원본 레시피를 펀딩 진행중(FUNDING_IN_PROGRESS) 상태로 전이한다.
       // recipe_id가 없으면(레시피 없이 만든 직접 펀딩) 전이 대상이 없으므로 건너뛴다.
@@ -448,10 +1058,14 @@ const approveFundingDraft = async (req, res) => {
     const aiRecommendation = await registerFundingProjectToAiPool(funding.funding_id);
 
     return res.status(200).json({
-      draftId: Number(draftId),
-      fundingId: funding.funding_id,
+      draftId: Number(approvedDraft.draft_id),
+      fundingId: Number(funding.funding_id),
       title: funding.title,
       status: funding.status,
+      draftStatus: approvedDraft.status,
+      fundingStatus: funding.status,
+      reviewedAt: approvedDraft.reviewed_at,
+      reviewedBy: Number(approvedDraft.reviewed_by),
       createdAt: funding.created_at,
       aiRecommendation,
       message: '프로젝트가 승인되었습니다.',
@@ -473,7 +1087,16 @@ const approveFundingDraft = async (req, res) => {
 // 관리자 제출 프로젝트 반려
 const rejectFundingDraft = async (req, res) => {
   const { draftId } = req.params;
-  const { rejectReason } = req.body;
+  const body = req.body || {};
+  const rejectReason = body.rejectReason || body.rejectionReason || body.reason;
+  const adminUserId = getAdminUserId(req);
+
+  if (!adminUserId) {
+    return res.status(401).json({
+      status: 401,
+      message: '관리자 사용자 정보를 확인할 수 없습니다.',
+    });
+  }
 
   if (!draftId || isNaN(Number(draftId))) {
     return res.status(400).json({
@@ -528,11 +1151,13 @@ const rejectFundingDraft = async (req, res) => {
         SET
           status = 'REJECTED',
           reject_reason = $1,
+          reviewed_at = CURRENT_TIMESTAMP,
+          reviewed_by = $3,
           updated_at = CURRENT_TIMESTAMP
         WHERE draft_id = $2
-        RETURNING draft_id, funding_id, status, reject_reason, updated_at
+        RETURNING draft_id, funding_id, status, reject_reason, reviewed_at, reviewed_by, updated_at
         `,
-        [rejectReason.trim(), Number(draftId)]
+        [rejectReason.trim(), Number(draftId), adminUserId]
       );
 
       rejectedDraft = result.rows[0];
@@ -545,7 +1170,6 @@ const rejectFundingDraft = async (req, res) => {
             status = 'REJECTED',
             updated_at = CURRENT_TIMESTAMP
           WHERE funding_id = $1
-            AND status IN ('READY', 'REVIEWING', 'SUBMITTED', 'ONGOING')
           RETURNING funding_id, status, updated_at
           `,
           [Number(rejectedDraft.funding_id)]
@@ -563,11 +1187,16 @@ const rejectFundingDraft = async (req, res) => {
     }
 
     return res.status(200).json({
-      draftId: rejectedDraft.draft_id,
+      draftId: Number(rejectedDraft.draft_id),
       fundingId: rejectedDraft.funding_id ? Number(rejectedDraft.funding_id) : null,
       status: rejectedDraft.status,
+      draftStatus: rejectedDraft.status,
+      fundingStatus: rejectedFunding?.status || null,
       projectStatus: rejectedFunding?.status || null,
       rejectReason: rejectedDraft.reject_reason,
+      rejectionReason: rejectedDraft.reject_reason,
+      reviewedAt: rejectedDraft.reviewed_at,
+      reviewedBy: Number(rejectedDraft.reviewed_by),
       updatedAt: rejectedDraft.updated_at,
       message: '프로젝트가 반려되었습니다.',
     });
@@ -1090,6 +1719,7 @@ const completeFundingSettlement = async (req, res) => {
 
 module.exports = {
   getSubmittedFundingDrafts,
+  getFundingDraftReviewDetail,
   approveFundingDraft,
   rejectFundingDraft,
   cancelFundingProject,

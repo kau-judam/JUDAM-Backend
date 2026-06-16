@@ -4,6 +4,7 @@ const authMiddleware = require('../middlewares/authMiddleware');
 
 const {
   getSubmittedFundingDrafts,
+  getFundingDraftReviewDetail,
   approveFundingDraft,
   rejectFundingDraft,
   cancelFundingProject,
@@ -30,9 +31,14 @@ const requireAdmin = (req, res, next) => {
   return next();
 };
 
-router.get('/fundings/drafts', getSubmittedFundingDrafts);
-router.patch('/fundings/drafts/:draftId/approve', approveFundingDraft);
-router.patch('/fundings/drafts/:draftId/reject', rejectFundingDraft);
+router.get('/fundings/drafts', authMiddleware, requireAdmin, getSubmittedFundingDrafts);
+router.get('/fundings/drafts/:draftId', authMiddleware, requireAdmin, getFundingDraftReviewDetail);
+router.patch('/fundings/drafts/:draftId/approve', authMiddleware, requireAdmin, approveFundingDraft);
+router.patch('/fundings/drafts/:draftId/reject', authMiddleware, requireAdmin, rejectFundingDraft);
+router.get('/fundings/reviews', authMiddleware, requireAdmin, getSubmittedFundingDrafts);
+router.get('/fundings/reviews/:draftId', authMiddleware, requireAdmin, getFundingDraftReviewDetail);
+router.patch('/fundings/reviews/:draftId/approve', authMiddleware, requireAdmin, approveFundingDraft);
+router.patch('/fundings/reviews/:draftId/reject', authMiddleware, requireAdmin, rejectFundingDraft);
 router.patch(
   '/fundings/:fundingId/cancel',
   authMiddleware,
