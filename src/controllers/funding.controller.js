@@ -1039,11 +1039,11 @@ const buildFundingSupportOptionsResponse = ({
   }];
 };
 
-const MAIN_INGREDIENT_LABEL = '硫붿씤 ?щ즺';
+const MAIN_INGREDIENT_LABEL = '메인 재료';
 
 const PLAN_GUIDES = {
-  budgetPlanGuide: '?덉궛 ?ъ슜 怨꾪쉷??援ъ껜?곸쑝濡??묒꽦?댁＜?몄슂.',
-  schedulePlanGuide: '???吏꾪뻾 諛?諛곗넚 ?쇱젙??援ъ껜?곸쑝濡??묒꽦?댁＜?몄슂.',
+  budgetPlanGuide: '예산 사용 계획을 구체적으로 작성해주세요.',
+  schedulePlanGuide: '프로젝트 진행 및 배송 일정을 구체적으로 작성해주세요.',
 };
 
 const FUNDING_TEXT_FIXTURES = {
@@ -1491,6 +1491,8 @@ const buildFundingDraftPayload = (draft, documents = []) => {
       ? null
       : Number(draft.brewery_id),
     status: draft.status,
+    draftStatus: draft.status,
+    fundingStatus: draft.funding_status || draft.fundingStatus || null,
     progressRate: Number(draft.progress_rate || 0),
     createdAt: draft.created_at,
     updatedAt: draft.updated_at,
@@ -5908,6 +5910,17 @@ const getFundingDraftByFundingId = async (req, res) => {
   try {
     if (!(await authorizeFundingProjectOwner(resolvedFundingId, req.user, res))) return;
 
+    const fundingStatusResult = await pool.query(
+      `
+      SELECT status
+      FROM funding_projects
+      WHERE funding_id = $1
+      LIMIT 1
+      `,
+      [resolvedFundingId]
+    );
+    const fundingStatus = fundingStatusResult.rows[0]?.status || null;
+
     const draft = await findAndLinkFundingDraftByFundingId(resolvedFundingId);
 
     if (!draft) {
@@ -5921,14 +5934,17 @@ const getFundingDraftByFundingId = async (req, res) => {
     const payload = buildFundingDraftPayload(draft, documents);
     const responseData = {
       ...payload,
+      draftStatus: payload.draftStatus || payload.status,
+      fundingStatus,
       draft,
     };
 
     return res.status(200).json({
       ...payload,
       status: 200,
-      draftStatus: payload.status,
-      message: '?? ?? ? ??? ??????.',
+      draftStatus: responseData.draftStatus,
+      fundingStatus,
+      message: '펀딩 임시저장 조회 성공',
       data: responseData,
     });
   } catch (error) {
