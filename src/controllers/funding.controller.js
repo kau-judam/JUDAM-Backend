@@ -8,6 +8,7 @@ const {
 } = require('../services/funding.service');
 const {
   generateFundingDraftAiImageAndUpload,
+  requestBreweryLicenseOcr,
   updateAiTasteProfile,
 } = require('../services/ai.service');
 const {
@@ -2805,6 +2806,75 @@ const REQUIRED_FUNDING_DOCUMENT_TYPES = [
 const normalizeFundingDocumentType = (documentType) =>
   DOCUMENT_TYPE_ALIASES[documentType] || null;
 
+const getFundingDocumentOcrErrorMessage = (result) => {
+  if (!result || typeof result !== 'object') {
+    return 'OCR 처리에 실패했습니다.';
+  }
+
+  return result.error || result.message || result.detail || 'OCR 처리에 실패했습니다.';
+};
+
+const runFundingDocumentOcr = async ({ file, documentUrl }) => {
+  if (!file?.buffer) {
+    return {
+      status: 'FAILED',
+      message: 'OCR 처리에 실패했습니다.',
+    };
+  }
+
+  try {
+    const result = await requestBreweryLicenseOcr({
+      file,
+      documentUrl,
+    });
+    const ocrStatus = typeof result?.status === 'string'
+      ? result.status.trim().toUpperCase()
+      : '';
+
+    if (ocrStatus === 'COMPLETED') {
+      return {
+        status: 'COMPLETED',
+        result,
+      };
+    }
+
+    if (ocrStatus === 'FAILED') {
+      console.warn('Funding document OCR returned failed status', {
+        documentUrl,
+        fileName: file.originalname,
+        message: getFundingDocumentOcrErrorMessage(result),
+      });
+
+      return {
+        status: 'FAILED',
+        message: getFundingDocumentOcrErrorMessage(result),
+      };
+    }
+
+    console.warn('Funding document OCR returned unexpected status', {
+      documentUrl,
+      fileName: file.originalname,
+      status: ocrStatus || 'MISSING',
+    });
+
+    return {
+      status: 'FAILED',
+      message: 'OCR 처리에 실패했습니다.',
+    };
+  } catch (error) {
+    console.warn('Funding document OCR failed', {
+      documentUrl,
+      fileName: file.originalname,
+      message: error.message,
+    });
+
+    return {
+      status: 'FAILED',
+      message: 'OCR 처리에 실패했습니다.',
+    };
+  }
+};
+
 // 펀딩 처리 로직
 const saveAgreement = async (req, res) => {
   const body = req.body || {};
@@ -5276,7 +5346,7 @@ const saveNotices = async (req, res) => {
       riskNotice: draft.risk_notice,
       progressRate: draft.progress_rate,
       updatedAt: draft.updated_at,
-      message: '요청 처리 중 오류가 발생했습니다.',
+      message: '펀딩 공지 및 정책 저장이 완료되었습니다.',
     });
   } catch (error) {
     console.error(error);
@@ -5363,6 +5433,12 @@ const uploadDocument = async (req, res) => {
     );
 
     const document = result.rows[0];
+    const ocr = normalizedDocumentType === 'BUSINESS_LICENSE'
+      ? await runFundingDocumentOcr({
+        file,
+        documentUrl: fileUrl,
+      })
+      : null;
 
     const requiredDocumentResult = await pool.query(
       `
@@ -5415,9 +5491,8 @@ const uploadDocument = async (req, res) => {
       },
       progressRate,
       createdAt: document.created_at,
-      message: isAllRequiredDocumentsUploaded
-        ? '필수 펀딩 서류 업로드가 완료되어 임시저장 진행률이 100%로 업데이트되었습니다.'
-        : '펀딩 서류 업로드가 완료되었습니다.',
+      ocr,
+      message: '펀딩 서류 업로드가 완료되었습니다.',
     });
   } catch (error) {
     console.error(error);
