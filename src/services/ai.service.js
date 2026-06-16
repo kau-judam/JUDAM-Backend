@@ -137,6 +137,47 @@ const normalizeAiImagePayload = (payload = {}) => {
   const normalizedPayload = {
     ...(payload && typeof payload === 'object' ? payload : {}),
   };
+  const normalizeListField = (value) => {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean);
+    }
+
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    return [];
+  };
+
+  if (
+    normalizedPayload.flavor_tags === undefined &&
+    normalizedPayload.flavorTags !== undefined
+  ) {
+    normalizedPayload.flavor_tags = normalizeListField(normalizedPayload.flavorTags);
+  } else if (normalizedPayload.flavor_tags !== undefined) {
+    normalizedPayload.flavor_tags = normalizeListField(normalizedPayload.flavor_tags);
+  }
+
+  if (
+    normalizedPayload.main_ingredient === undefined &&
+    normalizedPayload.mainIngredient !== undefined
+  ) {
+    normalizedPayload.main_ingredient = String(normalizedPayload.mainIngredient).trim();
+  }
+
+  if (
+    normalizedPayload.sub_ingredients === undefined &&
+    normalizedPayload.subIngredients !== undefined
+  ) {
+    normalizedPayload.sub_ingredients = normalizeListField(normalizedPayload.subIngredients);
+  } else if (normalizedPayload.sub_ingredients !== undefined) {
+    normalizedPayload.sub_ingredients = normalizeListField(normalizedPayload.sub_ingredients);
+  }
 
   if (
     normalizedPayload.taste_vector === undefined &&
