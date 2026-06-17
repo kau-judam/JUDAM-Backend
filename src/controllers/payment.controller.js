@@ -15,6 +15,7 @@ exports.confirmTossPayment = async (req, res) => {
       paymentKey,
       orderId,
       amount,
+      userId: req.user?.userId || req.user?.id,
     });
 
     res.set('Cache-Control', 'no-store');
