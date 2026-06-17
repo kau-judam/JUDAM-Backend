@@ -2,6 +2,11 @@ const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const pool = require('../config/db');
 const { sendPasswordResetCodeEmail } = require('./mail.service');
+const {
+  requestAuthPhoneVerification,
+  confirmAuthPhoneVerification,
+} = require('./auth-phone.service');
+const { normalizePhoneNumber } = require('./mypage.service');
 
 const PASSWORD_RESET_EXPIRES_IN_MINUTES = 5;
 const PASSWORD_RESET_TOKEN_EXPIRES_IN_MINUTES = 10;
@@ -31,6 +36,17 @@ const generatePasswordResetCode = () =>
 
 const generatePasswordResetToken = () => crypto.randomBytes(32).toString('base64url');
 
+const PASSWORD_RESET_PHONE_MISMATCH_MESSAGE = '입력한 이메일 또는 전화번호를 확인해주세요.';
+const PHONE_VERIFICATION_INVALID_MESSAGE = '전화번호 인증번호가 올바르지 않거나 만료되었습니다.';
+
+const normalizePasswordResetPhoneNumber = (phoneNumber) => {
+  try {
+    return normalizePhoneNumber(phoneNumber);
+  } catch (error) {
+    throw createServiceError(400, '전화번호 형식이 올바르지 않습니다.');
+  }
+};
+
 const findLocalUserByEmail = async (client, email) => {
   const { rows } = await client.query(
     `
@@ -45,6 +61,72 @@ const findLocalUserByEmail = async (client, email) => {
   );
 
   return rows[0] || null;
+};
+
+const findLocalUserByEmailAndPhone = async (client, email, phoneNumber) => {
+  const { rows } = await client.query(
+    `
+    SELECT user_id, email, phone_number, provider
+    FROM users
+    WHERE LOWER(email) = LOWER($1)
+      AND provider = 'local'
+      AND deleted_at IS NULL
+      AND REGEXP_REPLACE(COALESCE(phone_number, ''), '[^0-9]', '', 'g') = $2
+    LIMIT 1
+    `,
+    [email, phoneNumber]
+  );
+
+  return rows[0] || null;
+};
+
+const createPasswordResetTokenForEmail = async (client, email) => {
+  const passwordResetToken = generatePasswordResetToken();
+  const passwordResetTokenHash = hashPasswordResetValue(passwordResetToken);
+
+  await client.query(
+    `
+    UPDATE password_reset_verifications
+    SET
+      used = true,
+      used_at = COALESCE(used_at, CURRENT_TIMESTAMP)
+    WHERE email = $1
+      AND used = false
+      AND reset_token_hash IS NOT NULL
+    `,
+    [email]
+  );
+
+  await client.query(
+    `
+    INSERT INTO password_reset_verifications (
+      email,
+      verification_code_hash,
+      expires_at,
+      used,
+      attempt_count,
+      reset_token_hash,
+      reset_token_expires_at
+    )
+    VALUES (
+      $1,
+      NULL,
+      CURRENT_TIMESTAMP + ($2::text || ' minutes')::interval,
+      false,
+      0,
+      $3,
+      CURRENT_TIMESTAMP + ($4::text || ' minutes')::interval
+    )
+    `,
+    [
+      email,
+      PASSWORD_RESET_EXPIRES_IN_MINUTES,
+      passwordResetTokenHash,
+      PASSWORD_RESET_TOKEN_EXPIRES_IN_MINUTES,
+    ]
+  );
+
+  return passwordResetToken;
 };
 
 const requestPasswordResetVerification = async (email) => {
@@ -191,6 +273,93 @@ const verifyPasswordResetCode = async ({ email, verificationCode }) => {
   }
 };
 
+const requestPasswordResetPhoneVerification = async ({ email, phoneNumber }) => {
+  const normalizedPhoneNumber = normalizePasswordResetPhoneNumber(phoneNumber);
+  const client = await pool.connect();
+
+  try {
+    const user = await findLocalUserByEmailAndPhone(client, email, normalizedPhoneNumber);
+
+    if (!user) {
+      throw createServiceError(400, PASSWORD_RESET_PHONE_MISMATCH_MESSAGE);
+    }
+  } finally {
+    client.release();
+  }
+
+  const verification = await requestAuthPhoneVerification(normalizedPhoneNumber);
+
+  return {
+    phoneNumber: verification.phoneNumber,
+    verificationCode: verification.verificationCode,
+    sendTo: verification.sendTo,
+    guideMessage: `인증번호 ${verification.verificationCode}을 ${verification.sendTo}로 문자 전송해주세요.`,
+    expiresInMinutes: PASSWORD_RESET_EXPIRES_IN_MINUTES,
+  };
+};
+
+const confirmPasswordResetPhoneVerification = async ({ email, phoneNumber, verificationCode }) => {
+  const normalizedPhoneNumber = normalizePasswordResetPhoneNumber(phoneNumber);
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const user = await findLocalUserByEmailAndPhone(client, email, normalizedPhoneNumber);
+
+    if (!user) {
+      throw createServiceError(400, PASSWORD_RESET_PHONE_MISMATCH_MESSAGE);
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    client.release();
+    throw error;
+  }
+
+  client.release();
+
+  try {
+    await confirmAuthPhoneVerification(normalizedPhoneNumber, verificationCode);
+  } catch (error) {
+    if (error.statusCode === 400) {
+      throw createServiceError(error.statusCode, PHONE_VERIFICATION_INVALID_MESSAGE);
+    }
+
+    if (error.statusCode === 502) {
+      throw createServiceError(502, '전화번호 인증 서비스와 통신할 수 없습니다.');
+    }
+
+    if (error.statusCode) {
+      throw createServiceError(error.statusCode, '전화번호 인증 확인 중 오류가 발생했습니다.');
+    }
+
+    throw error;
+  }
+
+  const tokenClient = await pool.connect();
+
+  try {
+    await tokenClient.query('BEGIN');
+
+    const passwordResetToken = await createPasswordResetTokenForEmail(tokenClient, email);
+
+    await tokenClient.query('COMMIT');
+
+    return {
+      resetToken: passwordResetToken,
+      passwordResetToken,
+      expiresInMinutes: PASSWORD_RESET_TOKEN_EXPIRES_IN_MINUTES,
+    };
+  } catch (error) {
+    await tokenClient.query('ROLLBACK');
+    throw error;
+  } finally {
+    tokenClient.release();
+  }
+};
+
 const confirmPasswordReset = async ({ passwordResetToken, newPassword }) => {
   const client = await pool.connect();
   const passwordResetTokenHash = hashPasswordResetValue(passwordResetToken);
@@ -277,5 +446,7 @@ module.exports = {
   PASSWORD_RESET_EXPIRES_IN_MINUTES,
   requestPasswordResetVerification,
   verifyPasswordResetCode,
+  requestPasswordResetPhoneVerification,
+  confirmPasswordResetPhoneVerification,
   confirmPasswordReset,
 };

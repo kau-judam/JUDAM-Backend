@@ -29,6 +29,8 @@ const {
   PASSWORD_RESET_EXPIRES_IN_MINUTES,
   requestPasswordResetVerification,
   verifyPasswordResetCode,
+  requestPasswordResetPhoneVerification,
+  confirmPasswordResetPhoneVerification,
   confirmPasswordReset,
 } = require('../services/auth.service');
 
@@ -674,6 +676,166 @@ const resetPassword = async (req, res) => {
     });
   }
 };
+
+const requestPasswordResetPhone = async (req, res) => {
+  const email = normalizeString(req.body?.email).toLowerCase();
+  const phoneNumber = req.body?.phoneNumber;
+
+  if (!email) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일을 입력해주세요.',
+    });
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (phoneNumber === undefined || phoneNumber === null || normalizeString(phoneNumber) === '') {
+    return res.status(400).json({
+      status: 400,
+      message: '전화번호를 입력해주세요.',
+    });
+  }
+
+  try {
+    const data = await requestPasswordResetPhoneVerification({ email, phoneNumber });
+
+    return res.status(200).json({
+      status: 200,
+      message: '전화번호 인증 요청이 생성되었습니다.',
+      data,
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+
+    return res.status(statusCode).json({
+      status: statusCode,
+      message: error.message || '전화번호 인증 요청 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const confirmPasswordResetPhone = async (req, res) => {
+  const email = normalizeString(req.body?.email).toLowerCase();
+  const phoneNumber = req.body?.phoneNumber;
+  const verificationCode = normalizeString(req.body?.verificationCode);
+
+  if (!email) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일을 입력해주세요.',
+    });
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(400).json({
+      status: 400,
+      message: '이메일 형식이 올바르지 않습니다.',
+    });
+  }
+
+  if (phoneNumber === undefined || phoneNumber === null || normalizeString(phoneNumber) === '') {
+    return res.status(400).json({
+      status: 400,
+      message: '전화번호를 입력해주세요.',
+    });
+  }
+
+  if (!verificationCode) {
+    return res.status(400).json({
+      status: 400,
+      message: '인증번호를 입력해주세요.',
+    });
+  }
+
+  try {
+    const data = await confirmPasswordResetPhoneVerification({
+      email,
+      phoneNumber,
+      verificationCode,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '전화번호 인증이 완료되었습니다.',
+      data: {
+        resetToken: data.resetToken,
+        passwordResetToken: data.passwordResetToken,
+        expiresInMinutes: data.expiresInMinutes,
+      },
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+
+    return res.status(statusCode).json({
+      status: statusCode,
+      message: error.message || '전화번호 인증 확인 중 서버 오류가 발생했습니다.',
+    });
+  }
+};
+
+const completePasswordResetPhone = async (req, res) => {
+  const resetToken = normalizeString(req.body?.resetToken)
+    || normalizeString(req.body?.passwordResetToken);
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  const newPasswordConfirm = typeof req.body?.newPasswordConfirm === 'string'
+    ? req.body.newPasswordConfirm
+    : '';
+
+  if (!resetToken) {
+    return res.status(400).json({
+      status: 400,
+      message: '비밀번호 재설정 토큰이 필요합니다.',
+    });
+  }
+
+  if (newPasswordConfirm && newPassword !== newPasswordConfirm) {
+    return res.status(400).json({
+      status: 400,
+      message: '새 비밀번호와 비밀번호 확인이 일치하지 않습니다.',
+    });
+  }
+
+  if (!PASSWORD_PATTERN.test(newPassword)) {
+    return res.status(400).json({
+      status: 400,
+      message: '비밀번호는 8자 이상이며 영문 대문자, 영문 소문자, 숫자를 모두 포함해야 합니다.',
+    });
+  }
+
+  try {
+    await confirmPasswordReset({
+      passwordResetToken: resetToken,
+      newPassword,
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: '비밀번호가 변경되었습니다.',
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    let message = '비밀번호 변경 중 서버 오류가 발생했습니다.';
+
+    if (statusCode === 400) {
+      message = '비밀번호 재설정 토큰이 올바르지 않거나 만료되었습니다.';
+    } else if (statusCode === 404) {
+      message = '비밀번호를 변경할 계정을 찾을 수 없습니다.';
+    } else if (error.message && !/[?�]/u.test(error.message)) {
+      message = error.message;
+    }
+
+    return res.status(statusCode).json({
+      status: statusCode,
+      message,
+    });
+  }
+};
 const kakaoLoginUrl = (req, res) => {
   const redirectUri = normalizeString(req.query?.redirectUri) || getFrontendRedirectUri() || getBackendRedirectUri();
   const appRedirectUri = normalizeString(req.query?.appRedirectUri)
@@ -1153,6 +1315,9 @@ module.exports = {
   requestPasswordReset,
   verifyPasswordReset,
   resetPassword,
+  requestPasswordResetPhone,
+  confirmPasswordResetPhone,
+  completePasswordResetPhone,
   kakaoLoginUrl,
   kakaoLogin,
   kakaoCallback,
