@@ -3058,7 +3058,8 @@ const getParticipatedFundings = async (userId, options = {}) => {
         fp.raw_materials,
         ba.brewery_name,
         u.nickname AS brewery_nickname,
-        fr.review_id
+        fr.review_id,
+        COALESCE(supporters.supporter_count, 0) AS supporter_count
       FROM (
         SELECT DISTINCT ON (o.funding_id)
           o.funding_id,
@@ -3079,6 +3080,12 @@ const getParticipatedFundings = async (userId, options = {}) => {
           AND o2.order_status = 'PAID'
           AND o2.funding_id = recent.funding_id
       ) agg ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(DISTINCT o_paid.user_id)::int AS supporter_count
+        FROM orders o_paid
+        WHERE o_paid.funding_id = recent.funding_id
+          AND o_paid.order_status = 'PAID'
+      ) supporters ON TRUE
       LEFT JOIN users u ON u.user_id = fp.brewery_user_id
       LEFT JOIN LATERAL (
         SELECT brewery_name
@@ -3137,6 +3144,7 @@ const getParticipatedFundings = async (userId, options = {}) => {
       currentAmount,
       goalAmount,
       progressRate,
+      supporterCount: Number(row.supporter_count || 0),
       canViewDelivery,
       deliveryStatus: hasTrackingNumber ? 'SHIPPED' : null,
       hasTrackingNumber,
