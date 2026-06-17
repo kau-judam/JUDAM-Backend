@@ -23,6 +23,7 @@ const getAdminUserId = (req) => {
 
 const ADMIN_FUNDING_REVIEW_STATUSES = ['SUBMITTED', 'REVIEWING', 'APPROVED', 'REJECTED'];
 const ADMIN_FUNDING_REPORT_STATUSES = ['PENDING', 'REVIEWED', 'RESOLVED', 'REJECTED'];
+const ADMIN_FUNDING_REPORT_BAD_STATUS_MESSAGE = '신고 상태는 PENDING, REVIEWED, RESOLVED, REJECTED 중 하나여야 합니다.';
 
 const normalizeAdminFundingReportStatus = (value) => {
   if (value === undefined || value === null) {
@@ -1385,7 +1386,7 @@ const getFundingReportsForAdmin = async (req, res) => {
   if (hasStatusQuery && !normalizedStatus) {
     return res.status(400).json({
       status: 400,
-      message: '신고 상태는 PENDING, REVIEWED, RESOLVED, REJECTED 중 하나여야 합니다.',
+      message: ADMIN_FUNDING_REPORT_BAD_STATUS_MESSAGE,
     });
   }
 
@@ -1528,7 +1529,7 @@ const updateFundingReportStatusForAdmin = async (req, res) => {
   if (!nextStatus) {
     return res.status(400).json({
       status: 400,
-      message: '신고 상태는 PENDING, REVIEWED, RESOLVED, REJECTED 중 하나여야 합니다.',
+      message: ADMIN_FUNDING_REPORT_BAD_STATUS_MESSAGE,
     });
   }
 
