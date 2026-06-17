@@ -1750,6 +1750,64 @@ const getFundingDraftDocuments = async (draftId) => {
   return rows;
 };
 
+const getFundingSupportOptionsByFundingId = async (fundingId) => {
+  if (fundingId === null || fundingId === undefined) {
+    return [];
+  }
+
+  const numericFundingId = Number(fundingId);
+
+  if (!Number.isInteger(numericFundingId) || numericFundingId <= 0) {
+    return [];
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT
+      option_id,
+      funding_id,
+      name,
+      price,
+      description,
+      stock,
+      remaining_stock,
+      max_per_user,
+      created_at
+    FROM funding_support_options
+    WHERE funding_id = $1
+    ORDER BY option_id ASC
+    `,
+    [numericFundingId]
+  );
+
+  return rows;
+};
+
+const buildFundingDraftSupportOptionsResponse = async (draft) => {
+  const supportOptionRows = await getFundingSupportOptionsByFundingId(draft?.funding_id);
+  const rawMaterials = parseRawMaterialsField(draft?.raw_materials, []);
+  const mainIngredient = toTrimmedString(draft?.main_ingredient)
+    || rawMaterials.map((material) => material.name).filter(Boolean)[0]
+    || null;
+  const subIngredients = parseFundingListField(draft?.sub_ingredients);
+  const ingredients = uniqueValues([
+    mainIngredient,
+    ...subIngredients,
+    ...rawMaterials.map((material) => material.name),
+  ]);
+
+  return buildFundingSupportOptionsResponse({
+    options: supportOptionRows,
+    funding: {
+      ...draft,
+      total_quantity: draft?.total_quantity,
+    },
+    mainIngredient,
+    subIngredients,
+    ingredients,
+  });
+};
+
 const findDirectFundingDraftByFundingId = async (fundingId) => {
   const { rows } = await pool.query(
     `
@@ -6398,7 +6456,11 @@ const getFundingDraftByFundingId = async (req, res) => {
     }
 
     const documents = await getFundingDraftDocuments(draft.draft_id);
-    const payload = buildFundingDraftPayload(draft, documents);
+    const supportOptions = await buildFundingDraftSupportOptionsResponse(draft);
+    const payload = {
+      ...buildFundingDraftPayload(draft, documents),
+      supportOptions,
+    };
     const responseData = {
       ...payload,
       draftStatus: payload.draftStatus || payload.status,
@@ -6650,7 +6712,11 @@ const getFundingDraftPreview = async (req, res) => {
     );
 
     const draft = draftResult.rows[0];
-    const payload = buildFundingDraftPayload(draft, documentResult.rows);
+    const supportOptions = await buildFundingDraftSupportOptionsResponse(draft);
+    const payload = {
+      ...buildFundingDraftPayload(draft, documentResult.rows),
+      supportOptions,
+    };
     const responseData = {
       ...payload,
       draft,
