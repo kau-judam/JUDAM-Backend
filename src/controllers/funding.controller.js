@@ -9136,6 +9136,7 @@ const getFundingReviews = async (req, res) => {
     const totalElements = countResult.rows[0].total_count;
 
     return res.status(200).json({
+      status: 200,
       content: result.rows.map(mapFundingReview),
       page: pageNumber,
       size: sizeNumber,
@@ -9147,7 +9148,7 @@ const getFundingReviews = async (req, res) => {
       myReviewId: reviewWriteState.existingReview
         ? Number(reviewWriteState.existingReview.review_id)
         : null,
-      message: '요청 처리 중 오류가 발생했습니다.',
+      message: '펀딩 후기 목록 조회 성공',
     });
   } catch (error) {
     console.error(error);
