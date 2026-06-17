@@ -9547,7 +9547,9 @@ const logFundingOrderValidationFailure = ({
   });
 };
 
-const FUNDING_ORDER_CLOSED_MESSAGE = '종료된 펀딩에는 후원할 수 없습니다.';
+const FUNDING_ORDER_ENDED_MESSAGE = '종료된 펀딩에는 후원할 수 없습니다.';
+const FUNDING_ORDER_NOT_STARTED_MESSAGE = '펀딩 시작 전에는 후원할 수 없습니다.';
+const FUNDING_ORDER_INACTIVE_MESSAGE = 'ACTIVE 상태의 펀딩만 후원할 수 있습니다.';
 
 const getFundingOrderAvailability = async (fundingId) => {
   const numericFundingId = Number(fundingId);
@@ -9561,6 +9563,7 @@ const getFundingOrderAvailability = async (fundingId) => {
     SELECT
       funding_id,
       status,
+      start_date::date > ((CURRENT_TIMESTAMP AT TIME ZONE $2)::date) AS is_not_started,
       end_date::date < ((CURRENT_TIMESTAMP AT TIME ZONE $2)::date) AS is_expired
     FROM funding_projects
     WHERE funding_id = $1
@@ -9577,11 +9580,27 @@ const getFundingOrderAvailability = async (fundingId) => {
 
   const fundingStatus = String(funding.status || '').trim().toUpperCase();
 
-  if (fundingStatus !== 'ACTIVE' || funding.is_expired) {
+  if (fundingStatus !== 'ACTIVE') {
     return {
       canCreate: false,
       status: 400,
-      message: FUNDING_ORDER_CLOSED_MESSAGE,
+      message: FUNDING_ORDER_INACTIVE_MESSAGE,
+    };
+  }
+
+  if (funding.is_not_started) {
+    return {
+      canCreate: false,
+      status: 400,
+      message: FUNDING_ORDER_NOT_STARTED_MESSAGE,
+    };
+  }
+
+  if (funding.is_expired) {
+    return {
+      canCreate: false,
+      status: 400,
+      message: FUNDING_ORDER_ENDED_MESSAGE,
     };
   }
 
@@ -9589,6 +9608,19 @@ const getFundingOrderAvailability = async (fundingId) => {
 };
 
 const createFundingOrder = async (req, res) => {
+  const { fundingId } = req.params;
+  const numericFundingId = Number(fundingId);
+
+  if (!Number.isInteger(numericFundingId) || numericFundingId <= 0) {
+    return res.status(404).json({
+      status: 404,
+      message: '펀딩 프로젝트를 찾을 수 없습니다.',
+    });
+  }
+
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+
   const fundingOrderAvailability = await getFundingOrderAvailability(req.params.fundingId);
 
   if (!fundingOrderAvailability.canCreate) {
@@ -9598,10 +9630,9 @@ const createFundingOrder = async (req, res) => {
     });
   }
 
-  const { fundingId } = req.params;
   const body = req.body || {};
 
-  const optionId = getBodyValue(body, ['optionId', 'option_id']);
+  const optionId = getBodyValue(body, ['supportOptionId', 'support_option_id', 'optionId', 'option_id']);
   const quantity = getBodyValue(body, ['quantity']);
   const donationAmount = getBodyValue(body, [
     'donationAmount',
@@ -9623,6 +9654,8 @@ const createFundingOrder = async (req, res) => {
   const supportMessage = toTrimmedString(
     getBodyValue(body, ['supportMessage', 'support_message', 'message'])
   );
+  const successUrl = toTrimmedString(getBodyValue(body, ['successUrl', 'success_url']));
+  const failUrl = toTrimmedString(getBodyValue(body, ['failUrl', 'fail_url']));
   const postalCode = toTrimmedString(
     getBodyValue(body, ['postalCode', 'postal_code', 'zonecode']) ||
       extractZonecodeFromAddress(shippingAddress)
@@ -9693,7 +9726,7 @@ const createFundingOrder = async (req, res) => {
 
     return res.status(400).json({
       status: 400,
-      message: '요청 값이 올바르지 않습니다.',
+      message: '주문 요청값이 올바르지 않습니다.',
       missingFields,
       invalidFields,
     });
@@ -9737,7 +9770,7 @@ const createFundingOrder = async (req, res) => {
 
     return res.status(400).json({
       status: 400,
-      message: '요청 값이 올바르지 않습니다.',
+      message: '추가 후원 금액이 올바르지 않습니다.',
       missingFields: [],
       invalidFields: ['additionalSupportAmount'],
     });
@@ -9752,6 +9785,7 @@ const createFundingOrder = async (req, res) => {
         price_per_bottle,
         shipping_fee,
         status,
+        start_date,
         end_date
       FROM funding_projects
       WHERE funding_id = $1
@@ -9768,6 +9802,28 @@ const createFundingOrder = async (req, res) => {
 
     const funding = fundingResult.rows[0];
     const kstToday = await getKstToday();
+    const fundingStatus = String(funding.status || '').trim().toUpperCase();
+
+    if (fundingStatus !== 'ACTIVE') {
+      return res.status(400).json({
+        status: 400,
+        message: FUNDING_ORDER_INACTIVE_MESSAGE,
+      });
+    }
+
+    if (funding.start_date && String(funding.start_date).slice(0, 10) > String(kstToday).slice(0, 10)) {
+      return res.status(400).json({
+        status: 400,
+        message: FUNDING_ORDER_NOT_STARTED_MESSAGE,
+      });
+    }
+
+    if (funding.end_date && String(funding.end_date).slice(0, 10) < String(kstToday).slice(0, 10)) {
+      return res.status(400).json({
+        status: 400,
+        message: FUNDING_ORDER_ENDED_MESSAGE,
+      });
+    }
 
     if (!isFundingSupportable(funding, kstToday)) {
       return res.status(400).json({
@@ -9781,7 +9837,15 @@ const createFundingOrder = async (req, res) => {
     if (numericOptionId !== null) {
       const optionResult = await pool.query(
         `
-        SELECT option_id, funding_id, name, price, remaining_stock, stock
+        SELECT
+          option_id,
+          funding_id,
+          name,
+          price,
+          remaining_stock,
+          stock,
+          COALESCE(remaining_stock, stock) AS available_stock,
+          max_per_user
         FROM funding_support_options
         WHERE option_id = $1
           AND funding_id = $2
@@ -9792,11 +9856,56 @@ const createFundingOrder = async (req, res) => {
       if (optionResult.rows.length === 0) {
         return res.status(404).json({
           status: 404,
+          message: '후원 옵션을 찾을 수 없습니다.',
+        });
+      }
+
+      if (optionResult.rows.length === 0) {
+        return res.status(404).json({
+          status: 404,
           message: '펀딩 프로젝트를 찾을 수 없습니다.',
         });
       }
 
       supportOption = optionResult.rows[0];
+
+      const availableStock = supportOption.available_stock === null || supportOption.available_stock === undefined
+        ? null
+        : Number(supportOption.available_stock);
+
+      if (availableStock !== null && availableStock < bottleCount) {
+        return res.status(400).json({
+          status: 400,
+          message: '후원 옵션 재고가 부족합니다.',
+        });
+      }
+
+      const maxPerUser = supportOption.max_per_user === null || supportOption.max_per_user === undefined
+        ? null
+        : Number(supportOption.max_per_user);
+
+      if (Number.isInteger(maxPerUser) && maxPerUser > 0) {
+        const orderedQuantityResult = await pool.query(
+          `
+          SELECT COALESCE(SUM(quantity), 0)::int AS ordered_quantity
+          FROM orders
+          WHERE user_id = $1
+            AND funding_id = $2
+            AND option_id = $3
+            AND order_status IN ('CREATED', 'PAID')
+          `,
+          [userId, Number(fundingId), numericOptionId]
+        );
+
+        const orderedQuantity = Number(orderedQuantityResult.rows[0]?.ordered_quantity || 0);
+
+        if (orderedQuantity + bottleCount > maxPerUser) {
+          return res.status(400).json({
+            status: 400,
+            message: '1인 최대 구매 수량을 초과했습니다.',
+          });
+        }
+      }
     }
 
     const pricePerBottle = Number(
@@ -9816,9 +9925,6 @@ const createFundingOrder = async (req, res) => {
         : 3000;
     const totalAmount =
       pricePerBottle * bottleCount + shippingFee + donationAmountNumber;
-
-    const userId = requireUserId(req, res);
-    if (!userId) return;
 
     const userResult = await pool.query(
       `
@@ -9903,6 +10009,7 @@ const createFundingOrder = async (req, res) => {
     );
 
     const order = orderResult.rows[0];
+    const tossOrderId = `funding_order_${order.order_id}`;
     const paymentResult = await pool.query(
       `
       INSERT INTO payments (
@@ -9910,12 +10017,13 @@ const createFundingOrder = async (req, res) => {
         payment_method,
         payment_provider,
         amount,
-        payment_status
+        payment_status,
+        toss_order_id
       )
-      VALUES ($1, NULL, 'TOSS', $2, 'READY')
-      RETURNING payment_id, payment_status, amount, created_at
+      VALUES ($1, NULL, 'TOSS', $2, 'READY', $3)
+      RETURNING payment_id, payment_status, amount, toss_order_id, created_at
       `,
-      [Number(order.order_id), Number(order.total_amount)]
+      [Number(order.order_id), Number(order.total_amount), tossOrderId]
     );
     const payment = paymentResult.rows[0];
     const orderName = `${funding.title || '펀딩 후원'} ${bottleCount}병`;
@@ -9924,10 +10032,12 @@ const createFundingOrder = async (req, res) => {
     const customerMobilePhone = user.phone_number || recipientPhone;
     const responseData = {
       orderId: String(order.order_id),
+      tossOrderId: payment.toss_order_id || tossOrderId,
       numericOrderId: Number(order.order_id),
       fundingId: String(order.funding_id),
       numericFundingId: Number(order.funding_id),
       optionId: order.option_id,
+      supportOptionId: order.option_id,
       quantity: order.quantity,
       pricePerBottle: order.price_per_bottle,
       supportOptionPrice: order.price_per_bottle,
@@ -9943,6 +10053,8 @@ const createFundingOrder = async (req, res) => {
       orderStatus: order.order_status,
       paymentId: payment.payment_id,
       paymentStatus: payment.payment_status,
+      successUrl: successUrl || null,
+      failUrl: failUrl || null,
       recipientName: order.recipient_name,
       recipientPhone: order.recipient_phone,
       shippingAddress: order.shipping_address,
@@ -9960,8 +10072,10 @@ const createFundingOrder = async (req, res) => {
       status: 201,
       data: responseData,
       orderId: order.order_id,
+      tossOrderId: payment.toss_order_id || tossOrderId,
       fundingId: order.funding_id,
       optionId: order.option_id,
+      supportOptionId: order.option_id,
       quantity: order.quantity,
       pricePerBottle: order.price_per_bottle,
       supportOptionPrice: order.price_per_bottle,
@@ -9970,6 +10084,9 @@ const createFundingOrder = async (req, res) => {
       additionalSupportAmount: order.donation_amount,
       totalAmount: order.total_amount,
       orderStatus: order.order_status,
+      paymentStatus: payment.payment_status,
+      successUrl: successUrl || null,
+      failUrl: failUrl || null,
       recipientName: order.recipient_name,
       recipientPhone: order.recipient_phone,
       shippingAddress: order.shipping_address,
