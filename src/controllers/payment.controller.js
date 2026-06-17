@@ -33,3 +33,25 @@ exports.confirmTossPayment = async (req, res) => {
     });
   }
 };
+
+exports.getFundingPaymentOrderStatus = async (req, res) => {
+  try {
+    const result = await paymentService.getFundingPaymentOrderStatus({
+      orderId: req.params.orderId,
+      userId: req.user?.userId || req.user?.id,
+    });
+
+    res.set('Cache-Control', 'no-store');
+    return res.status(200).json({
+      status: 200,
+      message: '결제 상태 조회 성공',
+      data: result,
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      status: error.status || 500,
+      message: error.message || '결제 상태 조회 중 서버 오류가 발생했습니다.',
+      ...(error.code ? { code: error.code } : {}),
+    });
+  }
+};

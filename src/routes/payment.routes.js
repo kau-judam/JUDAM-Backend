@@ -5,5 +5,6 @@ const authMiddleware = require('../middlewares/authMiddleware');
 const paymentController = require('../controllers/payment.controller');
 
 router.post('/toss/confirm', authMiddleware, paymentController.confirmTossPayment);
+router.get('/orders/:orderId/status', authMiddleware, paymentController.getFundingPaymentOrderStatus);
 
 module.exports = router;

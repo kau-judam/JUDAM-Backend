@@ -518,3 +518,115 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount, userId }) => 
     client.release();
   }
 };
+
+exports.getFundingPaymentOrderStatus = async ({ orderId, userId }) => {
+  const numericOrderId = normalizeNumericOrderId(orderId);
+  const numericUserId = Number(userId);
+
+  if (!numericOrderId) {
+    throw createPaymentError(
+      400,
+      'orderId 형식이 올바르지 않습니다. 숫자, order_숫자, funding_order_숫자 형식만 지원합니다.'
+    );
+  }
+
+  if (!Number.isInteger(numericUserId) || numericUserId <= 0) {
+    throw createPaymentError(401, '로그인이 필요합니다.');
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT
+      o.order_id,
+      o.user_id,
+      o.funding_id,
+      o.option_id,
+      o.quantity,
+      o.total_amount,
+      o.order_status,
+      o.paid_at AS order_paid_at,
+      fp.title AS funding_title,
+      fp.current_amount,
+      fp.goal_amount AS target_amount,
+      fso.name AS support_option_name,
+      fso.stock,
+      fso.remaining_stock,
+      p.payment_id,
+      p.amount AS payment_amount,
+      p.payment_status,
+      p.payment_key,
+      p.toss_order_id,
+      p.paid_at AS payment_paid_at,
+      p.failed_at,
+      p.failure_reason
+    FROM orders o
+    LEFT JOIN funding_projects fp ON fp.funding_id = o.funding_id
+    LEFT JOIN funding_support_options fso ON fso.option_id = o.option_id
+    LEFT JOIN LATERAL (
+      SELECT
+        payment_id,
+        order_id,
+        amount,
+        payment_status,
+        payment_key,
+        toss_order_id,
+        paid_at,
+        failed_at,
+        failure_reason,
+        created_at
+      FROM payments
+      WHERE order_id = o.order_id
+      ORDER BY created_at DESC, payment_id DESC
+      LIMIT 1
+    ) p ON TRUE
+    WHERE o.order_id = $1
+    LIMIT 1
+    `,
+    [numericOrderId]
+  );
+
+  if (rows.length === 0) {
+    throw createPaymentError(404, '주문을 찾을 수 없습니다.');
+  }
+
+  const order = rows[0];
+
+  if (Number(order.user_id) !== numericUserId) {
+    throw createPaymentError(403, '해당 주문에 접근할 권한이 없습니다.');
+  }
+
+  if (!order.payment_id) {
+    throw createPaymentError(404, '결제 요청 정보를 찾을 수 없습니다.');
+  }
+
+  const remainingStock =
+    order.remaining_stock !== null && order.remaining_stock !== undefined
+      ? order.remaining_stock
+      : order.stock;
+
+  return {
+    orderId: String(order.order_id),
+    tossOrderId: order.toss_order_id || `funding_order_${order.order_id}`,
+    fundingId: order.funding_id === null || order.funding_id === undefined
+      ? null
+      : String(order.funding_id),
+    fundingTitle: order.funding_title || '',
+    supportOptionId: order.option_id === null || order.option_id === undefined
+      ? null
+      : String(order.option_id),
+    supportOptionName: order.support_option_name || null,
+    quantity: Number(order.quantity || 0),
+    amount: Number(order.payment_amount ?? order.total_amount ?? 0),
+    orderStatus: order.order_status || null,
+    paymentStatus: order.payment_status || null,
+    paymentKey: order.payment_key || null,
+    paidAt: order.payment_paid_at || order.order_paid_at || null,
+    failedAt: order.failed_at || null,
+    failureReason: order.failure_reason || null,
+    currentAmount: Number(order.current_amount || 0),
+    targetAmount: Number(order.target_amount || 0),
+    remainingStock: remainingStock === null || remainingStock === undefined
+      ? null
+      : Number(remainingStock),
+  };
+};
