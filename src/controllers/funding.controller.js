@@ -7017,7 +7017,7 @@ const getFundingList = async (req, res) => {
     conditions.push(`(
       fp.title ILIKE ${keywordParam}
       OR COALESCE(fp.description, '') ILIKE ${keywordParam}
-      OR COALESCE(bp.brewery_name, ba.brewery_name, u.nickname, '') ILIKE ${keywordParam}
+      OR COALESCE(NULLIF(bp.brewery_name, ''), ba.brewery_name, u.nickname, '') ILIKE ${keywordParam}
       OR r.title ILIKE ${keywordParam}
     )`);
   }
@@ -7034,6 +7034,7 @@ const getFundingList = async (req, res) => {
     FROM funding_projects fp
     LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
     LEFT JOIN users u ON u.user_id = fp.brewery_user_id
+    LEFT JOIN brewery_profiles bp ON bp.user_id = fp.brewery_user_id
     LEFT JOIN LATERAL (
       SELECT brewery_name
       FROM brewery_auth
@@ -7111,7 +7112,7 @@ const getFundingList = async (req, res) => {
         fp.brewery_user_id,
         fp.title,
         fp.description,
-        COALESCE(ba.brewery_name, u.nickname) AS brewery_name,
+        COALESCE(NULLIF(bp.brewery_name, ''), ba.brewery_name, u.nickname) AS brewery_name,
         r.title AS recipe_title,
         COALESCE(fp.thumbnail_url, r.image_url) AS thumbnail_url,
         fp.image_urls,

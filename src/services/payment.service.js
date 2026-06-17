@@ -5,8 +5,14 @@ const {
 } = require('./breweryDashboardNotification.service');
 
 const normalizeNumericOrderId = (orderId) => {
-  const normalized = String(orderId || '').trim().replace(/^order_/i, '');
-  const numericOrderId = Number(normalized);
+  const rawOrderId = String(orderId || '').trim();
+  const matched = rawOrderId.match(/^(?:funding_order_|order_)?(\d+)$/i);
+
+  if (!matched) {
+    return null;
+  }
+
+  const numericOrderId = Number(matched[1]);
 
   return Number.isInteger(numericOrderId) && numericOrderId > 0 ? numericOrderId : null;
 };
@@ -76,8 +82,20 @@ exports.confirmTossPayment = async ({ paymentKey, orderId, amount }) => {
     throw error;
   }
 
-  if (!paymentKey || !numericOrderId || !Number.isFinite(numericAmount) || numericAmount <= 0) {
+  if (!paymentKey || !orderId || amount === undefined) {
     const error = new Error('결제 승인 요청값이 올바르지 않습니다.');
+    error.status = 400;
+    throw error;
+  }
+
+  if (!numericOrderId) {
+    const error = new Error('orderId 형식이 올바르지 않습니다. 숫자, order_숫자, funding_order_숫자 형식만 지원합니다.');
+    error.status = 400;
+    throw error;
+  }
+
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    const error = new Error('결제 승인 금액이 올바르지 않습니다.');
     error.status = 400;
     throw error;
   }
