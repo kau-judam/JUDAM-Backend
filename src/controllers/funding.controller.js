@@ -996,7 +996,7 @@ const buildFundingSupportOptionsResponse = ({
     description: option.description,
     volume: option.volume ?? funding.volume,
     alcohol: option.alcohol ?? funding.alcohol_percentage,
-    alcoholPercentage: option.alcohol ?? funding.alcohol_percentage,
+    alcoholPercentage: option.alcohol_percentage ?? option.alcohol ?? funding.alcohol_percentage,
     expectedDeliveryDate: funding.expected_delivery_date,
     mainIngredient,
     primaryIngredient: mainIngredient,
@@ -1761,31 +1761,75 @@ const getFundingSupportOptionsByFundingId = async (fundingId) => {
     return [];
   }
 
-  const { rows } = await pool.query(
-    `
-    SELECT
-      option_id,
-      funding_id,
-      name,
-      price,
-      description,
-      stock,
-      remaining_stock,
-      max_per_user,
-      created_at
-    FROM funding_support_options
-    WHERE funding_id = $1
-    ORDER BY option_id ASC
-    `,
-    [numericFundingId]
-  );
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT
+        option_id,
+        funding_id,
+        name,
+        price,
+        description,
+        stock,
+        remaining_stock,
+        max_per_user,
+        volume,
+        alcohol,
+        alcohol_percentage,
+        created_at
+      FROM funding_support_options
+      WHERE funding_id = $1
+      ORDER BY option_id ASC
+      `,
+      [numericFundingId]
+    );
 
-  return rows;
+    return rows;
+  } catch (error) {
+    if (error.code === '42703') {
+      try {
+        const { rows } = await pool.query(
+          `
+          SELECT
+            option_id,
+            funding_id,
+            name,
+            price,
+            description,
+            stock,
+            remaining_stock,
+            max_per_user,
+            NULL::int AS volume,
+            NULL::numeric AS alcohol,
+            NULL::numeric AS alcohol_percentage,
+            created_at
+          FROM funding_support_options
+          WHERE funding_id = $1
+          ORDER BY option_id ASC
+          `,
+          [numericFundingId]
+        );
+
+        return rows;
+      } catch (fallbackError) {
+        console.warn('Failed to load funding support options with fallback columns', {
+          fundingId: numericFundingId,
+          message: fallbackError.message,
+        });
+      }
+    }
+
+    console.warn('Failed to load funding support options for draft response', {
+      fundingId: numericFundingId,
+      message: error.message,
+    });
+    return [];
+  }
 };
 
 const buildFundingDraftSupportOptionsResponse = async (draft) => {
   const supportOptionRows = await getFundingSupportOptionsByFundingId(draft?.funding_id);
-  const rawMaterials = parseRawMaterialsField(draft?.raw_materials, []);
+  const rawMaterials = parseFundingRawMaterialsField(draft?.raw_materials, []);
   const mainIngredient = toTrimmedString(draft?.main_ingredient)
     || rawMaterials.map((material) => material.name).filter(Boolean)[0]
     || null;
