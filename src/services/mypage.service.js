@@ -3048,6 +3048,8 @@ const getParticipatedFundings = async (userId, options = {}) => {
         recent.funding_id,
         recent.order_id,
         recent.participated_at,
+        recent.delivery_status,
+        recent.tracking_number,
         agg.my_amount,
         fp.title AS project_name,
         fp.alcohol_percentage AS abv,
@@ -3064,7 +3066,9 @@ const getParticipatedFundings = async (userId, options = {}) => {
         SELECT DISTINCT ON (o.funding_id)
           o.funding_id,
           o.order_id,
-          o.created_at AS participated_at
+          o.created_at AS participated_at,
+          o.delivery_status,
+          o.tracking_number
         FROM orders o
         WHERE o.user_id = $1
           AND o.order_status = 'PAID'
@@ -3124,7 +3128,10 @@ const getParticipatedFundings = async (userId, options = {}) => {
       ? Math.round((currentAmount / goalAmount) * 1000) / 10
       : 0;
     const fundingStatus = row.funding_status;
-    const hasTrackingNumber = Boolean(deliveryTrackingMap.get(Number(row.funding_id)));
+    const legacyFundingTrackingNumber = deliveryTrackingMap.get(Number(row.funding_id));
+    const hasTrackingNumber = Boolean(row.tracking_number || legacyFundingTrackingNumber);
+    const deliveryStatus = normalizeOrderDeliveryStatus(row.delivery_status)
+      || (legacyFundingTrackingNumber ? 'SHIPPED' : null);
     // FE 정책: 펀딩 성공(SUCCESS)이면 배송 내역 확인 버튼 노출(참여 펀딩은 항상 주문 존재).
     // 운송장 유무는 hasTrackingNumber로 별도 표시하므로 canViewDelivery 조건에서 제외.
     const canViewDelivery = fundingStatus === 'SUCCESS';
@@ -3146,7 +3153,7 @@ const getParticipatedFundings = async (userId, options = {}) => {
       progressRate,
       supporterCount: Number(row.supporter_count || 0),
       canViewDelivery,
-      deliveryStatus: hasTrackingNumber ? 'SHIPPED' : null,
+      deliveryStatus,
       hasTrackingNumber,
       hasReview: reviewId !== null,
       reviewId,
