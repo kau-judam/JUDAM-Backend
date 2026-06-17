@@ -22,6 +22,9 @@ const {
   getBreweryNotificationsByUserId,
 } = require('../services/brewery.service');
 const { verifyAuthPhoneVerificationToken } = require('../services/auth-phone.service');
+const {
+  createBreweryDashboardNotification,
+} = require('../services/breweryDashboardNotification.service');
 
 const APPLICATION_STATUSES = new Set(['PENDING', 'APPROVED', 'REJECTED']);
 
@@ -36,6 +39,50 @@ const sendError = (res, status, message, error) => {
     message,
     error,
   });
+};
+
+const createBreweryApplicationNotification = async ({
+  application,
+  type,
+  title,
+  content,
+  linkUrl,
+  metadata = {},
+}) => {
+  const userId = Number(application?.userId || application?.user_id);
+  const applicationId = Number(application?.applicationId || application?.application_id);
+
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return null;
+  }
+
+  try {
+    return await createBreweryDashboardNotification({
+      userId,
+      type,
+      title,
+      content,
+      linkUrl,
+      eventKey: Number.isInteger(applicationId) && applicationId > 0
+        ? `brewery-application:${applicationId}:${type}`
+        : null,
+      metadata: {
+        applicationId: Number.isInteger(applicationId) && applicationId > 0
+          ? applicationId
+          : null,
+        status: application?.status || null,
+        ...metadata,
+      },
+    });
+  } catch (notificationError) {
+    console.warn('Failed to create brewery application notification', {
+      userId,
+      applicationId: Number.isInteger(applicationId) && applicationId > 0 ? applicationId : null,
+      type,
+      message: notificationError.message,
+    });
+    return null;
+  }
 };
 
 const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
@@ -818,6 +865,16 @@ const createBreweryApplication = async (req, res) => {
       documentKey: normalizedDocumentKey,
     });
 
+    if (application.status === 'PENDING') {
+      await createBreweryApplicationNotification({
+        application,
+        type: 'BREWERY_APPLICATION_SUBMITTED',
+        title: '양조장 인증 신청이 접수되었습니다.',
+        content: '관리자 검토 후 승인 여부가 안내됩니다.',
+        linkUrl: '/brewery/application',
+      });
+    }
+
     const responseMessage = application.status === 'APPROVED'
       ? '\uC774\uBBF8 \uC2B9\uC778\uB41C \uC591\uC870\uC7A5 \uC778\uC99D\uC785\uB2C8\uB2E4.'
       : '\uC591\uC870\uC7A5 \uC778\uC99D \uC2E0\uCCAD\uC774 \uC811\uC218\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAD00\uB9AC\uC790 \uAC80\uD1A0 \uD6C4 \uC2B9\uC778\uB429\uB2C8\uB2E4.';
@@ -975,6 +1032,14 @@ const approveBreweryApplication = async (req, res) => {
     // TODO: Restrict this endpoint to ADMIN users after admin authorization is added.
     const result = await approveApplication(applicationId);
 
+    await createBreweryApplicationNotification({
+      application: result,
+      type: 'BREWERY_APPLICATION_APPROVED',
+      title: '양조장 인증이 승인되었습니다.',
+      content: '이제 양조장 기능을 사용할 수 있습니다.',
+      linkUrl: '/brewery/dashboard',
+    });
+
     return res.status(200).json({
       ...result,
       message: '?묒“???몄쬆???뱀씤?섏뿀?듬땲?? 湲곗〈 accessToken?먮뒗 ?댁쟾 role???ㅼ뼱?덉쓣 ???덉쑝誘濡??ㅼ떆 濡쒓렇?명빐??role=BREWERY媛 諛섏쁺?⑸땲??',
@@ -1016,6 +1081,17 @@ const rejectBreweryApplication = async (req, res) => {
     const application = await rejectApplication({
       applicationId,
       rejectReason: normalizedRejectReason,
+    });
+
+    await createBreweryApplicationNotification({
+      application,
+      type: 'BREWERY_APPLICATION_REJECTED',
+      title: '양조장 인증이 반려되었습니다.',
+      content: `반려 사유: ${normalizedRejectReason} 다시 신청해주세요.`,
+      linkUrl: '/brewery/application',
+      metadata: {
+        rejectReason: normalizedRejectReason,
+      },
     });
 
     return res.status(200).json({
