@@ -10098,7 +10098,7 @@ const createFundingOrder = async (req, res) => {
       noticeAgreed: order.notice_agreed,
       createdAt: order.created_at,
       privacyAgreed: order.privacy_agreed,
-      message: '요청 처리 중 오류가 발생했습니다.',
+      message: '펀딩 주문이 생성되었습니다.',
     });
   } catch (error) {
     console.error(error);
