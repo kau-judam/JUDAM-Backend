@@ -22,6 +22,45 @@ const getAdminUserId = (req) => {
 };
 
 const ADMIN_FUNDING_REVIEW_STATUSES = ['SUBMITTED', 'REVIEWING', 'APPROVED', 'REJECTED'];
+const ADMIN_FUNDING_REPORT_STATUSES = ['PENDING', 'REVIEWED', 'RESOLVED', 'REJECTED'];
+
+const normalizeAdminFundingReportStatus = (value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const normalized = String(value).trim().toUpperCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  return ADMIN_FUNDING_REPORT_STATUSES.includes(normalized) ? normalized : null;
+};
+
+const getAdminFundingReportTableName = async () => 'funding_reports';
+
+const mapAdminFundingReport = (row) => ({
+  reportId: Number(row.report_id),
+  fundingId: row.funding_id === null || row.funding_id === undefined
+    ? null
+    : Number(row.funding_id),
+  fundingTitle: row.funding_title || null,
+  reporterId: row.reporter_id === null || row.reporter_id === undefined
+    ? null
+    : Number(row.reporter_id),
+  reporterNickname: row.reporter_nickname || null,
+  reason: row.reason,
+  content: row.content || null,
+  status: row.status,
+  adminMemo: row.admin_memo || null,
+  reviewedAt: row.reviewed_at || null,
+  reviewedBy: row.reviewed_by === null || row.reviewed_by === undefined
+    ? null
+    : Number(row.reviewed_by),
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
 
 const toNullableNumber = (value) => {
   if (value === undefined || value === null || value === '') {
@@ -1339,20 +1378,21 @@ const cancelFundingProject = async (req, res) => {
 const getFundingReportsForAdmin = async (req, res) => {
   const { status, page = 0, size = 20 } = req.query;
   const normalizedStatus = normalizeAdminFundingReportStatus(status);
+  const hasStatusQuery = status !== undefined && status !== null && String(status).trim() !== '';
   const pageNumber = Number(page);
   const sizeNumber = Number(size);
 
-  if (status && !ADMIN_FUNDING_REPORT_STATUSES.includes(normalizedStatus)) {
+  if (hasStatusQuery && !normalizedStatus) {
     return res.status(400).json({
       status: 400,
-      message: '?? ??? PENDING, REVIEWED, RESOLVED, REJECTED ? ???? ???.',
+      message: '신고 상태는 PENDING, REVIEWED, RESOLVED, REJECTED 중 하나여야 합니다.',
     });
   }
 
   if (!Number.isInteger(pageNumber) || pageNumber < 0 || !Number.isInteger(sizeNumber) || sizeNumber <= 0) {
     return res.status(400).json({
       status: 400,
-      message: '??? ?? ?? ???? ????.',
+      message: '페이지 요청 값이 올바르지 않습니다.',
     });
   }
 
@@ -1363,7 +1403,7 @@ const getFundingReportsForAdmin = async (req, res) => {
 
     if (normalizedStatus) {
       values.push(normalizedStatus);
-      conditions.push(`fr.status = ${values.length}`);
+      conditions.push(`fr.status = $${values.length}`);
     }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -1394,8 +1434,8 @@ const getFundingReportsForAdmin = async (req, res) => {
       LEFT JOIN users u ON u.user_id = fr.reporter_id
       ${whereClause}
       ORDER BY fr.created_at DESC, fr.report_id DESC
-      LIMIT ${listValues.length - 1}
-      OFFSET ${listValues.length}
+      LIMIT $${listValues.length - 1}
+      OFFSET $${listValues.length}
       `,
       listValues,
     );
@@ -1404,7 +1444,7 @@ const getFundingReportsForAdmin = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?? ?? ?? ?? ??',
+      message: '펀딩 신고 목록 조회 성공',
       data: {
         content: rows.map(mapAdminFundingReport),
         page: pageNumber,
@@ -1417,7 +1457,7 @@ const getFundingReportsForAdmin = async (req, res) => {
     console.error('[admin-funding-reports] list failed', error);
     return res.status(500).json({
       status: 500,
-      message: '?? ?? ?? ?? ? ?? ??? ??????.',
+      message: '펀딩 신고 목록 조회 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -1427,7 +1467,7 @@ const getFundingReportDetailForAdmin = async (req, res) => {
   const reportId = Number(req.params.reportId);
 
   if (!Number.isInteger(reportId) || reportId <= 0) {
-    return res.status(400).json({ status: 400, message: '??? ?? ID? ????.' });
+    return res.status(400).json({ status: 400, message: '펀딩 신고 ID가 올바르지 않습니다.' });
   }
 
   try {
@@ -1458,19 +1498,19 @@ const getFundingReportDetailForAdmin = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ status: 404, message: '??? ?? ? ????.' });
+      return res.status(404).json({ status: 404, message: '펀딩 신고를 찾을 수 없습니다.' });
     }
 
     return res.status(200).json({
       status: 200,
-      message: '?? ?? ?? ?? ??',
+      message: '펀딩 신고 상세 조회 성공',
       data: mapAdminFundingReport(rows[0]),
     });
   } catch (error) {
     console.error('[admin-funding-reports] detail failed', error);
     return res.status(500).json({
       status: 500,
-      message: '?? ?? ?? ?? ? ?? ??? ??????.',
+      message: '펀딩 신고 상세 조회 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
@@ -1482,13 +1522,13 @@ const updateFundingReportStatusForAdmin = async (req, res) => {
   const adminMemo = typeof req.body?.adminMemo === 'string' ? req.body.adminMemo.trim() : null;
 
   if (!Number.isInteger(reportId) || reportId <= 0) {
-    return res.status(400).json({ status: 400, message: '??? ?? ID? ????.' });
+    return res.status(400).json({ status: 400, message: '펀딩 신고 ID가 올바르지 않습니다.' });
   }
 
-  if (!ADMIN_FUNDING_REPORT_STATUSES.includes(nextStatus)) {
+  if (!nextStatus) {
     return res.status(400).json({
       status: 400,
-      message: '?? ??? PENDING, REVIEWED, RESOLVED, REJECTED ? ???? ???.',
+      message: '신고 상태는 PENDING, REVIEWED, RESOLVED, REJECTED 중 하나여야 합니다.',
     });
   }
 
@@ -1522,7 +1562,7 @@ const updateFundingReportStatusForAdmin = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ status: 404, message: '??? ?? ? ????.' });
+      return res.status(404).json({ status: 404, message: '펀딩 신고를 찾을 수 없습니다.' });
     }
 
     console.log('[admin-funding-reports] status updated', {
@@ -1534,14 +1574,14 @@ const updateFundingReportStatusForAdmin = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: '?? ?? ?? ??? ???????.',
+      message: '펀딩 신고 상태가 수정되었습니다.',
       data: mapAdminFundingReport(rows[0]),
     });
   } catch (error) {
     console.error('[admin-funding-reports] status update failed', error);
     return res.status(500).json({
       status: 500,
-      message: '?? ?? ?? ?? ?? ? ?? ??? ??????.',
+      message: '펀딩 신고 상태 수정 중 서버 오류가 발생했습니다.',
       error: error.message,
     });
   }
