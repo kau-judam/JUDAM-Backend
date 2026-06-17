@@ -29,6 +29,19 @@ const {
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+const requireAdmin = (req, res, next) => {
+  const role = String(req.user?.role || req.user?.userRole || req.user?.type || '').toUpperCase();
+
+  if (role !== 'ADMIN') {
+    return res.status(403).json({
+      status: 403,
+      message: '관리자만 접근할 수 있습니다.',
+    });
+  }
+
+  return next();
+};
+
 router.get('/me/profile', authMiddleware, getMyBreweryProfile);
 router.patch('/me/profile', authMiddleware, updateMyBreweryProfile);
 router.patch(
@@ -85,10 +98,10 @@ router.get('/me/dashboard/notifications', authMiddleware, getMyBreweryDashboardN
 router.post('/accounts/verify', authMiddleware, verifyBreweryAccount);
 
 router.post('/applications', authMiddleware, upload.single('businessLicense'), createBreweryApplication);
-router.get('/applications', authMiddleware, getBreweryApplications);
+router.get('/applications', authMiddleware, requireAdmin, getBreweryApplications);
 router.get('/applications/me', authMiddleware, getMyBreweryApplication);
 router.patch('/applications/me', authMiddleware, updateMyApprovedBreweryApplication);
-router.patch('/applications/:applicationId/approve', authMiddleware, approveBreweryApplication);
-router.patch('/applications/:applicationId/reject', authMiddleware, rejectBreweryApplication);
+router.patch('/applications/:applicationId/approve', authMiddleware, requireAdmin, approveBreweryApplication);
+router.patch('/applications/:applicationId/reject', authMiddleware, requireAdmin, rejectBreweryApplication);
 
 module.exports = router;
