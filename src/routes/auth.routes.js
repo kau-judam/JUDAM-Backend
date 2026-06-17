@@ -11,6 +11,9 @@ const {
   requestPasswordReset,
   verifyPasswordReset,
   resetPassword,
+  requestPasswordResetPhone,
+  confirmPasswordResetPhone,
+  completePasswordResetPhone,
   kakaoLoginUrl,
   kakaoLogin,
   kakaoCallback,
@@ -33,6 +36,9 @@ router.post('/password/reset/request', requestPasswordReset);
 router.post('/password/reset/verify', verifyPasswordReset);
 router.post('/password/reset/confirm', resetPassword);
 router.patch('/password/reset', resetPassword);
+router.post('/password-reset/phone/request', requestPasswordResetPhone);
+router.post('/password-reset/phone/confirm', confirmPasswordResetPhone);
+router.post('/password-reset/phone/complete', completePasswordResetPhone);
 router.get('/kakao/url', kakaoLoginUrl);
 router.get('/kakao', kakaoLogin);
 router.get('/kakao/callback', kakaoCallback);
