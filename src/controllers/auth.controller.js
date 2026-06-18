@@ -963,38 +963,43 @@ const buildKakaoSignupRequiredData = (kakaoProfile, kakaoSignupToken, extraData 
 });
 
 const kakaoLoginByCode = async (req, res) => {
-  const { code } = req.body || {};
+  const code = normalizeString(req.body?.code);
+  const kakaoAccessToken = normalizeString(req.body?.accessToken)
+    || normalizeString(req.body?.kakaoAccessToken);
   const redirectUri = normalizeString(req.body?.redirectUri) || getFrontendRedirectUri();
 
-  if (!code) {
+  if (!code && !kakaoAccessToken) {
     return res.status(400).json({
       status: 400,
-      message: '燁삳똻萸???硫? ?꾨뗀諭뜹첎? ?袁⑹뒄??몃빍??',
+      message: '카카오 인증 정보가 필요합니다.',
     });
   }
 
   try {
-    let tokenData;
-    try {
-      tokenData = await getKakaoToken(code, redirectUri);
-    } catch (error) {
-      if (error.statusCode === 500) {
-        throw error;
-      }
+    let kakaoApiAccessToken = kakaoAccessToken;
+    if (!kakaoApiAccessToken) {
+      try {
+        const tokenData = await getKakaoToken(code, redirectUri);
+        kakaoApiAccessToken = tokenData.access_token;
+      } catch (error) {
+        if (error.statusCode === 500) {
+          throw error;
+        }
 
-      return res.status(401).json({
-        status: 401,
-        message: '燁삳똻萸???紐꾩쵄????쎈솭??됰뮸??덈뼄.',
-      });
+        return res.status(401).json({
+          status: 401,
+          message: '카카오 인증에 실패했습니다.',
+        });
+      }
     }
 
     let kakaoUserInfo;
     try {
-      kakaoUserInfo = await getKakaoUserInfo(tokenData.access_token);
+      kakaoUserInfo = await getKakaoUserInfo(kakaoApiAccessToken);
     } catch (error) {
       return res.status(502).json({
         status: 502,
-        message: '燁삳똻萸????????類ｋ궖 鈺곌퀬?????쎈솭??됰뮸??덈뼄.',
+        message: '카카오 사용자 정보를 가져오지 못했습니다.',
       });
     }
 
