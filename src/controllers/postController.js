@@ -95,7 +95,7 @@ const getPostDetail = async (req, res) => {
 // 게시글 수정 핸들러 (PUT /api/posts/:postId)
 // - 로그인 필수 (작성자 본인만 수정 가능)
 // - 이미지 = 남길 기존 URL(existing_image_urls, JSON 문자열) + 새 파일(images)을 합쳐 재구성
-// - board_type 수정 불가 (요청에 포함되어도 무시)
+// - board_type 선택 수정 가능 (FREE/INFO, 미전송 시 기존 유형 유지)
 const putPost = async (req, res) => {
   const postId = parseInt(req.params.postId, 10);
   if (!Number.isInteger(postId) || postId <= 0) {
@@ -133,6 +133,7 @@ const putPost = async (req, res) => {
     const post = await updatePost(postId, req.user.id, {
       title: body.title,
       content: body.content,
+      board_type: body.board_type,
       existingImageUrls,
       newImageUrls,
     });

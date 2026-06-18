@@ -196,7 +196,7 @@ const getPostById = async (postId, userId) => {
 // 최종 image_urls = [...existingImageUrls, ...newImageUrls], 총 5개 이하.
 const MAX_POST_IMAGES = 5;
 
-const updatePost = async (postId, userId, { title, content, existingImageUrls = [], newImageUrls = [] }) => {
+const updatePost = async (postId, userId, { title, content, board_type, existingImageUrls = [], newImageUrls = [] }) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -215,6 +215,14 @@ const updatePost = async (postId, userId, { title, content, existingImageUrls = 
     if (Number(ownerResult.rows[0].user_id) !== userId) {
       const error = new Error('본인이 작성한 게시글만 수정할 수 있습니다.');
       error.statusCode = 403;
+      throw error;
+    }
+
+    const normalizedBoardType =
+      typeof board_type === 'string' && board_type.trim() !== '' ? board_type.trim() : null;
+    if (normalizedBoardType !== null && !VALID_BOARD_TYPES.has(normalizedBoardType)) {
+      const error = new Error('유효하지 않은 게시판 유형입니다.');
+      error.statusCode = 400;
       throw error;
     }
 
@@ -242,10 +250,10 @@ const updatePost = async (postId, userId, { title, content, existingImageUrls = 
 
     const updateResult = await client.query(
       `UPDATE posts
-       SET title = $2, content = $3, updated_at = CURRENT_TIMESTAMP
+       SET title = $2, content = $3, board_type = COALESCE($4, board_type), updated_at = CURRENT_TIMESTAMP
        WHERE post_id = $1
-       RETURNING post_id, title, content, updated_at`,
-      [postId, title, content]
+       RETURNING post_id, title, content, board_type, updated_at`,
+      [postId, title, content, normalizedBoardType]
     );
 
     await client.query('DELETE FROM post_images WHERE post_id = $1', [postId]);
@@ -264,6 +272,7 @@ const updatePost = async (postId, userId, { title, content, existingImageUrls = 
       post_id: Number(row.post_id),
       title: row.title,
       content: row.content,
+      board_type: row.board_type,
       image_urls: finalUrls,
       updated_at: row.updated_at,
     };
