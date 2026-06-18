@@ -2,6 +2,13 @@ const pool = require('../config/db');
 
 const ACTIVE_FUNDING_STATUSES = ['ACTIVE', 'ONGOING'];
 const SUCCESS_FUNDING_STATUSES = ['SUCCESS', 'SUCCESSFUL', 'FUNDING_SUCCESS'];
+const RAISED_AMOUNT_FUNDING_STATUSES = [
+  ...ACTIVE_FUNDING_STATUSES,
+  ...SUCCESS_FUNDING_STATUSES,
+  'COMPLETED',
+];
+const PAID_ORDER_STATUSES = ['PAID'];
+const PAID_PAYMENT_STATUSES = ['PAID'];
 const KST_CURRENT_DATE_SQL = "(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul')::date";
 
 const toNumber = (value) => Number(value || 0);
@@ -19,9 +26,31 @@ const getPublicStatsSummary = async () => {
           COUNT(*) FILTER (
             WHERE UPPER(COALESCE(status, '')) = ANY($2::text[])
           )::int AS successful_funding_count,
-          COALESCE(SUM(COALESCE(current_amount, 0)), 0)::bigint AS total_funding_amount,
           COALESCE(SUM(COALESCE(supporter_count, 0)), 0)::bigint AS total_backer_count
         FROM funding_projects
+      ),
+      paid_funding_amount_stats AS (
+        SELECT
+          COALESCE(SUM(latest_payment.amount), 0)::bigint AS total_funding_amount
+        FROM orders o
+        INNER JOIN funding_projects fp ON fp.funding_id = o.funding_id
+        INNER JOIN LATERAL (
+          SELECT
+            amount,
+            payment_status,
+            paid_at,
+            failed_at
+          FROM payments p
+          WHERE p.order_id = o.order_id
+          ORDER BY p.created_at DESC, p.payment_id DESC
+          LIMIT 1
+        ) latest_payment ON TRUE
+        WHERE UPPER(COALESCE(o.order_status, '')) = ANY($4::text[])
+          AND o.canceled_at IS NULL
+          AND UPPER(COALESCE(latest_payment.payment_status, '')) = ANY($3::text[])
+          AND latest_payment.paid_at IS NOT NULL
+          AND latest_payment.failed_at IS NULL
+          AND UPPER(COALESCE(fp.status, '')) = ANY($5::text[])
       ),
       member_stats AS (
         SELECT COUNT(*)::int AS member_count
@@ -32,12 +61,19 @@ const getPublicStatsSummary = async () => {
         member_stats.member_count,
         funding_stats.active_funding_count,
         funding_stats.successful_funding_count,
-        funding_stats.total_funding_amount,
+        paid_funding_amount_stats.total_funding_amount,
         funding_stats.total_backer_count
       FROM funding_stats
+      CROSS JOIN paid_funding_amount_stats
       CROSS JOIN member_stats
     `,
-    [ACTIVE_FUNDING_STATUSES, SUCCESS_FUNDING_STATUSES],
+    [
+      ACTIVE_FUNDING_STATUSES,
+      SUCCESS_FUNDING_STATUSES,
+      PAID_PAYMENT_STATUSES,
+      PAID_ORDER_STATUSES,
+      RAISED_AMOUNT_FUNDING_STATUSES,
+    ],
   );
 
   const stats = rows[0] || {};
