@@ -754,10 +754,11 @@ const buildDefaultSupportOptionName = (draft, funding) => {
     draft.title ||
     funding.title ||
     '기본 후원 옵션'
-  ).trim();
-  const optionName = baseName.endsWith('기본 후원')
-    ? baseName
-    : `${baseName} 기본 후원`;
+  ).trim().replace(/\s+/g, ' ');
+  const normalizedBaseName = baseName.replace(/(?:\s*기본\s*후원)+$/u, '').trim();
+  const optionName = normalizedBaseName && normalizedBaseName !== '기본 후원 옵션'
+    ? `${normalizedBaseName} 기본 후원`
+    : '기본 후원 옵션';
 
   return optionName.slice(0, 100);
 };

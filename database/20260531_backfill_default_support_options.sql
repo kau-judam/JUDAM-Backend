@@ -15,7 +15,21 @@ INSERT INTO funding_support_options (
 SELECT
   fp.funding_id,
   LEFT(
-    COALESCE(NULLIF(fp.short_title, ''), NULLIF(fp.title, ''), '기본 후원 옵션') || ' 기본 후원',
+    CASE
+      WHEN REGEXP_REPLACE(
+        BTRIM(COALESCE(NULLIF(fp.short_title, ''), NULLIF(fp.title, ''), '기본 후원 옵션')),
+        '(\s*기본\s*후원)+$',
+        '',
+        'g'
+      ) = '기본 후원 옵션'
+        THEN '기본 후원 옵션'
+      ELSE REGEXP_REPLACE(
+        BTRIM(COALESCE(NULLIF(fp.short_title, ''), NULLIF(fp.title, ''), '기본 후원 옵션')),
+        '(\s*기본\s*후원)+$',
+        '',
+        'g'
+      ) || ' 기본 후원'
+    END,
     100
   ) AS name,
   fp.price_per_bottle AS price,

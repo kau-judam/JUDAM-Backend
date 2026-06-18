@@ -9,6 +9,18 @@ const ALLOWED_INQUIRY_CATEGORIES = new Set([
   'BREWERY',
   'ETC',
 ]);
+const INQUIRY_CATEGORY_ALIASES = {
+  계정: 'ACCOUNT',
+  회원: 'ACCOUNT',
+  로그인: 'ACCOUNT',
+  펀딩: 'FUNDING',
+  후원: 'FUNDING',
+  결제: 'PAYMENT',
+  배송: 'DELIVERY',
+  양조장: 'BREWERY',
+  기타: 'ETC',
+  일반: 'ETC',
+};
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_SUBJECT_LENGTH = 255;
 const MAX_CONTENT_LENGTH = 5000;
@@ -28,7 +40,8 @@ const normalizeString = (value) => {
 };
 
 const normalizeCategory = (category) => {
-  const normalized = normalizeString(category || 'ETC').toUpperCase();
+  const rawCategory = normalizeString(category || 'ETC');
+  const normalized = INQUIRY_CATEGORY_ALIASES[rawCategory] || rawCategory.toUpperCase();
 
   if (!ALLOWED_INQUIRY_CATEGORIES.has(normalized)) {
     throw createServiceError(400, '문의 유형이 올바르지 않습니다.');
