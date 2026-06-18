@@ -1305,35 +1305,10 @@ const normalizeWriterRole = (role) => toTrimmedString(role || 'USER').toUpperCas
 
 const isBreweryWriterRole = (role) => normalizeWriterRole(role).startsWith('BREWERY');
 
-const normalizeSulbtiScore = (score) => {
-  const numberScore = Number(score);
-  if (!Number.isFinite(numberScore)) return null;
-  return Math.max(0, Math.min(100, (numberScore - 1) * 25));
-};
-
 const normalizeFundingMatchScore = (score, fallback = 0) => {
   const numberScore = Number(score);
   if (!Number.isFinite(numberScore)) return fallback;
   return Math.max(0, Math.min(100, Math.round(numberScore)));
-};
-
-const calculateSulbtiMatchScore = (sulbti, taste) => {
-  if (!sulbti || !taste) return 0;
-
-  const axes = [
-    [normalizeSulbtiScore(sulbti.sweetness_score), taste.sweetness],
-    [normalizeSulbtiScore(sulbti.body_score), taste.body],
-    [normalizeSulbtiScore(sulbti.carbonation_score), taste.carbonation],
-    [normalizeSulbtiScore(sulbti.abv_score), taste.alcohol_intensity],
-  ].filter(([preferred, actual]) => preferred !== null && Number.isFinite(Number(actual)));
-
-  if (axes.length === 0) return 0;
-
-  const total = axes.reduce((sum, [preferred, actual]) => (
-    sum + Math.max(0, 100 - Math.abs(preferred - Number(actual)))
-  ), 0);
-
-  return normalizeFundingMatchScore(total / axes.length);
 };
 
 const mapFundingDocument = (document) => ({
@@ -7616,21 +7591,6 @@ const getFundingDetail = async (req, res) => {
         }
       : null;
     const taste = draftTaste || tasteResult.rows[0];
-    const sulbtiResult = await pool.query(
-      `
-      SELECT
-        sweetness_score,
-        body_score,
-        carbonation_score,
-        abv_score
-      FROM sul_bti_results
-      WHERE user_id = $1
-      ORDER BY updated_at DESC NULLS LAST, created_at DESC, result_id DESC
-      LIMIT 1
-      `,
-      [userId]
-    );
-    const matchScore = calculateSulbtiMatchScore(sulbtiResult.rows[0], taste);
     const documentResult = funding.draft_id
       ? await pool.query(
         `
@@ -7767,12 +7727,6 @@ const getFundingDetail = async (req, res) => {
       businessAddress: breweryProfile.businessAddress,
       breweryAddress: breweryProfile.businessAddress,
       breweryLocation: breweryProfile.businessAddress,
-      matchRate: matchScore,
-      sulbtiMatchScore: matchScore,
-      matchScore,
-      tasteMatchScore: matchScore,
-      matchPercent: matchScore,
-      recommendationScore: matchScore,
       liked: funding.liked,
       likeCount: Number(funding.like_count || 0),
       supporterCount: Number(funding.supporter_count || 0),
