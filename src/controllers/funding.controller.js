@@ -989,9 +989,24 @@ const buildFundingSupportOptionsResponse = ({
   subIngredients = [],
   ingredients = [],
 }) => {
+  const normalizeSupportOptionName = (name, fallback = '기본 후원 옵션') => {
+    const normalized = String(name || fallback).trim().replace(/\s+/g, ' ');
+    const withoutRepeatedSuffix = normalized.replace(/(?:\s*기본\s*후원)+$/u, '').trim();
+
+    if (!withoutRepeatedSuffix) {
+      return '기본 후원';
+    }
+
+    if (withoutRepeatedSuffix === '기본 후원 옵션') {
+      return withoutRepeatedSuffix;
+    }
+
+    return `${withoutRepeatedSuffix} 기본 후원`;
+  };
+
   const mappedOptions = (options || []).map((option) => ({
     optionId: Number(option.option_id),
-    name: option.name,
+    name: normalizeSupportOptionName(option.name),
     price: Number(option.price || 0),
     description: option.description,
     volume: option.volume ?? funding.volume,
@@ -10303,7 +10318,10 @@ const getFundingShareLink = async (req, res) => {
       normalizeShareBaseUrl(process.env.FRONTEND_BASE_URL) ||
       requestBaseUrl;
 
+    const funding = fundingResult.rows[0];
     const shareUrl = `${publicBaseUrl}/funding/${Number(fundingId)}`;
+    const shareTitle = funding.title || '주담 펀딩';
+    const shareText = `${shareTitle}\n${shareUrl}`;
 
     const shareResult = await pool.query(
       `INSERT INTO funding_shares (funding_id, share_url, share_count, created_at, updated_at)
@@ -10321,6 +10339,11 @@ const getFundingShareLink = async (req, res) => {
     const responseData = {
       fundingId: share.funding_id,
       shareUrl: share.share_url,
+      webUrl: share.share_url,
+      url: share.share_url,
+      title: shareTitle,
+      shareText,
+      message: shareText,
       shareCount: Number(share.share_count || 0),
     };
 
@@ -10330,6 +10353,10 @@ const getFundingShareLink = async (req, res) => {
       data: responseData,
       fundingId: responseData.fundingId,
       shareUrl: responseData.shareUrl,
+      webUrl: responseData.webUrl,
+      url: responseData.url,
+      title: responseData.title,
+      shareText: responseData.shareText,
       shareCount: responseData.shareCount,
     });
   } catch (error) {
