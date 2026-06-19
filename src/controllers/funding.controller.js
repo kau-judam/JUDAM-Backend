@@ -7464,7 +7464,7 @@ const getFundingDetail = async (req, res) => {
           AND my_like.user_id = $2
         ) AS liked
       FROM funding_projects fp
-      JOIN recipes r ON r.recipe_id = fp.recipe_id
+      LEFT JOIN recipes r ON r.recipe_id = fp.recipe_id
       JOIN users u ON u.user_id = fp.brewery_user_id
       LEFT JOIN brewery_profiles bp ON bp.user_id = fp.brewery_user_id
       LEFT JOIN LATERAL (
